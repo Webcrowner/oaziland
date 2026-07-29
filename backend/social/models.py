@@ -1,0 +1,305 @@
+"""
+social — the engagement layer: posts, follows, reviews, comments, ratings,
+sharing, referrals, groups, messaging, favorites, and automated life-event
+greetings. Built per Prompt 7 / UML Sections 7 and 11.
+
+Design note: every "who did what to what" relationship here is its own
+small class (Follow, Favorite, ShareEvent...) rather than one giant
+generic "Activity" table. This costs a few more tables, but it means each
+kind of interaction can carry exactly the fields it needs (a ShareEvent
+needs a channel; a Follow doesn't) and each has a clear, honest name.
+"""
+import uuid
+from django.conf import settings
+from django.db import models
+
+
+class ContentStatus(models.TextChoices):
+    """Shared by both Post and Listing (see property/models.py) so a
+    'draft vs scheduled vs published' item behaves the same way everywhere
+    in the platform, not slightly differently per feature."""
+    DRAFT = "DRAFT", "Draft"
+    SCHEDULED = "SCHEDULED", "Scheduled"
+    PENDING_REVIEW = "PENDING_REVIEW", "Pending Review"
+    PUBLISHED = "PUBLISHED", "Published"
+    CLOSED = "CLOSED", "Closed"
+
+
+class PosterRole(models.TextChoices):
+    LANDLORD = "LANDLORD", "Landlord"
+    INDEPENDENT_AGENT = "INDEPENDENT_AGENT", "Independent Agent"
+    AGENCY_AGENT = "AGENCY_AGENT", "Agency Agent"
+
+
+class Post(models.Model):
+    """A social post — a photo/video/audio update, optionally linked to a
+    property listing. Every post must declare who posted it and from
+    where/when (PosterAttribution below) — this is a platform-wide trust
+    requirement, not optional metadata."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="posts",
+    )
+    caption = models.TextField(blank=True)
+    linked_listing_id = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=ContentStatus.choices, default=ContentStatus.DRAFT)
+    scheduled_publish_at = models.DateTimeField(null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "posts"
+        indexes = [models.Index(fields=["status", "scheduled_publish_at"])]
+
+    def publish(self):
+        """Moves a draft or scheduled post live. Kept as a method (not just
+        a status = PUBLISHED assignment somewhere else) so publishing
+        always sets published_at consistently, in one place."""
+        from django.utils import timezone
+        self.status = ContentStatus.PUBLISHED
+        self.published_at = timezone.now()
+        self.save(update_fields=["status", "published_at"])
+
+
+class PostMedia(models.Model):
+    class MediaType(models.TextChoices):
+        PHOTO = "PHOTO", "Photo"
+        VIDEO = "VIDEO", "Video"
+        AUDIO = "AUDIO", "Audio"
+
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="media")
+    media_type = models.CharField(max_length=10, choices=MediaType.choices)
+    file_url = models.URLField()
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "post_media"
+        ordering = ["order"]
+
+
+class PosterAttribution(models.Model):
+    """Mandatory, one-per-Post record of who posted it, in what role, and
+    where/when — a viewer should never have to guess whether they're
+    talking to the landlord directly or an agent working on commission."""
+    post = models.OneToOneField(Post, on_delete=models.CASCADE, related_name="attribution")
+    poster_role = models.CharField(max_length=20, choices=PosterRole.choices)
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    posted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "poster_attributions"
+
+
+class Follow(models.Model):
+    follower = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="following",
+    )
+    followee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="followers",
+    )
+    followed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "follows"
+        unique_together = [("follower", "followee")]  # can't follow the same person twice
+
+
+class EmojiType(models.TextChoices):
+    LIKE = "LIKE", "👍"
+    LOVE = "LOVE", "❤️"
+    LAUGH = "LAUGH", "😂"
+    WOW = "WOW", "😮"
+    SAD = "SAD", "😢"
+
+
+class Reaction(models.Model):
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="reactions")
+    emoji = models.CharField(max_length=10, choices=EmojiType.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "reactions"
+        unique_together = [("author", "post")]  # one reaction per person per post
+
+
+class Comment(models.Model):
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="comments")
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "comments"
+
+    def edit(self, new_text: str, editor):
+        """Only the original author may edit their own comment — this check
+        lives here, in one place, rather than being re-implemented (and
+        potentially forgotten) at every place a comment might be edited."""
+        if editor.id != self.author_id:
+            raise PermissionError("Only the comment's author can edit it.")
+        from django.utils import timezone
+        self.text = new_text
+        self.edited_at = timezone.now()
+        self.save(update_fields=["text", "edited_at"])
+
+    def delete_by(self, requester):
+        if requester.id != self.author_id:
+            raise PermissionError("Only the comment's author can delete it.")
+        self.delete()
+
+
+class Review(models.Model):
+    """Tied to a completed Booking so only people who actually transacted
+    can leave a review — this is what makes reviews trustworthy rather
+    than open to anyone with an opinion and no real experience."""
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    booking = models.ForeignKey("transactions.Booking", on_delete=models.CASCADE, related_name="reviews")
+    score = models.PositiveSmallIntegerField()  # 1-5
+    text = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "reviews"
+
+    def edit(self, new_text, new_score, editor):
+        if editor.id != self.author_id:
+            raise PermissionError("Only the review's author can edit it.")
+        from django.utils import timezone
+        self.text, self.score = new_text, new_score
+        self.edited_at = timezone.now()
+        self.save(update_fields=["text", "score", "edited_at"])
+
+    def delete_by(self, requester):
+        if requester.id != self.author_id:
+            raise PermissionError("Only the review's author can delete it.")
+        self.delete()
+
+
+class Rating(models.Model):
+    """A lighter-weight star rating on an agent, agency, or property —
+    distinct from Review, which requires a completed transaction and a
+    written component."""
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    subject_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="ratings_received",
+    )
+    subject_property_id = models.UUIDField(null=True, blank=True)
+    score = models.DecimalField(max_digits=3, decimal_places=2)  # e.g. 4.5
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ratings"
+
+
+class Channel(models.TextChoices):
+    WHATSAPP = "WHATSAPP", "WhatsApp"
+    SMS = "SMS", "SMS"
+    FACEBOOK = "FACEBOOK", "Facebook"
+    TIKTOK = "TIKTOK", "TikTok"
+    LINKEDIN = "LINKEDIN", "LinkedIn"
+    IN_APP = "IN_APP", "In-App"
+
+
+class ShareEvent(models.Model):
+    """Records WHICH channel content was shared through — this is what lets
+    the platform later answer 'does WhatsApp sharing actually drive more
+    bookings than Facebook sharing', not just 'sharing happened'."""
+    shared_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, null=True, blank=True)
+    listing_id = models.UUIDField(null=True, blank=True)
+    channel = models.CharField(max_length=20, choices=Channel.choices)
+    shared_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "share_events"
+
+
+class ReferralStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending"
+    QUALIFIED = "QUALIFIED", "Qualified"
+    REWARDED = "REWARDED", "Rewarded"
+
+
+class Referral(models.Model):
+    """A first-class, auditable record — not just a promo code — so a
+    reward can be traced back to exactly which referral earned it."""
+    referrer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="referrals_made",
+    )
+    referred_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="referred_by",
+    )
+    status = models.CharField(max_length=20, choices=ReferralStatus.choices, default=ReferralStatus.PENDING)
+    reward_earned_xaf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "referrals"
+        unique_together = [("referrer", "referred_user")]
+
+
+class Group(models.Model):
+    name = models.CharField(max_length=200)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="owned_groups")
+    members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="joined_groups", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "groups_"  # trailing underscore avoids clashing with Django's built-in auth Group
+
+
+class Conversation(models.Model):
+    participants = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="conversations")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "conversations"
+
+
+class Message(models.Model):
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    text = models.TextField(blank=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+    read_receipt = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "messages"
+        ordering = ["sent_at"]
+
+
+class Favorite(models.Model):
+    """A private save — deliberately separate from Follow (following a
+    PERSON) and ShareEvent (sharing TO others). Saving a listing tells no
+    one else anything; that's the point of it."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="favorites")
+    listing_id = models.UUIDField(null=True, blank=True)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, null=True, blank=True)
+    saved_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "favorites"
+
+
+class CelebrationType(models.TextChoices):
+    BIRTHDAY = "BIRTHDAY", "Birthday"
+    NEW_YEAR = "NEW_YEAR", "New Year"
+    NATIONAL_DAY = "NATIONAL_DAY", "National Day"
+    PLATFORM_ANNIVERSARY = "PLATFORM_ANNIVERSARY", "Platform Anniversary"
+
+
+class CelebrationEvent(models.Model):
+    """A scheduled trigger for an automatic greeting. National days are
+    scoped per-country (not hardcoded to Cameroon) so this works if
+    Oaziland expands elsewhere."""
+    celebration_type = models.CharField(max_length=30, choices=CelebrationType.choices)
+    occurs_on = models.DateField()
+    country = models.ForeignKey("geo.Country", on_delete=models.CASCADE, null=True, blank=True)
+
+    class Meta:
+        db_table = "celebration_events"
