@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# Backend CI — runs automatically on every push and every pull request.
+#
+# WHY this exists: without it, a broken change could be merged and nobody
+# would notice until it caused a real problem in production. This file
+# makes GitHub itself run the full automated test suite on every change,
+# against a real (temporary) PostgreSQL database, and fail loudly if
+# anything breaks.
+# ---------------------------------------------------------------------------
+name: Backend Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Spins up a real, temporary PostgreSQL database just for this test
+    # run — this is what lets the tests exercise the same database engine
+    # the real app uses, not a simplified stand-in.
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: oaziland_ci
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: oaziland_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install django djangorestframework django-environ psycopg2-binary pytest-django
+
+      - name: Run automated tests
+        working-directory: backend
+        env:
+          DJANGO_SECRET_KEY: ci-test-key-not-for-production
+          DATABASE_URL: postgres://oaziland_ci:ci_password@localhost:5432/oaziland_ci
+        run: python -m pytest -v
