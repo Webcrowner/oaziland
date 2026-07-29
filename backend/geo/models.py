@@ -92,3 +92,38 @@ class QuarterPriceTrend(models.Model):
     class Meta:
         db_table = "quarter_price_trends"
         indexes = [models.Index(fields=["quarter", "period_end"])]
+
+
+# ---------------------------------------------------------------------------
+# Points of interest — Prompt 3.
+#
+# WHY one generic model instead of a separate table per amenity type:
+# "distance to nearest university" and "distance to nearest market" are
+# the SAME underlying question — "how far is this property from the
+# closest thing of type X" — just asked about different X values. One
+# table with a `poi_type` field answers both, and adding a new amenity
+# type later (a stadium, a police station) is a one-line change instead
+# of a whole new table and a whole new distance-calculation function.
+# ---------------------------------------------------------------------------
+class PointOfInterestType(models.TextChoices):
+    UNIVERSITY = "UNIVERSITY", "University"
+    HOSPITAL = "HOSPITAL", "Hospital"
+    MARKET = "MARKET", "Market"
+    TRANSPORT_HUB = "TRANSPORT_HUB", "Transport Hub"
+    TARRED_ROAD_POINT = "TARRED_ROAD_POINT", "Tarred Road Access Point"
+
+
+class PointOfInterest(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200)
+    poi_type = models.CharField(max_length=30, choices=PointOfInterestType.choices)
+    quarter = models.ForeignKey(Quarter, on_delete=models.SET_NULL, null=True, blank=True, related_name="points_of_interest")
+    latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+
+    class Meta:
+        db_table = "points_of_interest"
+        indexes = [models.Index(fields=["poi_type"])]
+
+    def __str__(self):
+        return f"{self.name} ({self.get_poi_type_display()})"
