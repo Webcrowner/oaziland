@@ -50,6 +50,21 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.get_full_name() or self.username} ({self.phone})"
 
+    @property
+    def full_name(self):
+        """Prompt 2 asks for a `full_name` field. Rather than storing the
+        name twice, this reuses Django's built-in first_name/last_name
+        (which AbstractUser already gives us) — one source of truth,
+        just exposed under the name the spec expects."""
+        return self.get_full_name()
+
+    @property
+    def created_at(self):
+        """Same idea as full_name: Django's AbstractUser already tracks
+        this as `date_joined`. This property exposes it under the name
+        Prompt 2 specifies, without a second, possibly-inconsistent column."""
+        return self.date_joined
+
 
 class LandlordProfile(models.Model):
     user = models.OneToOneField(
