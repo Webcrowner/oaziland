@@ -15,36 +15,25 @@ class TitleType(models.TextChoices):
     DEMANDE_EN_COURS = "DEMANDE_EN_COURS", "Demande en Cours"
 
 
-class BadgeStatus(models.TextChoices):
-    NOT_SUBMITTED = "NOT_SUBMITTED", "Not Submitted"
-    PENDING = "PENDING", "Pending Review"
-    VERIFIED = "VERIFIED", "Verified"
-    REJECTED = "REJECTED", "Rejected"
+class LandUseType(models.TextChoices):
+    """WHY one enum instead of four separate PropertyAsset subclasses
+    (TitledResidentialLand, CommercialPlot, AgriculturalLand,
+    CarWashPlot): all four share the EXACT SAME title-deed verification
+    machinery below (SecureDocument, CornerPhoto, VerificationBadge) and
+    only differ in intended use — a field captures that difference
+    without duplicating the trust layer four times."""
+    TITLED_RESIDENTIAL = "TITLED_RESIDENTIAL", "Titled Residential"
+    COMMERCIAL_PLOT = "COMMERCIAL_PLOT", "Commercial Plot"
+    AGRICULTURAL = "AGRICULTURAL", "Agricultural"
+    CAR_WASH_PAVED_PLOT = "CAR_WASH_PAVED_PLOT", "Car Wash / Paved Plot"
 
 
 class Land(PropertyAsset):
+    land_use_type = models.CharField(max_length=25, choices=LandUseType.choices, default=LandUseType.TITLED_RESIDENTIAL)
     title_deed_number = models.CharField(max_length=100)
     title_type = models.CharField(max_length=20, choices=TitleType.choices)
     boundary_polygon_geojson = models.JSONField(null=True, blank=True)
-    bornes_visibles = models.BooleanField(default=False)
-
-    document_badge_status = models.CharField(
-        max_length=20, choices=BadgeStatus.choices, default=BadgeStatus.NOT_SUBMITTED,
-    )
-    document_verified_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="land_documents_verified",
-    )
-    document_verified_at = models.DateTimeField(null=True, blank=True)
-
-    site_visit_badge_status = models.CharField(
-        max_length=20, choices=BadgeStatus.choices, default=BadgeStatus.NOT_SUBMITTED,
-    )
-    site_visit_verified_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="land_site_visits_verified",
-    )
-    site_visit_verified_at = models.DateTimeField(null=True, blank=True)
+    bornes_visibles = models.BooleanField(default=False)  # quick-glance flag; the VerificationBadge is the auditable record
 
     class Meta:
         db_table = "land_parcels"
