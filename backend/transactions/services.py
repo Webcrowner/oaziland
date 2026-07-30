@@ -26,6 +26,13 @@ class VerificationRequiredError(Exception):
     """Raised when the requester must complete identity verification first."""
 
 
+class WebhookSignatureError(Exception):
+    """Raised when a payment webhook's signature doesn't check out — per
+    the Flowchart in the UML specification, this is treated as a possible
+    fraud attempt, not just a normal failure, and should be logged as a
+    security event by the caller."""
+
+
 @dataclass
 class PaymentDetails:
     provider: str          # PaymentProvider choice, e.g. "MTN_MOMO"
@@ -68,6 +75,23 @@ def reserve_booking(
     return booking
 
 
+def initiate_booking_payment(*, booking: Booking, payment_gateway, phone_number: str):
+    """Step 4 of the use case: actually start the Mobile Money/card debit
+    through the ACTIVE payment gateway — MTN MoMo, Orange Money, and card
+    payments all flow through this exact same function call, because they
+    all implement the same PaymentGateway interface (payments/gateways.py).
+    Swapping which provider is 'active' never requires changing this
+    function, or anything else in this file."""
+    booking.status = BookingStatus.PAYMENT_PROCESSING
+    booking.save(update_fields=["status"])
+
+    return payment_gateway.initiate_debit(
+        phone_number=phone_number,
+        amount_xaf=booking.amount_xaf,
+        idempotency_key=booking.idempotency_key,
+    )
+
+
 def confirm_payment(
     *,
     lock_client,
@@ -75,11 +99,33 @@ def confirm_payment(
     provider: str,
     provider_reference: str,
     platform_fee_xaf: Decimal,
+    payment_gateway=None,
+    raw_webhook_payload: bytes = None,
+    webhook_signature_header: str = None,
 ) -> PaymentEscrow:
     """Step 6 of the use case: payment webhook confirmed -> booking CONFIRMED
     and an escrow record created HELD. Idempotent on provider_reference via
     the unique constraint on PaymentEscrow — a duplicate webhook cannot
-    create a second escrow record."""
+    create a second escrow record.
+
+    If a payment_gateway and raw webhook data are supplied, the webhook's
+    signature is verified FIRST — an invalid signature raises
+    WebhookSignatureError rather than silently trusting the request. This
+    is optional (defaults to skipped) so existing callers/tests that
+    already trust their input don't break, but any real production
+    webhook handler MUST pass these."""
+    if payment_gateway is not None and raw_webhook_payload is not None:
+        verification = payment_gateway.verify_webhook(
+            raw_payload=raw_webhook_payload, signature_header=webhook_signature_header,
+        )
+        if not verification.is_valid_signature:
+            raise WebhookSignatureError(
+                "Payment webhook signature could not be verified — possible fraud attempt."
+            )
+        if not verification.payment_succeeded:
+            fail_payment(lock_client=lock_client, booking=booking)
+            raise ValueError("Payment did not succeed according to the gateway.")
+
     with db_transaction.atomic():
         booking.confirm()
         escrow = PaymentEscrow.objects.create(
