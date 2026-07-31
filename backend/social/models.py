@@ -31,6 +31,31 @@ class PosterRole(models.TextChoices):
     AGENCY_AGENT = "AGENCY_AGENT", "Agency Agent"
 
 
+class PostType(models.TextChoices):
+    """WHY a field on Post rather than separate Reel/Story/Status models:
+    they share every other field (author, media, caption, attribution) —
+    only their LIFESPAN differs (a Story/Status expires; a standard post
+    or Reel doesn't). One model with a type flag plus an expiry field
+    captures that difference without duplicating everything else."""
+    STANDARD = "STANDARD", "Standard Post"
+    REEL = "REEL", "Reel"
+    STORY = "STORY", "Story"
+    STATUS = "STATUS", "Status"
+
+
+class Tag(models.Model):
+    """A hashtag-style keyword — 'just like TikTok'. Kept as its own
+    table (not a comma-separated string field) so the recommendation
+    engine can efficiently find 'other posts with this same tag'."""
+    name = models.CharField(max_length=50, unique=True)
+
+    class Meta:
+        db_table = "tags"
+
+    def __str__(self):
+        return f"#{self.name}"
+
+
 class Post(models.Model):
     """A social post — a photo/video/audio update, optionally linked to a
     property listing. Every post must declare who posted it and from
@@ -40,11 +65,14 @@ class Post(models.Model):
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="posts",
     )
+    post_type = models.CharField(max_length=10, choices=PostType.choices, default=PostType.STANDARD)
     caption = models.TextField(blank=True)
+    tags = models.ManyToManyField(Tag, blank=True, related_name="posts")
     linked_listing_id = models.UUIDField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=ContentStatus.choices, default=ContentStatus.DRAFT)
     scheduled_publish_at = models.DateTimeField(null=True, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)  # set for STORY/STATUS only
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -54,11 +82,31 @@ class Post(models.Model):
     def publish(self):
         """Moves a draft or scheduled post live. Kept as a method (not just
         a status = PUBLISHED assignment somewhere else) so publishing
-        always sets published_at consistently, in one place."""
+        always sets published_at consistently, in one place. Stories and
+        Statuses also get a 24-hour expiry set automatically here."""
         from django.utils import timezone
         self.status = ContentStatus.PUBLISHED
         self.published_at = timezone.now()
-        self.save(update_fields=["status", "published_at"])
+        if self.post_type in (PostType.STORY, PostType.STATUS):
+            self.expires_at = self.published_at + timezone.timedelta(hours=24)
+        self.save(update_fields=["status", "published_at", "expires_at"])
+
+    @property
+    def is_expired(self):
+        if self.expires_at is None:
+            return False
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_sponsored(self):
+        """Whether this post is currently boosted via an active ad
+        campaign. Cross-app lookup into monetization is fine here — the
+        alternative (a mirrored boolean field kept manually in sync)
+        risks drifting out of date; this always reflects reality."""
+        return self.boostedcontent_set.filter(
+            campaign__status="ACTIVE",
+        ).exists()
 
 
 class PostMedia(models.Model):
@@ -303,3 +351,156 @@ class CelebrationEvent(models.Model):
 
     class Meta:
         db_table = "celebration_events"
+
+
+class PostNotificationSubscription(models.Model):
+    """A VIEWER opting in to be notified about activity on a specific
+    post (new comments, updates) — distinct from Favorite (a private
+    save with no notification implication)."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="post_subscriptions")
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="notification_subscribers")
+    subscribed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "post_notification_subscriptions"
+        unique_together = [("user", "post")]
+
+
+class ConnectionStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending"
+    ACCEPTED = "ACCEPTED", "Accepted"
+    REJECTED = "REJECTED", "Rejected"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
+class Connection(models.Model):
+    """A mutual, LinkedIn-style connection request — deliberately
+    DIFFERENT from Follow (one-directional, no approval needed). A
+    Connection requires the other person to accept before it counts as
+    mutual, which is what 'accept/reject/cancel/confirm' in the request
+    refers to."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    requester = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="connections_sent")
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="connections_received")
+    status = models.CharField(max_length=10, choices=ConnectionStatus.choices, default=ConnectionStatus.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "connections"
+        unique_together = [("requester", "recipient")]
+
+    def accept(self, responder):
+        if responder.id != self.recipient_id:
+            raise PermissionError("Only the recipient can accept a connection request.")
+        self._resolve(ConnectionStatus.ACCEPTED)
+
+    def reject(self, responder):
+        if responder.id != self.recipient_id:
+            raise PermissionError("Only the recipient can reject a connection request.")
+        self._resolve(ConnectionStatus.REJECTED)
+
+    def cancel(self, canceller):
+        if canceller.id != self.requester_id:
+            raise PermissionError("Only the requester can cancel their own connection request.")
+        self._resolve(ConnectionStatus.CANCELLED)
+
+    def _resolve(self, new_status):
+        from django.utils import timezone
+        self.status = new_status
+        self.resolved_at = timezone.now()
+        self.save(update_fields=["status", "resolved_at"])
+
+
+class Poll(models.Model):
+    post = models.OneToOneField(Post, on_delete=models.CASCADE, related_name="poll")
+    question = models.CharField(max_length=300)
+    created_at = models.DateTimeField(auto_now_add=True)
+    closes_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "polls"
+
+    @property
+    def is_closed(self):
+        if self.closes_at is None:
+            return False
+        from django.utils import timezone
+        return timezone.now() > self.closes_at
+
+
+class PollOption(models.Model):
+    poll = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name="options")
+    text = models.CharField(max_length=200)
+
+    class Meta:
+        db_table = "poll_options"
+
+    @property
+    def vote_count(self):
+        return self.votes.count()
+
+
+class PollVote(models.Model):
+    option = models.ForeignKey(PollOption, on_delete=models.CASCADE, related_name="votes")
+    voter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="poll_votes")
+    voted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "poll_votes"
+        # A voter can only vote ONCE per poll — enforced by making the
+        # combination of (poll, voter) unique via a constraint that spans
+        # the option's parent poll, checked in application code (see
+        # social/services.py) since Django can't express a cross-table
+        # uniqueness constraint like this directly in Meta.
+
+
+class LiveSessionStatus(models.TextChoices):
+    SCHEDULED = "SCHEDULED", "Scheduled"
+    LIVE = "LIVE", "Live"
+    ENDED = "ENDED", "Ended"
+
+
+class LiveSession(models.Model):
+    """A TikTok-style live broadcast. Gated behind a minimum-follower
+    threshold — see social/services.py's can_go_live(). The actual video
+    streaming infrastructure (e.g. Agora, Mux) is NOT connected yet; this
+    models the session's existence and lifecycle so the follower-gating
+    rule, chat, and gifting can all be built and tested now, with the
+    real video pipe as a clearly separate, later integration."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    broadcaster = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="live_sessions")
+    title = models.CharField(max_length=200, blank=True)
+    status = models.CharField(max_length=10, choices=LiveSessionStatus.choices, default=LiveSessionStatus.SCHEDULED)
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    peak_viewer_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "live_sessions"
+
+    def go_live(self):
+        from django.utils import timezone
+        self.status = LiveSessionStatus.LIVE
+        self.started_at = timezone.now()
+        self.save(update_fields=["status", "started_at"])
+
+    def end(self):
+        from django.utils import timezone
+        self.status = LiveSessionStatus.ENDED
+        self.ended_at = timezone.now()
+        self.save(update_fields=["status", "ended_at"])
+
+
+class LiveChatMessage(models.Model):
+    """In-session chat during a live broadcast — deliberately separate
+    from Message (which belongs to a private Conversation) since live
+    chat is public, ephemeral, and tied to a broadcast, not a DM thread."""
+    live_session = models.ForeignKey(LiveSession, on_delete=models.CASCADE, related_name="chat_messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    text = models.TextField()
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "live_chat_messages"
+        ordering = ["sent_at"]

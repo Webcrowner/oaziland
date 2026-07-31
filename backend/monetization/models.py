@@ -4,6 +4,7 @@ membership perks, and paid subscription tiers for agents/agencies.
 Built per Prompt 8 / UML Section 8.
 """
 import uuid
+from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
@@ -90,6 +91,8 @@ class TransactionCategory(models.TextChoices):
     MARKETPLACE_SALE = "MARKETPLACE_SALE", "Marketplace Sale"
     SERVICE_PAYMENT = "SERVICE_PAYMENT", "Service Payment"
     AD_SPEND = "AD_SPEND", "Ad Spend"
+    GIFT_CONVERSION = "GIFT_CONVERSION", "Gift-to-Cash Conversion"
+    WALLET_WITHDRAWAL = "WALLET_WITHDRAWAL", "Wallet Withdrawal"
 
 
 class PlatformFeePolicy(models.Model):
@@ -153,3 +156,106 @@ class SubscriptionTier(models.Model):
 
     class Meta:
         db_table = "subscription_tiers"
+
+
+# ---------------------------------------------------------------------------
+# Wallet & Gift economy.
+#
+# WHY Wallet lives here (monetization) and not in social, even though
+# gifts are triggered by social interactions: a Wallet is a financial
+# ledger — the same kind of thing PaymentEscrow already is — and it needs
+# the exact same discipline (every change is a recorded WalletTransaction,
+# never a silent balance edit). Keeping all money-handling code in one
+# app makes it much easier to audit later.
+# ---------------------------------------------------------------------------
+class Wallet(models.Model):
+    """One wallet per user. balance_xaf is never edited directly by
+    calling code — always go through WalletTransaction / the services in
+    monetization/services.py, so there's always a paper trail for where
+    every franc came from or went."""
+    owner = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wallet")
+    balance_xaf = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "wallets"
+
+
+class WalletTransactionType(models.TextChoices):
+    RECHARGE = "RECHARGE", "Recharge"
+    GIFT_PAYOUT = "GIFT_PAYOUT", "Gift Payout"
+    AD_SPEND = "AD_SPEND", "Ad Spend (funded from wallet)"
+    WITHDRAWAL = "WITHDRAWAL", "Withdrawal"
+    REFUND = "REFUND", "Refund"
+
+
+class WalletTransaction(models.Model):
+    """An immutable record of one wallet balance change. WHY immutable
+    (never edited after creation): a financial ledger you can rewrite
+    isn't really a ledger — if a mistake happens, it gets CORRECTED with
+    a new, opposite transaction, the same way real accounting works, not
+    by editing history."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name="transactions")
+    transaction_type = models.CharField(max_length=20, choices=WalletTransactionType.choices)
+    amount_xaf = models.DecimalField(max_digits=12, decimal_places=2)  # always positive; direction comes from transaction_type
+    platform_fee_xaf = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    related_reference = models.CharField(max_length=255, blank=True)  # e.g. a Gift id, an AdCampaign id
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "wallet_transactions"
+        indexes = [models.Index(fields=["wallet", "created_at"])]
+
+
+class WithdrawalStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending"
+    APPROVED = "APPROVED", "Approved"
+    PAID_OUT = "PAID_OUT", "Paid Out"
+    REJECTED = "REJECTED", "Rejected"
+
+
+class WithdrawalRequest(models.Model):
+    """A request to cash OUT of the wallet to a real Mobile Money account.
+    NOT auto-approved — real payout rails need a human/admin check before
+    real money leaves the platform, at least until a real payout API is
+    connected (flagged the same way the payment gateways were)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name="withdrawal_requests")
+    amount_xaf = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=15, choices=WithdrawalStatus.choices, default=WithdrawalStatus.PENDING)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+
+class GiftType(models.TextChoices):
+    ROSE = "ROSE", "Rose (100 pts)"
+    HOUSE_KEY = "HOUSE_KEY", "House Key (500 pts)"
+    DIAMOND = "DIAMOND", "Diamond (2000 pts)"
+
+
+GIFT_POINT_VALUES = {
+    GiftType.ROSE: 100,
+    GiftType.HOUSE_KEY: 500,
+    GiftType.DIAMOND: 2000,
+}
+POINTS_TO_XAF_RATE = Decimal("5")  # 1 point = 5 XAF before the platform fee — a simple, adjustable starting rate
+
+
+class Gift(models.Model):
+    """A sender sends a gift to a recipient, attached to a Post or a
+    LiveSession. point_value is captured at send-time (not looked up
+    later from GIFT_POINT_VALUES) so that if gift pricing changes later,
+    a gift someone already received keeps the value it had when it was
+    given — history shouldn't silently change under people's feet."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="gifts_sent")
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="gifts_received")
+    gift_type = models.CharField(max_length=20, choices=GiftType.choices)
+    point_value = models.PositiveIntegerField()
+    post = models.ForeignKey("social.Post", on_delete=models.SET_NULL, null=True, blank=True, related_name="gifts")
+    live_session = models.ForeignKey("social.LiveSession", on_delete=models.SET_NULL, null=True, blank=True, related_name="gifts")
+    converted_to_wallet = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "gifts"
