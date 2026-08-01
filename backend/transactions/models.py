@@ -17,6 +17,7 @@ class BookingType(models.TextChoices):
     HOSTEL_SEMESTER = "HOSTEL_SEMESTER", "Hostel Semester"
     GUEST_HOUSE = "GUEST_HOUSE", "Guest House"
     GENERAL_RENTAL = "GENERAL_RENTAL", "General Rental (House/Shop/Commercial)"
+    SERVICE_REQUEST = "SERVICE_REQUEST", "Service Request (Technician)"
 
 
 class BookingStatus(models.TextChoices):

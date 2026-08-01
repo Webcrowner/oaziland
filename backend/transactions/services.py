@@ -18,6 +18,20 @@ from django.utils import timezone
 from .models import Booking, BookingStatus, BookingType, PaymentEscrow, EscrowStatus
 
 
+def _fee_category_for_booking_type(booking_type: str):
+    """WHY this mapping exists (fixed as part of Prompt 10): a booking's
+    fee category must match what it actually IS — a service request
+    should be charged under SERVICE_PAYMENT's rate, not silently charged
+    the PROPERTY_BOOKING rate just because that was the previous
+    hardcoded default. Centralizing the mapping here means adding a new
+    BookingType later requires one new dict entry, not hunting through
+    confirm_payment's internals."""
+    from monetization.models import TransactionCategory
+    return {
+        BookingType.SERVICE_REQUEST: TransactionCategory.SERVICE_PAYMENT,
+    }.get(booking_type, TransactionCategory.PROPERTY_BOOKING)
+
+
 class InventoryConflictError(Exception):
     """Raised when the target unit/listing is already locked or booked."""
 
@@ -137,8 +151,9 @@ def confirm_payment(
             raise ValueError("Payment did not succeed according to the gateway.")
 
     if platform_fee_xaf is None:
-        from monetization.models import PlatformFeePolicy, TransactionCategory
-        platform_fee_xaf = PlatformFeePolicy.fee_for(TransactionCategory.PROPERTY_BOOKING, booking.amount_xaf)
+        from monetization.models import PlatformFeePolicy
+        fee_category = _fee_category_for_booking_type(booking.booking_type)
+        platform_fee_xaf = PlatformFeePolicy.fee_for(fee_category, booking.amount_xaf)
 
     with db_transaction.atomic():
         booking.confirm()
