@@ -8,12 +8,13 @@ nobody can trust. These functions are the ONLY sanctioned way money
 moves in or out of a wallet.
 """
 from decimal import Decimal
+from datetime import timedelta
 from django.db import transaction as db_transaction
 
 from .models import (
     Wallet, WalletTransaction, WalletTransactionType, WithdrawalRequest,
     WithdrawalStatus, Gift, GIFT_POINT_VALUES, POINTS_TO_XAF_RATE,
-    PlatformFeePolicy, TransactionCategory,
+    PlatformFeePolicy, TransactionCategory, BOOST_DURATION_TIMEDELTA,
 )
 
 
@@ -136,3 +137,52 @@ def approve_withdrawal(*, withdrawal_request: WithdrawalRequest):
     withdrawal_request.resolved_at = timezone.now()
     withdrawal_request.save(update_fields=["status", "resolved_at"])
     return fee
+
+
+def get_boost_price(*, placement: str, duration_unit: str, duration_quantity: int) -> Decimal:
+    """Looks up the per-unit price for a placement/duration combination
+    and multiplies by how many units were purchased — e.g. DAILY at
+    2,000 XAF/day × 3 days = 6,000 XAF."""
+    from .models import BoostPricingTier
+    tier = BoostPricingTier.objects.get(placement=placement, duration_unit=duration_unit)
+    return tier.price_xaf * duration_quantity
+
+
+def purchase_campaign_boost(
+    *, owner, placement: str, duration_unit: str, duration_quantity: int,
+    payment_gateway, phone_number: str, target_quarter=None, target_property_type: str = "",
+):
+    """Charges the advertiser for a boost (hourly/daily/monthly/yearly,
+    Facebook-style) through the SAME PaymentGateway interface as every
+    other payment in the platform, then applies the AD_SPEND platform
+    fee via the SAME PlatformFeePolicy.fee_for() used for bookings — the
+    literal 'same underlying calculation' the acceptance criteria asks
+    for. The campaign's usable budget is the price paid MINUS the
+    platform's fee, mirroring how a booking's payee_amount is gross
+    minus fee."""
+    from django.utils import timezone
+    from .models import AdCampaign, AdStatus
+
+    total_price = get_boost_price(placement=placement, duration_unit=duration_unit, duration_quantity=duration_quantity)
+
+    debit_result = payment_gateway.initiate_debit(
+        phone_number=phone_number, amount_xaf=total_price,
+        idempotency_key=f"adboost-{owner.id}-{placement}-{timezone.now().timestamp()}",
+    )
+    if not debit_result.success:
+        raise ValueError("Ad boost payment failed.")
+
+    platform_fee = PlatformFeePolicy.fee_for(TransactionCategory.AD_SPEND, total_price)
+    usable_budget = total_price - platform_fee
+
+    duration_delta = timedelta(**BOOST_DURATION_TIMEDELTA[duration_unit])
+    starts_at = timezone.now()
+
+    campaign = AdCampaign.objects.create(
+        owner=owner, placement=placement, duration_unit=duration_unit,
+        duration_quantity=duration_quantity, budget_xaf=usable_budget,
+        target_quarter=target_quarter, target_property_type=target_property_type,
+        starts_at=starts_at, ends_at=starts_at + (duration_delta * duration_quantity),
+    )
+    campaign.launch()
+    return campaign, platform_fee

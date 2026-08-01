@@ -98,7 +98,7 @@ def confirm_payment(
     booking: Booking,
     provider: str,
     provider_reference: str,
-    platform_fee_xaf: Decimal,
+    platform_fee_xaf: Decimal = None,
     payment_gateway=None,
     raw_webhook_payload: bytes = None,
     webhook_signature_header: str = None,
@@ -107,6 +107,16 @@ def confirm_payment(
     and an escrow record created HELD. Idempotent on provider_reference via
     the unique constraint on PaymentEscrow — a duplicate webhook cannot
     create a second escrow record.
+
+    WHY platform_fee_xaf defaults to None instead of being required: the
+    platform fee should come from ONE shared source of truth
+    (monetization.PlatformFeePolicy) so a booking, a marketplace sale,
+    and an ad purchase all compute their fee the exact same way — not
+    from whatever number happened to be passed in by the caller. If
+    platform_fee_xaf isn't explicitly given, it's looked up from
+    PlatformFeePolicy for PROPERTY_BOOKING automatically. The explicit
+    override still exists for tests and edge cases, but production code
+    should almost always leave it unset.
 
     If a payment_gateway and raw webhook data are supplied, the webhook's
     signature is verified FIRST — an invalid signature raises
@@ -125,6 +135,10 @@ def confirm_payment(
         if not verification.payment_succeeded:
             fail_payment(lock_client=lock_client, booking=booking)
             raise ValueError("Payment did not succeed according to the gateway.")
+
+    if platform_fee_xaf is None:
+        from monetization.models import PlatformFeePolicy, TransactionCategory
+        platform_fee_xaf = PlatformFeePolicy.fee_for(TransactionCategory.PROPERTY_BOOKING, booking.amount_xaf)
 
     with db_transaction.atomic():
         booking.confirm()

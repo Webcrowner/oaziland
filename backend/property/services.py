@@ -3,6 +3,7 @@ property.services — search and discovery logic that doesn't belong on the
 models themselves (models describe WHAT a property is; this file
 describes HOW to find one).
 """
+from django.db import models
 from geo.services import haversine_distance_km
 
 
@@ -38,6 +39,43 @@ def properties_near_location(latitude, longitude, radius_km=5, queryset=None):
 
     results.sort(key=lambda pair: pair[1])  # nearest first
     return results
+
+
+def search_listings_by_quarter(quarter, property_type: str = None):
+    """Search + ranking for one quarter, boosted listings first — this is
+    what makes AdCampaign/BoostedContent (monetization app) actually mean
+    something to a searcher, not just exist as unused billing records.
+
+    Ranking: any listing with an ACTIVE boost targeting this quarter (or
+    with no quarter targeting at all — a general boost) is shown first,
+    ordered by priority_rank (lower = higher). Every other, non-boosted
+    listing follows, most recently published first."""
+    from monetization.models import BoostedContent
+    from .models import Listing, ListingStatus
+
+    base_query = Listing.objects.filter(status=ListingStatus.PUBLISHED, property_asset__quarter=quarter)
+    if property_type:
+        base_query = base_query.filter(property_asset__type=property_type)
+
+    listing_ids = set(base_query.values_list("id", flat=True))
+
+    active_boosts = BoostedContent.objects.filter(
+        listing_id__in=listing_ids, campaign__status="ACTIVE",
+    ).filter(
+        models.Q(campaign__target_quarter=quarter) | models.Q(campaign__target_quarter__isnull=True)
+    ).select_related("campaign").order_by("priority_rank")
+
+    boosted_listing_ids = []
+    seen = set()
+    for boost in active_boosts:
+        if boost.listing_id not in seen:
+            boosted_listing_ids.append(boost.listing_id)
+            seen.add(boost.listing_id)
+
+    boosted_listings = [base_query.get(id=lid) for lid in boosted_listing_ids]
+    organic_listings = list(base_query.exclude(id__in=boosted_listing_ids).order_by("-published_at"))
+
+    return boosted_listings + organic_listings  # boosted always first, regardless of recency
 
 
 def build_property_location_from_device_gps(latitude, longitude, quarter=None):

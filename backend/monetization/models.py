@@ -22,6 +22,43 @@ class AdStatus(models.TextChoices):
     ENDED = "ENDED", "Ended"
 
 
+class BoostDurationUnit(models.TextChoices):
+    """WHY configurable tiers instead of 'pick any start/end date':
+    Facebook-style boosting sells TIME in fixed units (an hour, a day, a
+    month, a year) at a per-unit price — pricing a campaign is then just
+    'unit price × how many units', not a free-form calendar picker with
+    no relationship to cost."""
+    HOURLY = "HOURLY", "Hourly"
+    DAILY = "DAILY", "Daily"
+    MONTHLY = "MONTHLY", "Monthly"
+    YEARLY = "YEARLY", "Yearly"
+
+
+BOOST_DURATION_TIMEDELTA = {
+    BoostDurationUnit.HOURLY: {"hours": 1},
+    BoostDurationUnit.DAILY: {"days": 1},
+    BoostDurationUnit.MONTHLY: {"days": 30},   # a simple, explicit approximation — not a calendar-month edge case
+    BoostDurationUnit.YEARLY: {"days": 365},
+}
+
+
+class BoostPricingTier(models.Model):
+    """The price of ONE unit of boosting, per placement type. An admin-
+    configurable table (not hardcoded prices in code) so pricing can
+    change without a deployment. unique_together means each
+    (placement, duration_unit) combination has exactly one price."""
+    placement = models.CharField(max_length=30, choices=AdPlacement.choices)
+    duration_unit = models.CharField(max_length=10, choices=BoostDurationUnit.choices)
+    price_xaf = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        db_table = "boost_pricing_tiers"
+        unique_together = [("placement", "duration_unit")]
+
+    def __str__(self):
+        return f"{self.get_placement_display()} / {self.get_duration_unit_display()}: {self.price_xaf} XAF"
+
+
 class AdCampaign(models.Model):
     """A paid promotion. Owned by ANY user — a landlord, an independent
     agent, or an agency — not just agencies, since a landlord advertising
@@ -29,6 +66,8 @@ class AdCampaign(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ad_campaigns")
     placement = models.CharField(max_length=30, choices=AdPlacement.choices)
+    duration_unit = models.CharField(max_length=10, choices=BoostDurationUnit.choices, default=BoostDurationUnit.DAILY)
+    duration_quantity = models.PositiveIntegerField(default=1)  # e.g. duration_unit=DAILY, quantity=3 -> a 3-day boost
     budget_xaf = models.DecimalField(max_digits=12, decimal_places=2)
     spent_so_far_xaf = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     target_quarter = models.ForeignKey("geo.Quarter", on_delete=models.SET_NULL, null=True, blank=True)
