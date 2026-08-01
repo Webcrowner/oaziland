@@ -12,6 +12,17 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 
 
+class AccountStatus(models.TextChoices):
+    """WHY separate from Django's built-in is_active: is_active is a
+    blunt on/off switch with no memory of WHY or UNTIL WHEN. A temporary
+    suspension needs an end date; a ban needs to be permanent and
+    distinguishable from a suspension in the admin console — this field
+    captures both, is_active alone can't."""
+    ACTIVE = "ACTIVE", "Active"
+    SUSPENDED = "SUSPENDED", "Temporarily Suspended"
+    BANNED = "BANNED", "Permanently Banned"
+
+
 class VerificationStatus(models.TextChoices):
     UNVERIFIED = "UNVERIFIED", "Unverified"
     PENDING = "PENDING", "Pending Review"
@@ -41,6 +52,10 @@ class User(AbstractUser):
         "geo.Country", on_delete=models.PROTECT, null=True, blank=True,
     )
     deleted_at = models.DateTimeField(null=True, blank=True)  # soft delete
+    account_status = models.CharField(
+        max_length=10, choices=AccountStatus.choices, default=AccountStatus.ACTIVE,
+    )
+    suspended_until = models.DateTimeField(null=True, blank=True)  # only meaningful when account_status=SUSPENDED
 
     REQUIRED_FIELDS = ["phone"]
 
