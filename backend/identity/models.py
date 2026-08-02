@@ -128,11 +128,22 @@ class AgentProfile(models.Model):
 
 
 class StudentProfile(models.Model):
+    """WHY accessibility/international/programme fields live here rather
+    than on RoomAllocation: these are durable attributes of the STUDENT,
+    true across every semester they're allocated a room, not something
+    re-entered per allocation."""
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
         related_name="student_profile",
     )
     institution_name = models.CharField(max_length=200)
+    has_accessibility_needs = models.BooleanField(default=False)
+    is_international_student = models.BooleanField(default=False)
+    programme_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    roommate_preference = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="preferred_as_roommate_by",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

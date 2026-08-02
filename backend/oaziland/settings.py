@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'agency',
     'transactions',
     'hospitality',
+    'student_hostels',
     'student',
     'services',
     'social',
