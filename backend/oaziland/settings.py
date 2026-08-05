@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'transactions',
     'hospitality',
     'student_hostels',
+    'discovery',
     'student',
     'services',
     'social',
