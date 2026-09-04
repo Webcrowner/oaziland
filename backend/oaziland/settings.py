@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'careers',
     'verification_audit',
     'catalogue',
+    'flyers',
     'student',
     'services',
     'social',
@@ -159,3 +160,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# WHY this exists: the Flyer feature generates real image files
+# (composed with Pillow) that need somewhere to live. Local filesystem
+# storage is correct for development; production should point this at
+# real cloud storage (Cloudinary/S3), the same "swap the backend, not
+# the code that calls it" pattern used for payments/moderation/notifications.
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
