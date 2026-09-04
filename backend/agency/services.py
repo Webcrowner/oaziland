@@ -241,13 +241,18 @@ def get_agent_private_dashboard(agent_user):
     open_enquiries = Enquiry.objects.filter(agent=agent_user, first_response_at__isnull=True).count()
 
     agent_listing_ids = list(Listing.objects.filter(listed_by=agent_user).values_list("id", flat=True))
-    total_commission_earned = Commission.objects.filter(
+    agent_commissions = Commission.objects.filter(
         booking__target_content_type="property.Listing", booking__target_id__in=agent_listing_ids,
-    ).count()
+    )
+    total_commission_earned = agent_commissions.count()
+
+    from oaziland.analytics import compute_period_over_period
+    commission_trend = compute_period_over_period(queryset=agent_commissions, date_field="created_at", aggregate_field="agent_share_xaf")
 
     dashboard = {
         "performance_score": performance,
         "open_enquiries": open_enquiries,
+        "commission_trend_xaf": commission_trend,
         "total_completed_deals_with_commission": total_commission_earned,
     }
 

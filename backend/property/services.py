@@ -157,12 +157,17 @@ def get_landlord_portfolio_summary(landlord):
         booking__target_content_type="property.Listing", booking__target_id__in=listing_ids,
     ).aggregate(total=Sum("total_amount_xaf"))["total"] or 0
 
+    from oaziland.analytics import compute_period_over_period
+    all_bookings = Booking.objects.filter(target_content_type="property.Listing", target_id__in=listing_ids)
+    bookings_trend = compute_period_over_period(queryset=all_bookings, date_field="created_at")
+
     return {
         "total_properties": properties.count(),
         "total_listings": listings.count(),
         "published_listings": published_listings.count(),
         "completed_bookings": completed_bookings.count(),
         "total_commission_paid_xaf": total_commission_paid,
+        "bookings_trend": bookings_trend,
     }
 
 

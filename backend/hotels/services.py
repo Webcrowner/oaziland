@@ -264,3 +264,44 @@ def add_reservation_to_group(*, group_booking, guest, room_type, adults=1, child
     reservation.group_booking = group_booking
     reservation.save(update_fields=["group_booking"])
     return reservation
+
+
+# ---------------------------------------------------------------------------
+# Financial Dashboard (B.4.2) — a real gap: the spec explicitly named
+# this ('Total Bookings,' 'Revenue Trend Charts,' 'Outstanding
+# Payments,' 'Escrow Status,' 'Platform Commission,' 'Top Room Types
+# by Revenue') and nothing built it before now.
+# ---------------------------------------------------------------------------
+def get_hotel_financial_dashboard(hotel, period_days: int = 30):
+    from decimal import Decimal
+    from oaziland.analytics import compute_period_over_period, top_n_by_aggregate
+    from .models import Reservation, ReservationStatus, GuestFolio, FolioStatus
+
+    reservations = Reservation.objects.filter(hotel=hotel)
+    revenue_trend = compute_period_over_period(
+        queryset=reservations, date_field="created_at", aggregate_field="rate_xaf", period_days=period_days,
+    )
+    bookings_trend = compute_period_over_period(queryset=reservations, date_field="created_at", period_days=period_days)
+
+    top_room_types = top_n_by_aggregate(
+        queryset=reservations.filter(status__in=[ReservationStatus.CHECKED_IN, ReservationStatus.CHECKED_OUT]),
+        group_by_field="room_type__category", aggregate_field="rate_xaf",
+    )
+
+    open_folios = GuestFolio.objects.filter(reservation__hotel=hotel, status=FolioStatus.OPEN)
+    outstanding_balance = sum((f.balance_xaf for f in open_folios if f.balance_xaf > 0), Decimal("0"))
+
+    escrow_by_status = {}
+    for reservation in reservations.exclude(booking__isnull=True):
+        if hasattr(reservation.booking, "escrow"):
+            status = reservation.booking.escrow.status
+            escrow_by_status[status] = escrow_by_status.get(status, 0) + 1
+
+    return {
+        "total_bookings": reservations.count(),
+        "bookings_trend": bookings_trend,
+        "revenue_trend_xaf": revenue_trend,
+        "top_room_types_by_revenue": top_room_types,
+        "outstanding_balance_xaf": outstanding_balance,
+        "escrow_status_breakdown": escrow_by_status,
+    }

@@ -166,14 +166,12 @@ def get_hostel_occupancy_summary(hostel):
     from django.utils import timezone
     from .models import HostelUnit, RoomAllocation, RoomAllocationStatus, HostelBilling, AmenitySubscription
 
-    units = HostelUnit.objects.filter(building_ptr__in=[hostel.building_ptr_id])
+    units = HostelUnit.objects.filter(building_id=hostel.building_ptr_id)
     total_beds = sum(u.bed_capacity for u in units)
     active_allocations = RoomAllocation.objects.filter(unit__in=units, status=RoomAllocationStatus.ACTIVE).count()
     vacancy_rate = 1 - (active_allocations / total_beds) if total_beds else None
 
     revenue_by_unit_type = {}
-    for unit_type, _ in units.values_list("unit_type", flat=True).distinct():
-        pass  # placeholder loop variable unused — see explicit query below
     from django.db.models import Sum
     revenue_qs = HostelBilling.objects.filter(
         allocation__unit__in=units, status="PAID",
@@ -188,11 +186,21 @@ def get_hostel_occupancy_summary(hostel):
 
     amenity_uptake = AmenitySubscription.objects.filter(hostel=hostel, status="ACTIVE").count()
 
+    # WHY this trends on due_date, not a payment timestamp: HostelBilling
+    # has no separate 'paid_at' field recording when payment actually
+    # happened — due_date is the only real date field available, so this
+    # trend represents billing PERIODS due, not confirmed payment timing.
+    # A real 'paid_at' field would be a natural, worthwhile follow-up.
+    from oaziland.analytics import compute_period_over_period
+    paid_bills = HostelBilling.objects.filter(allocation__unit__in=units, status="PAID")
+    revenue_trend = compute_period_over_period(queryset=paid_bills, date_field="due_date", aggregate_field="amount_xaf")
+
     return {
         "vacancy_rate": vacancy_rate,
         "revenue_by_unit_type_xaf": revenue_by_unit_type,
         "upcoming_semester_expirations": upcoming_expirations,
         "active_amenity_subscriptions": amenity_uptake,
+        "revenue_trend_xaf": revenue_trend,
     }
 
 
@@ -211,9 +219,21 @@ def get_agency_hostel_portfolio_summary(agency):
     summaries = [get_hostel_occupancy_summary(h) for h in hostels]
     total_active_amenity_subs = sum(s["active_amenity_subscriptions"] for s in summaries)
 
+    # An aggregate revenue trend across every hostel this agency
+    # manages — summing each hostel's own already-computed trend
+    # rather than re-querying, so this stays consistent with what each
+    # individual hostel's own dashboard shows.
+    from decimal import Decimal
+    total_current = sum((s["revenue_trend_xaf"]["current_period_value"] for s in summaries), Decimal("0"))
+    total_previous = sum((s["revenue_trend_xaf"]["previous_period_value"] for s in summaries), Decimal("0"))
+    aggregate_percent_change = round(((total_current - total_previous) / total_previous) * 100, 1) if total_previous else None
+
     return {
         "hostels_managed": len(hostels),
         "total_active_amenity_subscriptions": total_active_amenity_subs,
+        "aggregate_revenue_trend_xaf": {
+            "current_period_value": total_current, "previous_period_value": total_previous, "percent_change": aggregate_percent_change,
+        },
         # Deliberately aggregate-only — no per-hostel owner financial breakdown here.
     }
 

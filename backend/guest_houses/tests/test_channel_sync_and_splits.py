@@ -136,3 +136,17 @@ def test_host_dashboard_aggregates_real_data(quarter, guest_house):
     assert summary["total_guest_houses"] == 1
     assert summary["total_blocked_nights_all_channels"] == 2
     assert summary["pending_housekeeping_tasks"] == 1
+
+
+@pytest.mark.django_db
+def test_host_dashboard_booked_nights_trend_includes_todays_bookings(guest_house):
+    """Confirms the fix in oaziland.analytics also correctly applies
+    here — ChannelBlockedDate.date is a DateField with the exact same
+    boundary issue HostelBilling.due_date had."""
+    from django.utils import timezone
+    from guest_houses.services import get_host_dashboard_summary
+
+    block_dates_across_all_channels(guest_house=guest_house, dates=[timezone.now().date()], source_channel=OTAChannel.DIRECT)
+
+    summary = get_host_dashboard_summary(guest_house.owner)
+    assert summary["booked_nights_trend"]["current_period_value"] == 1

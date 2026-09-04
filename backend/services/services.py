@@ -155,10 +155,15 @@ def get_technician_dashboard_summary(technician):
         transaction_type__in=[WalletTransactionType.GIFT_PAYOUT],
     ).order_by("-created_at")[:10]
 
+    from oaziland.analytics import compute_period_over_period
+    all_jobs = ServiceRequest.objects.filter(technician=technician)
+    jobs_trend = compute_period_over_period(queryset=all_jobs, date_field="requested_at")
+
     return {
         "active_job_count": active_jobs.count(),
         "active_jobs": list(active_jobs.values("id", "category", "priority")),
         "completed_job_count": completed_jobs.count(),
         "wallet_balance_xaf": wallet.balance_xaf,
         "recent_transaction_count": recent_earnings.count(),
+        "jobs_trend": jobs_trend,
     }

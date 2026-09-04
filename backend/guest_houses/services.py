@@ -163,15 +163,23 @@ def get_host_dashboard_summary(host):
     get_hostel_occupancy_summary()."""
     from property.models import GuestHouseLodge
     from .models import ChannelBlockedDate, HousekeepingTask, HousekeepingTaskStatus
+    from oaziland.analytics import compute_period_over_period
 
     guest_houses = GuestHouseLodge.objects.filter(owner=host)
-    blocked_nights = ChannelBlockedDate.objects.filter(guest_house__in=guest_houses).count()
+    blocked_dates = ChannelBlockedDate.objects.filter(guest_house__in=guest_houses)
+    blocked_nights = blocked_dates.count()
     pending_housekeeping = HousekeepingTask.objects.filter(
         guest_house__in=guest_houses, status__in=[HousekeepingTaskStatus.SCHEDULED, HousekeepingTaskStatus.IN_PROGRESS],
     ).count()
+
+    # Trends on the booked NIGHT itself (not when the block was
+    # recorded) — 'are more nights being booked this period than last,'
+    # the actual question a host cares about.
+    booked_nights_trend = compute_period_over_period(queryset=blocked_dates, date_field="date")
 
     return {
         "total_guest_houses": guest_houses.count(),
         "total_blocked_nights_all_channels": blocked_nights,
         "pending_housekeeping_tasks": pending_housekeeping,
+        "booked_nights_trend": booked_nights_trend,
     }

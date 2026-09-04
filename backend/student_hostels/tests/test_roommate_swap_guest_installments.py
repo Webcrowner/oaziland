@@ -148,3 +148,18 @@ def test_paying_all_installments_settles_the_parent_bill(hostel, semester):
     pay_installment(installments[1])
     billing.refresh_from_db()
     assert billing.status == "PAID"  # all installments paid — bill now settled
+
+
+@pytest.mark.django_db
+def test_hostel_occupancy_summary_includes_a_real_revenue_trend(hostel, semester):
+    """Confirms the DateField-based trend (due_date, not a datetime
+    field) actually works — the trickiest of the retrofitted trends."""
+    from student_hostels.services import get_hostel_occupancy_summary
+    unit = HostelUnit.objects.create(building=hostel.building_ptr, room_code="TREND-1", unit_type=HostelUnitType.SELF_CONTAIN, occupancy_model=OccupancyModel.PER_UNIT)
+    student = User.objects.create(username="trend_hostel_student", phone="+237699888400")
+    allocation = allocate_room(student=student, unit=unit, semester=semester)
+    billing = HostelBilling.objects.create(allocation=allocation, billing_cycle=BillingCycle.SEMESTER, amount_xaf=Decimal("200000"), due_date=date.today(), status=HostelBillingStatus.PAID)
+
+    summary = get_hostel_occupancy_summary(hostel)
+    assert "revenue_trend_xaf" in summary
+    assert summary["revenue_trend_xaf"]["current_period_value"] == Decimal("200000")

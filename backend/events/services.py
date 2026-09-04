@@ -188,3 +188,43 @@ def book_caterer(*, event_booking, caterer, menu_selections: dict, guest_count: 
         event_booking=event_booking, caterer=caterer, menu_selections=menu_selections,
         guest_count=guest_count, total_cost_xaf=total_cost,
     )
+
+
+# ---------------------------------------------------------------------------
+# Financial Dashboard (A.4.2) — same real gap as the Hotels module: the
+# spec explicitly named this, nothing built it before now.
+# ---------------------------------------------------------------------------
+def get_venue_financial_dashboard(venue, period_days: int = 30):
+    from decimal import Decimal
+    from oaziland.analytics import compute_period_over_period, top_n_by_aggregate
+    from .models import EventBooking, EventBookingStatus
+
+    bookings = EventBooking.objects.filter(venue_space__venue=venue)
+    revenue_trend = compute_period_over_period(
+        queryset=bookings, date_field="created_at", aggregate_field="total_cost_xaf", period_days=period_days,
+    )
+    bookings_trend = compute_period_over_period(queryset=bookings, date_field="created_at", period_days=period_days)
+
+    top_event_types = top_n_by_aggregate(
+        queryset=bookings.filter(status__in=[EventBookingStatus.CONFIRMED, EventBookingStatus.COMPLETED]),
+        group_by_field="event_type", aggregate_field="total_cost_xaf",
+    )
+
+    outstanding_balances = sum(
+        (b.balance_amount_xaf for b in bookings.filter(status=EventBookingStatus.CONFIRMED)), Decimal("0"),
+    )
+
+    escrow_by_status = {}
+    for booking in bookings.exclude(booking__isnull=True):
+        if hasattr(booking.booking, "escrow"):
+            status = booking.booking.escrow.status
+            escrow_by_status[status] = escrow_by_status.get(status, 0) + 1
+
+    return {
+        "total_bookings": bookings.count(),
+        "bookings_trend": bookings_trend,
+        "revenue_trend_xaf": revenue_trend,
+        "top_event_types_by_revenue": top_event_types,
+        "outstanding_balance_xaf": outstanding_balances,
+        "escrow_status_breakdown": escrow_by_status,
+    }
