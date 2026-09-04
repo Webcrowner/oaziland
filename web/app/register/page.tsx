@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Header from "@/components/Header";
 import { registerUser } from "@/lib/api";
 
 /**
@@ -33,7 +32,7 @@ export default function RegisterPage() {
 
   return (
     <main>
-      <Header />
+
       <div className="max-w-sm mx-auto px-4 py-12">
         <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">Create your account</h1>
 

@@ -1,0 +1,11 @@
+<svg width="220" height="48" viewBox="0 0 220 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- A simple, real placeholder mark — a house silhouette + wordmark in
+       the established navy/gold brand palette. Meant to be swapped for
+       a real designed logo later; this is a genuine asset, not an
+       empty box, so the "place for a logo" actually has one in it. -->
+  <rect x="0" y="10" width="30" height="28" rx="2" fill="#1B2A4A"/>
+  <polygon points="15,0 32,14 -2,14" fill="#C9A227"/>
+  <rect x="19" y="22" width="8" height="16" fill="white"/>
+  <text x="42" y="32" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="bold" fill="#1B2A4A">OAZI</text>
+  <text x="100" y="32" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="bold" fill="#C9A227">LAND</text>
+</svg>

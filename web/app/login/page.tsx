@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Header from "@/components/Header";
 import { loginUser } from "@/lib/api";
 
 export default function LoginPage() {
@@ -32,7 +31,7 @@ export default function LoginPage() {
 
   return (
     <main>
-      <Header />
+
       <div className="max-w-sm mx-auto px-4 py-12">
         <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">Sign in</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">

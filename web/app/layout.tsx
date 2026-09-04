@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 
 // WHY no next/font/google here: this sandbox has no network access to
 // Google Fonts at build time. A system font stack is a legitimate,
@@ -17,7 +19,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col font-sans" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        {children}
+        {/* WHY Header/Footer live here, once, instead of being repeated
+            on every page: it's the only way to GUARANTEE every page has
+            consistent navigation — a page file simply can't forget to
+            include it if it's not that page's responsibility at all. */}
+        <Header />
+        <div className="flex-1">{children}</div>
+        <Footer />
         <ServiceWorkerRegister />
       </body>
     </html>

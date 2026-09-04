@@ -1,4 +1,3 @@
-import Header from "@/components/Header";
 import { listQuarters } from "@/lib/api";
 
 /**
@@ -11,9 +10,9 @@ export default async function HomePage() {
 
   return (
     <main>
-      <Header />
 
-      <section className="bg-[#1B2A4A] text-white py-16 px-4">
+
+      <section className="bg-[#1B2A4A] text-white py-16 px-4 animate-fade-in">
         <div className="max-w-3xl mx-auto text-center">
           <h1 className="text-3xl md:text-5xl font-bold mb-4">
             Find your next home in Cameroon
@@ -53,7 +52,7 @@ export default async function HomePage() {
               <option value="STANDARD">Standard</option>
             </select>
 
-            <button type="submit" className="bg-[#C9A227] text-[#1B2A4A] font-semibold px-6 py-2 rounded hover:opacity-90">
+            <button type="submit" className="bg-[#C9A227] text-[#1B2A4A] font-semibold px-6 py-2 rounded transition-all duration-150 hover:opacity-90 hover:scale-[1.03]">
               Search
             </button>
           </form>

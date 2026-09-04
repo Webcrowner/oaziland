@@ -13,7 +13,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
   return (
     <Link
       href={`/listing/${listing.id}`}
-      className="block border rounded-lg overflow-hidden hover:shadow-lg transition-shadow bg-white"
+      className="block border rounded-lg overflow-hidden bg-white transition-all duration-200 hover:shadow-lg hover:-translate-y-1"
     >
       <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-400 text-sm">
         No photo yet

@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import Header from "@/components/Header";
 import { API_BASE_URL } from "@/lib/api";
 
 /**
@@ -54,7 +53,7 @@ export default function ListPropertyPage() {
 
   return (
     <main>
-      <Header />
+
       <div className="max-w-lg mx-auto px-4 py-12">
         <h1 className="text-2xl font-bold text-[#1B2A4A] mb-2">List a Property</h1>
         <p className="text-gray-600 mb-6 text-sm">

@@ -1,4 +1,3 @@
-import Header from "@/components/Header";
 import { getListing } from "@/lib/api";
 import { notFound } from "next/navigation";
 
@@ -29,7 +28,7 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
 
   return (
     <main>
-      <Header />
+
       {/* eslint-disable-next-line react/no-danger */}
       <script
         type="application/ld+json"
