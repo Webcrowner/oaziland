@@ -7,6 +7,7 @@ over real HTTP.
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import api_view, permission_classes as drf_permission_classes
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema
 from .models import Booking
 from .serializers import BookingSerializer
 from .services import reserve_booking, confirm_payment, InventoryConflictError, WebhookSignatureError
@@ -60,6 +61,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(exclude=False, request=None, responses={200: dict, 403: dict, 404: dict})
 @api_view(["POST"])
 @drf_permission_classes([permissions.AllowAny])
 def payment_webhook_view(request):

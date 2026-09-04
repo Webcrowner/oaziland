@@ -18,6 +18,11 @@ class ConsentRecordViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        # WHY this guard: drf-spectacular calls get_queryset() during
+        # schema generation with no real authenticated user, which
+        # previously crashed comparing AnonymousUser to a UUID field.
+        if getattr(self, "swagger_fake_view", False):
+            return ConsentRecord.objects.none()
         return ConsentRecord.objects.filter(user=self.request.user).order_by("-granted_at")
 
     def perform_create(self, serializer):
@@ -33,6 +38,11 @@ class DataExportRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        # WHY this guard: drf-spectacular calls get_queryset() during
+        # schema generation with no real authenticated user, which
+        # previously crashed comparing AnonymousUser to a UUID field.
+        if getattr(self, "swagger_fake_view", False):
+            return DataExportRequest.objects.none()
         return DataExportRequest.objects.filter(user=self.request.user).order_by("-requested_at")
 
     def create(self, request, *args, **kwargs):

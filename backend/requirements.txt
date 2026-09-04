@@ -1,0 +1,16 @@
+# Production dependencies — what the deployed backend actually needs
+# to run. Kept lean deliberately: faster builds, smaller deploy images.
+# See requirements-dev.txt for testing/local-only tools.
+Django==6.1
+djangorestframework==3.18.0
+djangorestframework_simplejwt==5.5.1
+drf-spectacular==0.30.0
+django-cors-headers==4.9.0
+django-environ==0.14.0
+django-filter==26.1
+psycopg2-binary==2.9.12
+gunicorn==26.2.0
+whitenoise==6.12.0
+pillow==12.3.0
+qrcode==8.2
+PyJWT==2.13.0

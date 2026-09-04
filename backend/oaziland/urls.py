@@ -29,8 +29,26 @@ router.register(r"consent", ConsentRecordViewSet, basename="consent")
 router.register(r"data-exports", DataExportRequestViewSet, basename="data-export")
 router.register(r"policy-documents", PolicyDocumentViewSet, basename="policy-document")
 
+from django.http import JsonResponse
+
+
+def health_check(request):
+    """A real health check — pings the actual database, not just
+    'the process is running.' Railway/Render/Fly.io all expect an
+    endpoint like this to know when to route traffic to a new deploy
+    and when to restart a failed one."""
+    from django.db import connection
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        return JsonResponse({"status": "healthy"})
+    except Exception as e:
+        return JsonResponse({"status": "unhealthy", "detail": str(e)}, status=503)
+
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('health/', health_check, name='health-check'),
 
     # Authentication
     path('api/auth/register/', RegisterView.as_view(), name='register'),

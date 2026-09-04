@@ -91,6 +91,11 @@ AUTH_USER_MODEL = 'identity.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise MUST sit directly after SecurityMiddleware (its own
+    # documented requirement) — serves static files efficiently without
+    # needing a separate CDN/S3 setup for launch, a real deployment gap
+    # this closes.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -100,12 +105,18 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# WHY this is dev-only and permissive: the web app (Next.js, Prompt 17)
-# runs on a different port during development and needs to call this
-# API from the browser. Production should replace this with an
-# explicit CORS_ALLOWED_ORIGINS list (the real deployed frontend
-# domain only), never CORS_ALLOW_ALL_ORIGINS.
-CORS_ALLOW_ALL_ORIGINS = True
+# WHY this is gated behind DEBUG: it was previously an unconditional
+# CORS_ALLOW_ALL_ORIGINS = True with only a comment warning it should
+# change in production — a comment doesn't stop a deployment from
+# accidentally shipping with every origin allowed if nobody remembers
+# to change it. Now the wide-open setting only ever applies to local
+# development; production (DEBUG=False) MUST set CORS_ALLOWED_ORIGINS
+# explicitly to the real deployed frontend domain(s), or CORS blocks
+# every request by default.
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 
 ROOT_URLCONF = 'oaziland.urls'
 
@@ -179,6 +190,28 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    # WHY WhiteNoise's compressed+hashed storage: serves static files
+    # efficiently straight from the app server, closing the "how do
+    # static files even work in production" gap without requiring a
+    # separate CDN/S3 setup to be configured before launch.
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
+# WHY these are gated behind `not DEBUG`: they're correct and
+# necessary once real HTTPS is in front of the app (Prompt 22's
+# actual production deployment), but would break plain local HTTP
+# development if always on — DEBUG already reliably distinguishes the
+# two per this file's own settings above.
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # WHY this exists: the Flyer feature generates real image files
 # (composed with Pillow) that need somewhere to live. Local filesystem

@@ -16,6 +16,11 @@ class SocialAccountLinkViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        # WHY this guard: drf-spectacular calls get_queryset() during
+        # schema generation with no real authenticated user, which
+        # previously crashed comparing AnonymousUser to a UUID field.
+        if getattr(self, "swagger_fake_view", False):
+            return SocialAccountLink.objects.none()
         return SocialAccountLink.objects.filter(user=self.request.user).order_by("-added_at")
 
     def perform_create(self, serializer):
