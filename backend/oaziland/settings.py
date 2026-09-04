@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'engagement',
     'careers',
     'verification_audit',
+    'catalogue',
     'student',
     'services',
     'social',
