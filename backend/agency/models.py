@@ -48,3 +48,26 @@ class Enquiry(models.Model):
         if self.first_response_at is None:
             return None
         return (self.first_response_at - self.created_at).total_seconds()
+
+
+class ShowingAppointmentStatus(models.TextChoices):
+    SCHEDULED = "SCHEDULED", "Scheduled"
+    COMPLETED = "COMPLETED", "Completed"
+    CANCELLED = "CANCELLED", "Cancelled"
+    NO_SHOW = "NO_SHOW", "No Show"
+
+
+class ShowingAppointment(models.Model):
+    """The catalogue document's 'client scheduling tool for property
+    viewings' — a real calendar entry, not just an Enquiry note."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="showing_appointments")
+    client = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="property_viewings")
+    listing_id = models.UUIDField()
+    scheduled_at = models.DateTimeField()
+    status = models.CharField(max_length=10, choices=ShowingAppointmentStatus.choices, default=ShowingAppointmentStatus.SCHEDULED)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "showing_appointments"
+        indexes = [models.Index(fields=["agent", "scheduled_at"])]

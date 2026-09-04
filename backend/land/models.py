@@ -97,3 +97,23 @@ class LandInquiry(models.Model):
 
     class Meta:
         db_table = "land_inquiries"
+
+
+class LandDueDiligenceReport(models.Model):
+    """Combines title status, verification badges, and scam-flag
+    history into ONE record for a buyer — the exact three things the
+    catalogue document specifies. Kept as its own record (not just a
+    computed dict) so a buyer's due-diligence check at a point in time
+    can be looked back on later, e.g. if a title dispute arises after
+    a sale."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    land = models.ForeignKey(Land, on_delete=models.CASCADE, related_name="due_diligence_reports")
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    title_status_summary = models.JSONField(default=dict)
+    verification_summary = models.JSONField(default=dict)
+    scam_flag_summary = models.JSONField(default=dict)
+    overall_risk_level = models.CharField(max_length=10, blank=True)  # LOW / MEDIUM / HIGH
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "land_due_diligence_reports"

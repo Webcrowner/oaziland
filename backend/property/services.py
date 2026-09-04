@@ -126,6 +126,39 @@ def get_property_status_summary(property_asset):
     return {"status": "AVAILABLE", "detail": None}
 
 
+def get_landlord_portfolio_summary(landlord):
+    """Aggregates across EVERY property type a landlord owns (house,
+    land, shop, warehouse, everything) — the catalogue document's
+    'portfolio dashboard across multiple properties', generalized
+    beyond just hostels (student_hostels already has its own portfolio
+    summary for agencies managing hostels specifically; this is the
+    general-landlord equivalent)."""
+    from django.db.models import Sum, Count
+    from .models import PropertyAsset, Listing, ListingStatus
+    from transactions.models import Booking, BookingStatus, Commission
+
+    properties = PropertyAsset.objects.filter(owner=landlord)
+    listings = Listing.objects.filter(property_asset__in=properties)
+    published_listings = listings.filter(status=ListingStatus.PUBLISHED)
+
+    listing_ids = list(listings.values_list("id", flat=True))
+    completed_bookings = Booking.objects.filter(
+        target_content_type="property.Listing", target_id__in=listing_ids, status=BookingStatus.COMPLETED,
+    )
+
+    total_commission_paid = Commission.objects.filter(
+        booking__target_content_type="property.Listing", booking__target_id__in=listing_ids,
+    ).aggregate(total=Sum("total_amount_xaf"))["total"] or 0
+
+    return {
+        "total_properties": properties.count(),
+        "total_listings": listings.count(),
+        "published_listings": published_listings.count(),
+        "completed_bookings": completed_bookings.count(),
+        "total_commission_paid_xaf": total_commission_paid,
+    }
+
+
 def build_property_location_from_device_gps(latitude, longitude, quarter=None):
     """Supports 'use my location when posting a property' — Prompt 3's
     other explicit requirement. This is a thin, named helper (rather than

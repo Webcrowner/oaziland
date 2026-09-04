@@ -216,3 +216,170 @@ def get_agency_hostel_portfolio_summary(agency):
         "total_active_amenity_subscriptions": total_active_amenity_subs,
         # Deliberately aggregate-only — no per-hostel owner financial breakdown here.
     }
+
+
+# ---------------------------------------------------------------------------
+# Roommate compatibility matching.
+# ---------------------------------------------------------------------------
+def roommate_compatibility_score(student_a, student_b) -> int:
+    """A simple, transparent point-based score (0-4) — one point per
+    matching dimension (sleep schedule, cleanliness, noise tolerance,
+    study habit). Deliberately not a black-box algorithm: a housing
+    office should be able to explain exactly why two students were
+    suggested as compatible."""
+    from .models import RoommatePreferenceProfile
+
+    try:
+        prefs_a = student_a.roommate_preferences
+        prefs_b = student_b.roommate_preferences
+    except RoommatePreferenceProfile.DoesNotExist:
+        return 0  # can't score compatibility without both having set preferences
+
+    score = 0
+    if prefs_a.sleep_schedule == prefs_b.sleep_schedule:
+        score += 1
+    if prefs_a.cleanliness_level == prefs_b.cleanliness_level:
+        score += 1
+    if prefs_a.noise_tolerance == prefs_b.noise_tolerance:
+        score += 1
+    if prefs_a.study_habit == prefs_b.study_habit:
+        score += 1
+    return score
+
+
+def suggest_roommates(student, candidates, limit=5):
+    """Ranks a pool of candidate students by compatibility score,
+    highest first — the actual matching output a housing office or a
+    student-facing 'suggested roommates' screen would use."""
+    scored = [(candidate, roommate_compatibility_score(student, candidate)) for candidate in candidates]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Room swap marketplace.
+# ---------------------------------------------------------------------------
+def request_room_swap(*, allocation, desired_unit_type=None, reason=""):
+    from .models import RoomSwapRequest
+    return RoomSwapRequest.objects.create(current_allocation=allocation, desired_unit_type=desired_unit_type, reason=reason)
+
+
+def find_and_match_swap(swap_request):
+    """Looks for another OPEN swap request wanting what this student
+    currently HAS, where this student wants what THAT one currently
+    has — a genuine mutual swap, not just a one-sided desire."""
+    from .models import RoomSwapRequest, RoomSwapStatus
+
+    my_current_type = swap_request.current_allocation.unit.unit_type
+    candidates = RoomSwapRequest.objects.filter(
+        status=RoomSwapStatus.OPEN, desired_unit_type=my_current_type,
+    ).exclude(id=swap_request.id)
+
+    for candidate in candidates:
+        if candidate.current_allocation.unit.unit_type == swap_request.desired_unit_type:
+            swap_request.matched_with = candidate
+            swap_request.status = RoomSwapStatus.MATCHED
+            swap_request.save(update_fields=["matched_with", "status"])
+            candidate.matched_with = swap_request
+            candidate.status = RoomSwapStatus.MATCHED
+            candidate.save(update_fields=["matched_with", "status"])
+            return candidate
+    return None
+
+
+def complete_room_swap(swap_request):
+    """Actually swaps the two students' unit assignments — the matched
+    pair's RoomAllocation.unit values are exchanged."""
+    from django.utils import timezone
+    from .models import RoomSwapStatus
+
+    if swap_request.matched_with is None:
+        raise ValueError("Cannot complete a swap with no matched pair.")
+
+    other = swap_request.matched_with
+    allocation_a = swap_request.current_allocation
+    allocation_b = other.current_allocation
+
+    allocation_a.unit, allocation_b.unit = allocation_b.unit, allocation_a.unit
+    allocation_a.save(update_fields=["unit"])
+    allocation_b.save(update_fields=["unit"])
+
+    now = timezone.now()
+    for req in (swap_request, other):
+        req.status = RoomSwapStatus.COMPLETED
+        req.completed_at = now
+        req.save(update_fields=["status", "completed_at"])
+
+    return allocation_a, allocation_b
+
+
+# ---------------------------------------------------------------------------
+# Guest passes.
+# ---------------------------------------------------------------------------
+def issue_guest_pass(*, host_student, guest_full_name, visit_date, guest_id_document_note=""):
+    from .models import GuestPass
+    return GuestPass.objects.create(
+        host_student=host_student, guest_full_name=guest_full_name,
+        visit_date=visit_date, guest_id_document_note=guest_id_document_note,
+    )
+
+
+def log_guest_check_in(*, guest_pass, logged_by):
+    from django.utils import timezone
+    guest_pass.checked_in_at = timezone.now()
+    guest_pass.logged_by = logged_by
+    guest_pass.save(update_fields=["checked_in_at", "logged_by"])
+    return guest_pass
+
+
+def log_guest_check_out(*, guest_pass, logged_by):
+    from django.utils import timezone
+    guest_pass.checked_out_at = timezone.now()
+    guest_pass.logged_by = logged_by
+    guest_pass.save(update_fields=["checked_out_at", "logged_by"])
+    return guest_pass
+
+
+# ---------------------------------------------------------------------------
+# Installment payment plans.
+# ---------------------------------------------------------------------------
+def create_installment_plan(*, billing, num_installments: int):
+    """Splits billing.amount_xaf evenly across num_installments,
+    spacing due dates evenly between now and the bill's own due_date.
+    Any rounding remainder is added to the LAST installment, so the
+    total always exactly equals the original bill — never off by a
+    few francs from floating-point-style splitting."""
+    from datetime import timedelta
+    from .models import InstallmentPlan, InstallmentPayment
+
+    plan = InstallmentPlan.objects.create(billing=billing, num_installments=num_installments)
+
+    base_amount = (billing.amount_xaf / num_installments).quantize(billing.amount_xaf)
+    total_days = (billing.due_date - billing.due_date.today()).days
+    interval_days = max(total_days // num_installments, 1)
+
+    running_total = 0
+    for i in range(1, num_installments + 1):
+        is_last = i == num_installments
+        amount = billing.amount_xaf - (base_amount * (num_installments - 1)) if is_last else base_amount
+        due = billing.due_date.today() + timedelta(days=interval_days * i)
+        InstallmentPayment.objects.create(plan=plan, sequence_number=i, amount_xaf=amount, due_date=due)
+        running_total += amount
+
+    return plan
+
+
+def pay_installment(installment):
+    from django.utils import timezone
+    from .models import InstallmentPaymentStatus
+    installment.status = InstallmentPaymentStatus.PAID
+    installment.paid_at = timezone.now()
+    installment.save(update_fields=["status", "paid_at"])
+
+    # Once every installment is paid, the parent bill itself is settled.
+    plan = installment.plan
+    if not plan.installments.exclude(status=InstallmentPaymentStatus.PAID).exists():
+        plan.billing.status = "PAID"
+        plan.billing.save(update_fields=["status"])
+
+    return installment

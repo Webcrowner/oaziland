@@ -149,3 +149,22 @@ def agency_aggregated_commission(agency):
 def _listing_ids_for_agents(agent_user_ids):
     from property.models import Listing
     return list(Listing.objects.filter(listed_by_id__in=agent_user_ids).values_list("id", flat=True))
+
+
+def schedule_showing(*, agent, client, listing_id, scheduled_at):
+    from .models import ShowingAppointment
+    return ShowingAppointment.objects.create(agent=agent, client=client, listing_id=listing_id, scheduled_at=scheduled_at)
+
+
+def complete_showing(appointment):
+    from .models import ShowingAppointmentStatus
+    appointment.status = ShowingAppointmentStatus.COMPLETED
+    appointment.save(update_fields=["status"])
+    return appointment
+
+
+def cancel_showing(appointment):
+    from .models import ShowingAppointmentStatus
+    appointment.status = ShowingAppointmentStatus.CANCELLED
+    appointment.save(update_fields=["status"])
+    return appointment

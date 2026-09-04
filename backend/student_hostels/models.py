@@ -274,6 +274,89 @@ class Waitlist(models.Model):
         db_table = "hostel_waitlist"
 
 
+class SleepSchedule(models.TextChoices):
+    EARLY_BIRD = "EARLY_BIRD", "Early Bird"
+    NIGHT_OWL = "NIGHT_OWL", "Night Owl"
+    FLEXIBLE = "FLEXIBLE", "Flexible"
+
+
+class CleanlinessLevel(models.TextChoices):
+    VERY_TIDY = "VERY_TIDY", "Very Tidy"
+    MODERATE = "MODERATE", "Moderate"
+    RELAXED = "RELAXED", "Relaxed"
+
+
+class NoiseTolerance(models.TextChoices):
+    QUIET_PREFERRED = "QUIET_PREFERRED", "Prefers Quiet"
+    MODERATE = "MODERATE", "Moderate"
+    TOLERANT = "TOLERANT", "Tolerant of Noise"
+
+
+class StudyHabit(models.TextChoices):
+    IN_ROOM = "IN_ROOM", "Studies in Room"
+    LIBRARY_ONLY = "LIBRARY_ONLY", "Library/Study Hall Only"
+    MIXED = "MIXED", "Mixed"
+
+
+class RoommatePreferenceProfile(models.Model):
+    """WHY this is a SEPARATE model from identity.StudentProfile: these
+    fields exist for ONE purpose — roommate compatibility scoring — and
+    are meaningfully different in kind from StudentProfile's allocation-
+    priority fields (accessibility, international status, programme
+    year). Keeping them apart means a change to matching criteria never
+    touches the core student profile."""
+    student = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="roommate_preferences")
+    sleep_schedule = models.CharField(max_length=15, choices=SleepSchedule.choices, default=SleepSchedule.FLEXIBLE)
+    cleanliness_level = models.CharField(max_length=15, choices=CleanlinessLevel.choices, default=CleanlinessLevel.MODERATE)
+    noise_tolerance = models.CharField(max_length=20, choices=NoiseTolerance.choices, default=NoiseTolerance.MODERATE)
+    study_habit = models.CharField(max_length=15, choices=StudyHabit.choices, default=StudyHabit.MIXED)
+
+    class Meta:
+        db_table = "roommate_preference_profiles"
+
+
+class RoomSwapStatus(models.TextChoices):
+    OPEN = "OPEN", "Open"
+    MATCHED = "MATCHED", "Matched"
+    COMPLETED = "COMPLETED", "Completed"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
+class RoomSwapRequest(models.Model):
+    """The mid-semester room swap marketplace — a student in an
+    existing allocation posts a desire to swap; matched_with links to
+    the OTHER student's swap request once a mutual match is found."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    current_allocation = models.ForeignKey(RoomAllocation, on_delete=models.CASCADE, related_name="swap_requests")
+    desired_unit_type = models.CharField(max_length=25, choices=HostelUnitType.choices, null=True, blank=True)
+    reason = models.TextField(blank=True)
+    status = models.CharField(max_length=10, choices=RoomSwapStatus.choices, default=RoomSwapStatus.OPEN)
+    matched_with = models.OneToOneField("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="matched_by")
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "room_swap_requests"
+
+
+class GuestPass(models.Model):
+    """Guest visitor logging with security tracking — the founder's
+    'guest pass system with security logging' amenity, built as a real
+    dedicated model since it needs actual entry/exit tracking, not just
+    a subscription record."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    host_student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="guest_passes_issued")
+    guest_full_name = models.CharField(max_length=200)
+    guest_id_document_note = models.CharField(max_length=100, blank=True)  # e.g. "National ID ****4821" — never the full number, per the founder's own privacy preference on receipts
+    visit_date = models.DateField()
+    checked_in_at = models.DateTimeField(null=True, blank=True)
+    checked_out_at = models.DateTimeField(null=True, blank=True)
+    logged_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="guest_passes_logged")
+
+    class Meta:
+        db_table = "guest_passes"
+
+
 # ---------------------------------------------------------------------------
 # Billing & amenities.
 # ---------------------------------------------------------------------------
@@ -314,6 +397,41 @@ class HostelBilling(models.Model):
 
     class Meta:
         db_table = "hostel_billing"
+
+
+class InstallmentPlan(models.Model):
+    """Splits ONE HostelBilling total into several smaller payments
+    across the term — the catalogue document's 'installment payment
+    plans split across the term'. The parent HostelBilling.amount_xaf
+    remains the source of truth for the total; this just breaks it into
+    a payment schedule."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    billing = models.OneToOneField(HostelBilling, on_delete=models.CASCADE, related_name="installment_plan")
+    num_installments = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "installment_plans"
+
+
+class InstallmentPaymentStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending"
+    PAID = "PAID", "Paid"
+    OVERDUE = "OVERDUE", "Overdue"
+
+
+class InstallmentPayment(models.Model):
+    plan = models.ForeignKey(InstallmentPlan, on_delete=models.CASCADE, related_name="installments")
+    sequence_number = models.PositiveSmallIntegerField()  # 1, 2, 3...
+    amount_xaf = models.DecimalField(max_digits=12, decimal_places=2)
+    due_date = models.DateField()
+    status = models.CharField(max_length=10, choices=InstallmentPaymentStatus.choices, default=InstallmentPaymentStatus.PENDING)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "installment_payments"
+        unique_together = [("plan", "sequence_number")]
+        ordering = ["sequence_number"]
 
 
 class AmenityType(models.TextChoices):
