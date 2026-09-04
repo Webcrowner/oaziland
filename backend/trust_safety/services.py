@@ -3,13 +3,11 @@ trust_safety.services — the actual ENFORCEMENT that makes moderation
 mean something: scoring content before it goes live, and applying real
 account consequences once someone accumulates strikes.
 
-POLICY FLAG FOR THE FOUNDER (per Standing Rule 4 — this is a real policy
-decision, not just a technical detail): the strike thresholds below (3 =
-temporary suspension, 5 = permanent ban) are implemented exactly as
-Prompt 9 specified. Please explicitly confirm this is the policy you
-want live in production before launch — these numbers are one line to
-change, but the human impact of getting them wrong (banning someone too
-readily, or not readily enough) is real.
+POLICY CONFIRMED BY THE FOUNDER: the strike thresholds below (3 =
+temporary suspension, 5 = permanent ban) were explicitly reviewed and
+confirmed as the production policy — not left as an unconfirmed
+default. Changing them later is still a one-line change, but doing so
+should go through the same explicit confirmation this decision did.
 """
 from django.db import transaction as db_transaction
 

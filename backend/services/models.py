@@ -126,11 +126,10 @@ class TechnicianLocationPing(models.Model):
 class TasklnIntegrationSettings(models.Model):
     """A single-row, DB-backed configuration flag — deliberately NOT a
     hardcoded Python constant, so it can be changed by an admin without a
-    code deployment. This is the OPEN QUESTION Prompt 10 explicitly asked
-    to leave unresolved: does a technician already verified on Taskln
-    arrive pre-verified on Oaziland, or does Oaziland always run its own
-    separate KYC pass? Defaults to False (always re-verify) — the safer
-    default until the founder explicitly decides otherwise."""
+    code deployment. CONFIRMED BY THE FOUNDER: Oaziland always runs its
+    own separate verification pass rather than trusting a technician's
+    existing Taskln verification — this was an explicit decision, not
+    just an unconfirmed safe default left over from Prompt 10."""
     trust_taskln_verification = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
