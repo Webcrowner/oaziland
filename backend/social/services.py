@@ -376,3 +376,28 @@ def get_message_tick_status(message) -> dict:
     if all(r.delivered_at is not None for r in receipts):
         return {"ticks": 2, "color": "GREY", "label": "Delivered"}
     return {"ticks": 1, "color": "GREY", "label": "Sent"}
+
+
+# ---------------------------------------------------------------------------
+# Connected social accounts — display links to a user's other social
+# presence (Facebook, TikTok, Instagram, etc.) on their Oaziland profile.
+# ---------------------------------------------------------------------------
+def link_social_account(*, user, platform: str, handle_or_url: str):
+    """Adds or REPLACES the link for a given platform — a user adding
+    their TikTok twice (e.g. after changing their handle) updates the
+    existing link rather than creating a confusing duplicate."""
+    from .models import SocialAccountLink
+    link, _ = SocialAccountLink.objects.update_or_create(
+        user=user, platform=platform, defaults={"handle_or_url": handle_or_url},
+    )
+    return link
+
+
+def unlink_social_account(*, user, platform: str):
+    from .models import SocialAccountLink
+    SocialAccountLink.objects.filter(user=user, platform=platform).delete()
+
+
+def list_social_accounts(user):
+    from .models import SocialAccountLink
+    return SocialAccountLink.objects.filter(user=user)

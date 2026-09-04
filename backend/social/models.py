@@ -601,3 +601,40 @@ class LiveChatMessage(models.Model):
     class Meta:
         db_table = "live_chat_messages"
         ordering = ["sent_at"]
+
+
+class SocialPlatform(models.TextChoices):
+    """WHY this is a SEPARATE concept from identity.OAuthAccount: that
+    model exists purely for LOGGING IN (Google/Facebook OAuth) — it's
+    tightly scoped to auth providers. This is for DISPLAYING a link to a
+    user's other social presence on their Oaziland profile ('follow me
+    on TikTok'), which any user or actor (landlord, agent, agency,
+    technician) can add regardless of how they log in, and covers
+    platforms (TikTok, Instagram, X) that aren't login providers here
+    at all."""
+    FACEBOOK = "FACEBOOK", "Facebook"
+    TIKTOK = "TIKTOK", "TikTok"
+    INSTAGRAM = "INSTAGRAM", "Instagram"
+    TWITTER_X = "TWITTER_X", "X (Twitter)"
+    LINKEDIN = "LINKEDIN", "LinkedIn"
+    YOUTUBE = "YOUTUBE", "YouTube"
+    WHATSAPP_BUSINESS = "WHATSAPP_BUSINESS", "WhatsApp Business"
+    OTHER = "OTHER", "Other"
+
+
+class SocialAccountLink(models.Model):
+    """A link to a user's OTHER social profile — stored as a plain
+    profile URL/handle, not a real OAuth connection. WHY not real OAuth
+    for TikTok/Instagram/X here: those platforms' APIs aren't designed
+    for 'let a third-party app display my public profile link' the way
+    Google/Facebook's login OAuth is — a public profile URL is the
+    correct, honest way to represent this, not a fake OAuth flow."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="social_account_links")
+    platform = models.CharField(max_length=20, choices=SocialPlatform.choices)
+    handle_or_url = models.CharField(max_length=255)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "social_account_links"
+        unique_together = [("user", "platform")]  # one link per platform per user — adding a new one for the same platform replaces it, doesn't duplicate

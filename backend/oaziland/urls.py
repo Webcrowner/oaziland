@@ -17,11 +17,13 @@ from identity.views import RegisterView, MyProfileView
 from geo.views import QuarterViewSet
 from property.views import ListingViewSet
 from transactions.views import BookingViewSet
+from social.views import SocialAccountLinkViewSet
 
 router = DefaultRouter()
 router.register(r"quarters", QuarterViewSet, basename="quarter")
 router.register(r"listings", ListingViewSet, basename="listing")
 router.register(r"bookings", BookingViewSet, basename="booking")
+router.register(r"social-accounts", SocialAccountLinkViewSet, basename="social-account")
 
 urlpatterns = [
     path('admin/', admin.site.urls),
