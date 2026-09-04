@@ -41,10 +41,15 @@ def properties_near_location(latitude, longitude, radius_km=5, queryset=None):
     return results
 
 
-def search_listings_by_quarter(quarter, property_type: str = None):
+def search_listings_by_quarter(quarter, property_type: str = None, finish_level: str = None):
     """Search + ranking for one quarter, boosted listings first — this is
     what makes AdCampaign/BoostedContent (monetization app) actually mean
     something to a searcher, not just exist as unused billing records.
+
+    finish_level is a real filter button per the founder's explicit
+    requirement: 'modern or not modern' is a decisive factor for renters
+    in Cameroon specifically, but the field itself is universal — this
+    same filter works in any country the platform operates in.
 
     Ranking: any listing with an ACTIVE boost targeting this quarter (or
     with no quarter targeting at all — a general boost) is shown first,
@@ -56,6 +61,8 @@ def search_listings_by_quarter(quarter, property_type: str = None):
     base_query = Listing.objects.filter(status=ListingStatus.PUBLISHED, property_asset__quarter=quarter)
     if property_type:
         base_query = base_query.filter(property_asset__type=property_type)
+    if finish_level:
+        base_query = base_query.filter(property_asset__finish_level=finish_level)
 
     listing_ids = set(base_query.values_list("id", flat=True))
 

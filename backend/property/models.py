@@ -23,6 +23,18 @@ class PropertyType(models.TextChoices):
     BUILDING = "BUILDING", "Building (multi-unit)"
 
 
+class FinishLevel(models.TextChoices):
+    """WHY this lives on the base PropertyAsset, not a Cameroon-specific
+    model or field: 'modern vs. not modern' is a universal distinction
+    a renter/buyer cares about in any country this platform operates
+    in — it just happens to be an especially decisive factor in the
+    Cameroonian market, per the founder's explicit note. Blank/optional
+    since it's meaningless for Land (see PropertyAsset.finish_level's
+    blank=True below)."""
+    MODERN = "MODERN", "Modern"
+    STANDARD = "STANDARD", "Standard (Not Modern)"
+
+
 class PropertyAsset(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
@@ -32,6 +44,7 @@ class PropertyAsset(models.Model):
     type = models.CharField(max_length=30, choices=PropertyType.choices)
     size_sqm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     description = models.TextField(blank=True)
+    finish_level = models.CharField(max_length=10, choices=FinishLevel.choices, blank=True)  # blank = not applicable (e.g. Land) or not yet specified
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     distance_to_tarmac_km = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
@@ -44,6 +57,7 @@ class PropertyAsset(models.Model):
         indexes = [
             models.Index(fields=["quarter", "type"]),
             models.Index(fields=["owner"]),
+            models.Index(fields=["finish_level"]),
         ]
 
     def __str__(self):

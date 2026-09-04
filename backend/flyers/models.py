@@ -8,6 +8,7 @@ code linking back to the platform.
 import uuid
 from django.conf import settings
 from django.db import models
+from property.models import FinishLevel  # re-exported here so flyer code has one canonical enum to import, not a duplicate copy that could drift out of sync
 
 
 class FlyerCategory(models.TextChoices):
@@ -24,14 +25,6 @@ class FlyerCategory(models.TextChoices):
     LAND_FOR_SALE = "LAND_FOR_SALE", "Land for Sale"
     SHOP_FOR_RENT = "SHOP_FOR_RENT", "Shop for Rent"
     OFFICE_FOR_RENT = "OFFICE_FOR_RENT", "Office for Rent"
-
-
-class FinishLevel(models.TextChoices):
-    """WHY optional: 'modern or not modern' matters for a house/room/
-    apartment (a real distinction Cameroonian renters ask about
-    immediately) but is meaningless for a plot of land."""
-    MODERN = "MODERN", "Modern"
-    STANDARD = "STANDARD", "Standard (Not Modern)"
 
 
 class QrTargetType(models.TextChoices):

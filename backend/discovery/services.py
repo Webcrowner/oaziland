@@ -40,6 +40,8 @@ def listing_matches_filters(listing, filters: dict) -> bool:
         market_details = getattr(listing, "market_details", None)
         if market_details is None or market_details.road_accessibility != filters["road_accessibility"]:
             return False
+    if "finish_level" in filters and listing.property_asset.finish_level != filters["finish_level"]:
+        return False
     return True
 
 
