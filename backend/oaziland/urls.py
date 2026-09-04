@@ -23,6 +23,8 @@ from hotels.views import HotelViewSet, ReservationViewSet
 from events.views import VenueViewSet, EventBookingViewSet
 from student_hostels.views import StudentHostelViewSet, MyRoomAllocationViewSet
 from guest_houses.views import GuestHouseLodgeViewSet
+from discovery.views import WantedListingViewSet
+from agency.views import AgentPublicProfileView, AgencyPublicProfileView, MyAgentDashboardView
 
 router = DefaultRouter()
 router.register(r"quarters", QuarterViewSet, basename="quarter")
@@ -39,6 +41,7 @@ router.register(r"event-bookings", EventBookingViewSet, basename="event-booking"
 router.register(r"student-hostels", StudentHostelViewSet, basename="student-hostel")
 router.register(r"my-room-allocations", MyRoomAllocationViewSet, basename="my-room-allocation")
 router.register(r"guest-houses", GuestHouseLodgeViewSet, basename="guest-house")
+router.register(r"wanted-listings", WantedListingViewSet, basename="wanted-listing")
 
 from django.http import JsonResponse
 
@@ -73,6 +76,11 @@ urlpatterns = [
 
     # Model-backed API (Listing, Quarter, Booking — Prompt 16's core pass)
     path('api/', include(router.urls)),
+
+    # Agent/agency profiles — public (anyone) and the private dashboard.
+    path('api/agents/<uuid:user_id>/profile/', AgentPublicProfileView.as_view(), name='agent-public-profile'),
+    path('api/agencies/<uuid:agency_id>/profile/', AgencyPublicProfileView.as_view(), name='agency-public-profile'),
+    path('api/my-agent-dashboard/', MyAgentDashboardView.as_view(), name='my-agent-dashboard'),
 
     # Interactive API documentation — the acceptance criteria's
     # explicit requirement: "open the Swagger documentation yourself."

@@ -225,3 +225,37 @@ def notify_waitlist_on_availability(listing_id):
         entry.save(update_fields=["notified_at"])
         notified.append(entry)
     return notified
+
+
+# ---------------------------------------------------------------------------
+# The "I Am Looking For X" reverse board — rooms, stores, warehouses,
+# businesses. Generalizes land.LandInquiry's already-proven pattern.
+# ---------------------------------------------------------------------------
+def post_wanted_listing(*, seeker, category: str, quarter=None, min_size_sqm=None, max_budget_xaf=None, notes: str = ""):
+    from .models import WantedListing
+    return WantedListing.objects.create(
+        seeker=seeker, category=category, quarter=quarter,
+        min_size_sqm=min_size_sqm, max_budget_xaf=max_budget_xaf, notes=notes,
+    )
+
+
+def respond_to_wanted_listing(*, wanted_listing, responder, message: str):
+    from .models import WantedListingResponse
+    return WantedListingResponse.objects.create(wanted_listing=wanted_listing, responder=responder, message=message)
+
+
+def mark_wanted_listing_fulfilled(wanted_listing):
+    from .models import WantedListingStatus
+    wanted_listing.status = WantedListingStatus.FULFILLED
+    wanted_listing.save(update_fields=["status"])
+    return wanted_listing
+
+
+def list_open_wanted_listings(*, category: str = None, quarter=None):
+    from .models import WantedListing, WantedListingStatus
+    queryset = WantedListing.objects.filter(status=WantedListingStatus.OPEN)
+    if category:
+        queryset = queryset.filter(category=category)
+    if quarter:
+        queryset = queryset.filter(quarter=quarter)
+    return queryset.order_by("-created_at")

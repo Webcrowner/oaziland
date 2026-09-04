@@ -75,6 +75,18 @@
     "registrationFailed": "Échec de l'inscription",
     "mfaNotice": "L'authentification multifacteur et la vérification d'identité (KYC) seront configurées lors de votre prochaine connexion, conformément aux exigences de sécurité de la plateforme."
   },
+  "HotelsPage": {
+    "title": "Hôtels",
+    "subtitle": "Des hôtels vérifiés à travers le Cameroun, avec disponibilité des chambres en temps réel.",
+    "starRating": "{count} étoile",
+    "starRatingOther": "{count} étoiles",
+    "roomsAvailable": "{count} type de chambre disponible",
+    "roomsAvailableOther": "{count} types de chambres disponibles",
+    "from": "À partir de",
+    "perNight": "/ nuit",
+    "noHotelsYet": "Aucun hôtel vérifié n'est encore répertorié.",
+    "capacity": "Pour {count} personne(s)"
+  },
   "ListPropertyPage": {
     "title": "Publier une propriété",
     "description": "Ceci est un formulaire de base pour publier une annonce. Les détails spécifiques à chaque type de propriété (chambres, niveau de finition, informations sur le titre foncier, etc.) suivront le même modèle et constituent une extension naturelle à venir.",

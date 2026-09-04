@@ -70,3 +70,56 @@ class ListingWaitlistEntry(models.Model):
     class Meta:
         db_table = "listing_waitlist_entries"
         unique_together = [("user", "listing_id")]
+
+
+class WantedCategory(models.TextChoices):
+    """Generalizes land.LandInquiry's 'reverse board' pattern to the
+    categories the founder has explicitly seen real demand for — land
+    keeps its own specialized model (LandDueDiligenceReport-adjacent
+    verification concerns land alone needs); this covers everything else."""
+    ROOM_RENTAL = "ROOM_RENTAL", "Room for Rent"
+    STORE = "STORE", "Store"
+    WAREHOUSE = "WAREHOUSE", "Warehouse"
+    BUSINESS = "BUSINESS", "Business (Going Concern)"
+    BUSINESS_AREA = "BUSINESS_AREA", "Business Area/Commercial Space"
+
+
+class WantedListingStatus(models.TextChoices):
+    OPEN = "OPEN", "Open"
+    FULFILLED = "FULFILLED", "Fulfilled"
+    EXPIRED = "EXPIRED", "Expired"
+
+
+class WantedListing(models.Model):
+    """The 'I Am Looking For X' reverse board — a seeker posts what
+    they need; landlords/agents/agencies browse and respond directly,
+    exactly the same value proposition as LandInquiry, generalized to
+    rooms, stores, warehouses, and businesses."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    seeker = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wanted_listings")
+    category = models.CharField(max_length=20, choices=WantedCategory.choices)
+    quarter = models.ForeignKey("geo.Quarter", on_delete=models.SET_NULL, null=True, blank=True)
+    min_size_sqm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_budget_xaf = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    notes = models.TextField(blank=True)
+    status = models.CharField(max_length=10, choices=WantedListingStatus.choices, default=WantedListingStatus.OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "wanted_listings"
+        indexes = [models.Index(fields=["category", "status", "quarter"])]
+
+
+class WantedListingResponse(models.Model):
+    """A landlord/agent/agency reaching out with something matching —
+    kept as a real record (not just a WhatsApp click-off into the
+    void) so the seeker has a durable list of who responded and what
+    they offered."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    wanted_listing = models.ForeignKey(WantedListing, on_delete=models.CASCADE, related_name="responses")
+    responder = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wanted_listing_responses")
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "wanted_listing_responses"

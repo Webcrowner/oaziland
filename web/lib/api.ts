@@ -82,6 +82,29 @@ export async function listQuarters(): Promise<Quarter[]> {
   return data.results;
 }
 
+export interface RoomTypeSummary {
+  id: string;
+  category: string;
+  capacity: number;
+  base_rate_xaf: string;
+}
+
+export interface Hotel {
+  id: string;
+  star_rating: number | null;
+  verified: boolean;
+  quarter: string;
+  quarter_name: string;
+  total_rooms: number;
+  room_types: RoomTypeSummary[];
+}
+
+export async function searchHotels(): Promise<PaginatedResponse<Hotel>> {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Hotel search failed: ${res.status}`);
+  return res.json();
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;

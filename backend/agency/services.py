@@ -168,3 +168,95 @@ def cancel_showing(appointment):
     appointment.status = ShowingAppointmentStatus.CANCELLED
     appointment.save(update_fields=["status"])
     return appointment
+
+
+# ---------------------------------------------------------------------------
+# Public agent/agency profile and private dashboard — the founder's own
+# professional space as an agent+agency owner, and every other agent/
+# agency's equivalent.
+# ---------------------------------------------------------------------------
+def get_agent_public_profile(agent_user):
+    """Real aggregated data for a PUBLIC-facing agent page — anyone
+    should be able to see this without logging in, the same as
+    browsing a listing."""
+    from django.db.models import Avg
+    from property.models import Listing, ListingStatus
+    from social.models import Rating
+
+    active_listings = Listing.objects.filter(listed_by=agent_user, status=ListingStatus.PUBLISHED)
+    ratings = Rating.objects.filter(subject_user=agent_user)
+    average_rating = ratings.aggregate(avg=Avg("score"))["avg"]
+
+    is_kyc_verified = hasattr(agent_user, "kyc_profile") and agent_user.kyc_profile.kyc_status == "VERIFIED"
+
+    return {
+        "full_name": agent_user.full_name or agent_user.username,
+        "is_kyc_verified": is_kyc_verified,
+        "average_rating": round(average_rating, 2) if average_rating else None,
+        "rating_count": ratings.count(),
+        "active_listing_count": active_listings.count(),
+        "agency_name": agent_user.agent_profile.agency.user.full_name if hasattr(agent_user, "agent_profile") and agent_user.agent_profile.agency else None,
+    }
+
+
+def get_agency_public_profile(agency):
+    """Same idea, for the agency itself — aggregates across every
+    agent on its roster."""
+    from django.db.models import Avg
+    from property.models import Listing, ListingStatus
+    from social.models import Rating
+
+    roster_user_ids = list(agency.agents.values_list("user_id", flat=True))
+    active_listings = Listing.objects.filter(listed_by_id__in=roster_user_ids, status=ListingStatus.PUBLISHED)
+    ratings = Rating.objects.filter(subject_user_id__in=roster_user_ids)
+    average_rating = ratings.aggregate(avg=Avg("score"))["avg"]
+
+    return {
+        "agency_name": agency.user.full_name or agency.user.username,
+        "registration_number": agency.registration_number,
+        "agent_count": agency.agents.count(),
+        "average_rating": round(average_rating, 2) if average_rating else None,
+        "rating_count": ratings.count(),
+        "active_listing_count": active_listings.count(),
+    }
+
+
+def get_agent_private_dashboard(agent_user):
+    """The PRIVATE, logged-in-only view — real leads, commission, and
+    performance data, reusing the EXISTING agent_performance_score()
+    and agency_roster()/agency_aggregated_commission() rather than
+    rebuilding a second reporting layer.
+
+    WHY commission lookup goes through Listing.listed_by rather than a
+    direct Commission.agent field: Commission only has a OneToOneField
+    to Booking, and Booking's target is a generic (content_type, id)
+    reference, not a real FK — there's no direct 'this commission
+    belongs to this agent' column to filter on. The correct join is
+    Booking → its target Listing → listed_by."""
+    from .models import Enquiry
+    from property.models import Listing
+    from transactions.models import Commission
+
+    performance = agent_performance_score(agent_user)
+    open_enquiries = Enquiry.objects.filter(agent=agent_user, first_response_at__isnull=True).count()
+
+    agent_listing_ids = list(Listing.objects.filter(listed_by=agent_user).values_list("id", flat=True))
+    total_commission_earned = Commission.objects.filter(
+        booking__target_content_type="property.Listing", booking__target_id__in=agent_listing_ids,
+    ).count()
+
+    dashboard = {
+        "performance_score": performance,
+        "open_enquiries": open_enquiries,
+        "total_completed_deals_with_commission": total_commission_earned,
+    }
+
+    if hasattr(agent_user, "agency_profile"):
+        agency = agent_user.agency_profile
+        dashboard["is_agency_owner"] = True
+        dashboard["agency_roster"] = list(agency_roster(agency).values("user__username"))
+        dashboard["agency_aggregated_commission_xaf"] = agency_aggregated_commission(agency)
+    else:
+        dashboard["is_agency_owner"] = False
+
+    return dashboard

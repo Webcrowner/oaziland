@@ -1,6 +1,7 @@
 {
   "Header": {
     "exploreProperties": "Explore Properties",
+    "hotels": "Hotels",
     "listAProperty": "List a Property",
     "verifiedListingsCount": "10,000+ Verified Listings",
     "signIn": "Sign In",
@@ -74,6 +75,18 @@
     "register": "Register",
     "registrationFailed": "Registration failed",
     "mfaNotice": "Multi-factor authentication and identity verification (KYC) will be set up on your next login, per the platform's security requirements."
+  },
+  "HotelsPage": {
+    "title": "Hotels",
+    "subtitle": "Verified hotels across Cameroon, with real-time room availability.",
+    "starRating": "{count} star",
+    "starRatingOther": "{count} stars",
+    "roomsAvailable": "{count} room type available",
+    "roomsAvailableOther": "{count} room types available",
+    "from": "From",
+    "perNight": "/ night",
+    "noHotelsYet": "No verified hotels are listed yet.",
+    "capacity": "Sleeps {count}"
   },
   "ListPropertyPage": {
     "title": "List a Property",
