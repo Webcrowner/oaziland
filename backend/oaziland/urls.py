@@ -18,12 +18,16 @@ from geo.views import QuarterViewSet
 from property.views import ListingViewSet
 from transactions.views import BookingViewSet
 from social.views import SocialAccountLinkViewSet
+from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 
 router = DefaultRouter()
 router.register(r"quarters", QuarterViewSet, basename="quarter")
 router.register(r"listings", ListingViewSet, basename="listing")
 router.register(r"bookings", BookingViewSet, basename="booking")
 router.register(r"social-accounts", SocialAccountLinkViewSet, basename="social-account")
+router.register(r"consent", ConsentRecordViewSet, basename="consent")
+router.register(r"data-exports", DataExportRequestViewSet, basename="data-export")
+router.register(r"policy-documents", PolicyDocumentViewSet, basename="policy-document")
 
 urlpatterns = [
     path('admin/', admin.site.urls),

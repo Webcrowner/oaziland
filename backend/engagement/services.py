@@ -155,12 +155,15 @@ def cancel_account_deletion(request):
 
 
 def process_due_account_deletions(now=None):
-    """After the retention window passes, actually soft-deletes the
-    account via the EXISTING User.deleted_at field — reuses the
-    already-established soft-delete mechanism rather than inventing a
-    second one."""
+    """After the retention window passes, actually completes the
+    deletion via compliance.services.complete_account_deletion() — this
+    is what makes the RETENTION DISTINCTION real: financial/legal
+    records stay untouched, personal identifying data (KYC, contact
+    info) genuinely gets scrubbed, not just a bare deleted_at flag with
+    no policy behind it."""
     from django.utils import timezone
     from .models import AccountDeletionRequest, AccountDeletionStatus
+    from compliance.services import complete_account_deletion
 
     now = now or timezone.now()
     due = AccountDeletionRequest.objects.filter(
@@ -168,8 +171,7 @@ def process_due_account_deletions(now=None):
     )
     completed = []
     for request in due:
-        request.user.deleted_at = now
-        request.user.save(update_fields=["deleted_at"])
+        complete_account_deletion(request.user)
         request.status = AccountDeletionStatus.COMPLETED
         request.completed_at = now
         request.save(update_fields=["status", "completed_at"])

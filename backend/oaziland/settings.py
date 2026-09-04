@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     'verification_audit',
     'catalogue',
     'flyers',
+    'compliance',
     'student',
     'services',
     'social',
