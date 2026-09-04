@@ -80,6 +80,7 @@ INSTALLED_APPS = [
     'compliance',
     'hotels',
     'events',
+    'guest_houses',
     'student',
     'services',
     'social',
