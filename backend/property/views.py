@@ -73,3 +73,12 @@ class ListingViewSet(viewsets.ModelViewSet):
         listing = self.get_object()
         listing.publish()
         return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def renew(self, request, pk=None):
+        """Self-service renewal — only the listing's own agent/landlord
+        can renew it (IsOwnerOrReadOnly, applied via get_permissions
+        for every non-list/retrieve/approve action)."""
+        listing = self.get_object()
+        listing.renew()
+        return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)

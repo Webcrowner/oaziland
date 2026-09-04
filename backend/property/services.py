@@ -190,3 +190,97 @@ def build_property_location_from_device_gps(latitude, longitude, quarter=None):
         "longitude": longitude,
         "quarter": quarter,  # still required — GPS alone doesn't tell us which named Quarter this falls in
     }
+
+
+# ---------------------------------------------------------------------------
+# Listing expiration — notifying every relevant party (tenant, landlord,
+# agent, agency), real auto-expiry, and self-service renewal.
+# ---------------------------------------------------------------------------
+EXPIRATION_REMINDER_DAYS_BEFORE = [14, 7, 3, 1]
+
+
+def _current_tenant_for_listing(listing):
+    """The person actually occupying/renting this listing right now,
+    if any — found through a CONFIRMED/CHECKED_IN booking targeting it,
+    the same generic (content_type, id) pattern used everywhere else."""
+    from transactions.models import Booking, BookingStatus
+    booking = Booking.objects.filter(
+        target_content_type="property.Listing", target_id=listing.id,
+        status__in=[BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN],
+    ).order_by("-created_at").first()
+    return booking.requester if booking else None
+
+
+def _interested_parties_for_listing(listing):
+    """Every real person who should hear about this listing's
+    lifecycle — 'a tenant, landlord, agent, or agency,' per the
+    founder's explicit requirement. De-duplicated, since the same
+    person can hold more than one of these roles (an owner who is
+    also their own listing agent, for instance)."""
+    parties = {listing.listed_by}  # the agent/landlord who actually posted it
+    parties.add(listing.property_asset.owner)  # the property owner, if different from who listed it
+
+    if hasattr(listing.listed_by, "agent_profile") and listing.listed_by.agent_profile.agency:
+        parties.add(listing.listed_by.agent_profile.agency.user)  # the agency, if the lister is one of its agents
+
+    tenant = _current_tenant_for_listing(listing)
+    if tenant:
+        parties.add(tenant)
+
+    return parties
+
+
+def send_listing_expiration_reminders(today=None):
+    """Fires at 14/7/3/1 days before a listing expires — the same
+    idempotent-safe daily-job pattern already used for lease renewals
+    and event balance reminders (never re-sent twice in the same real day)."""
+    from django.utils import timezone
+    from notifications.services import notify
+    from notifications.models import Notification
+    from .models import Listing, ListingStatus
+
+    today = today or timezone.now().date()
+    sent = []
+    for listing in Listing.objects.filter(status=ListingStatus.PUBLISHED, expires_at__isnull=False):
+        days_until = (listing.expires_at.date() - today).days
+        if days_until not in EXPIRATION_REMINDER_DAYS_BEFORE:
+            continue
+
+        notification_type = f"LISTING_EXPIRING_{days_until}D"
+        for party in _interested_parties_for_listing(listing):
+            if Notification.objects.filter(recipient=party, notification_type=notification_type, related_reference=str(listing.id), created_at__date=timezone.now().date()).exists():
+                continue
+            notification = notify(
+                recipient=party, notification_type=notification_type, channel="WHATSAPP",
+                title=f"Listing expiring in {days_until} day{'s' if days_until != 1 else ''}",
+                message=f"A listing ({listing.property_asset.type} in {listing.property_asset.quarter}) expires in {days_until} day{'s' if days_until != 1 else ''}. Renew it to keep it visible in search.",
+                related_reference=str(listing.id),
+            )
+            sent.append(notification)
+    return sent
+
+
+def expire_overdue_listings(now=None):
+    """Real auto-expiry — once a listing's expires_at has genuinely
+    passed, it's actually moved to EXPIRED (and drops out of public
+    search, since search only shows PUBLISHED listings), not just
+    silently left PUBLISHED with a stale date nobody enforces."""
+    from django.utils import timezone
+    from .models import Listing, ListingStatus
+    from notifications.services import notify
+
+    now = now or timezone.now()
+    overdue = Listing.objects.filter(status=ListingStatus.PUBLISHED, expires_at__lt=now)
+    expired = []
+    for listing in overdue:
+        listing.status = ListingStatus.EXPIRED
+        listing.save(update_fields=["status"])
+        for party in _interested_parties_for_listing(listing):
+            notify(
+                recipient=party, notification_type="LISTING_EXPIRED", channel="WHATSAPP",
+                title="Your listing has expired",
+                message=f"A listing ({listing.property_asset.type} in {listing.property_asset.quarter}) has expired and is no longer visible in search. Renew it to bring it back.",
+                related_reference=str(listing.id),
+            )
+        expired.append(listing)
+    return expired

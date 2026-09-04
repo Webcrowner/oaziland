@@ -337,6 +337,7 @@ class ListingStatus(models.TextChoices):
     UNDER_OFFER = "UNDER_OFFER", "Under Offer"
     CLOSED = "CLOSED", "Closed"
     REJECTED = "REJECTED", "Rejected"
+    EXPIRED = "EXPIRED", "Expired"
 
 
 class Listing(models.Model):
@@ -354,6 +355,12 @@ class Listing(models.Model):
     status = models.CharField(max_length=20, choices=ListingStatus.choices, default=ListingStatus.DRAFT)
     price_xaf = models.DecimalField(max_digits=14, decimal_places=2)
     published_at = models.DateTimeField(null=True, blank=True)
+    # WHY this exists: a listing left up indefinitely with no
+    # expectation of renewal accumulates stale/dead ads nobody's
+    # actually managing — a real problem for search quality and for
+    # the person searching. Set automatically on publish(); a landlord/
+    # agent gets reminded before it lapses and can renew in one call.
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -363,11 +370,29 @@ class Listing(models.Model):
             models.Index(fields=["property_asset"]),
         ]
 
+    LISTING_DURATION_DAYS = 90  # a sensible, configurable default lifespan for an active listing
+
     def publish(self):
         self.status = ListingStatus.PUBLISHED
         from django.utils import timezone
-        self.published_at = timezone.now()
-        self.save(update_fields=["status", "published_at"])
+        from datetime import timedelta
+        now = timezone.now()
+        self.published_at = now
+        self.expires_at = now + timedelta(days=self.LISTING_DURATION_DAYS)
+        self.save(update_fields=["status", "published_at", "expires_at"])
+
+    def renew(self, extra_days: int = None):
+        """Self-service renewal — extends expires_at from NOW, not from
+        the old expiry date, so renewing a listing that's already
+        expired gives a full fresh period rather than compounding from
+        a stale date in the past."""
+        from django.utils import timezone
+        from datetime import timedelta
+        now = timezone.now()
+        self.expires_at = now + timedelta(days=extra_days or self.LISTING_DURATION_DAYS)
+        if self.status == ListingStatus.EXPIRED:
+            self.status = ListingStatus.PUBLISHED
+        self.save(update_fields=["expires_at", "status"])
 
     def close(self):
         self.status = ListingStatus.CLOSED
