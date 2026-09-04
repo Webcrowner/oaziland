@@ -16,7 +16,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from identity.views import RegisterView, MyProfileView
 from geo.views import QuarterViewSet
 from property.views import ListingViewSet
-from transactions.views import BookingViewSet
+from transactions.views import BookingViewSet, payment_webhook_view
 from social.views import SocialAccountLinkViewSet
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 
@@ -37,6 +37,10 @@ urlpatterns = [
     path('api/auth/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/auth/me/', MyProfileView.as_view(), name='my_profile'),
+
+    # Payment provider webhook — a real, publicly-reachable endpoint,
+    # not just service-layer logic with nowhere to actually be called from.
+    path('api/webhooks/payment/', payment_webhook_view, name='payment-webhook'),
 
     # Model-backed API (Listing, Quarter, Booking — Prompt 16's core pass)
     path('api/', include(router.urls)),

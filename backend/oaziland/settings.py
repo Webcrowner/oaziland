@@ -34,7 +34,13 @@ environ.Env.read_env(BASE_DIR / ".env")
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="django-insecure-dev-only-CHANGE-IN-PRODUCTION")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env.bool("DEBUG", default=True)
+# WHY default=False here specifically: the env schema above already
+# declares DEBUG=(bool, False) — this line previously said
+# default=True, silently CONTRADICTING that schema. If a deployment
+# ever forgot to set DEBUG explicitly, the app would have started in
+# DEBUG mode by default, leaking stack traces and settings to end
+# users. Found during Prompt 21's security review; fixed here.
+DEBUG = env.bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 

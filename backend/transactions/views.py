@@ -1,13 +1,15 @@
 """
-transactions.views — the booking reservation API. Reuses reserve_
-booking() (Prompt 5) directly, so the SAME race-condition protection
-tested at the service layer applies over real HTTP.
+transactions.views — the booking reservation API, AND the real payment
+webhook receiver. Reuses reserve_booking() (Prompt 5) directly, so the
+SAME race-condition protection tested at the service layer applies
+over real HTTP.
 """
 from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import api_view, permission_classes as drf_permission_classes
 from rest_framework.response import Response
 from .models import Booking
 from .serializers import BookingSerializer
-from .services import reserve_booking, InventoryConflictError
+from .services import reserve_booking, confirm_payment, InventoryConflictError, WebhookSignatureError
 from oaziland.permissions import IsVerifiedAndMfaEnabled
 
 
@@ -56,3 +58,51 @@ class BookingViewSet(viewsets.ModelViewSet):
         except InventoryConflictError as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@drf_permission_classes([permissions.AllowAny])
+def payment_webhook_view(request):
+    """The real, publicly-reachable endpoint a payment provider (MTN
+    MoMo, Orange Money, Flutterwave/CinetPay once connected) POSTs to.
+
+    WHY this was a real gap before this fix: confirm_payment() (Prompt
+    5) already had real webhook-signature-verification LOGIC — but
+    nothing in the URL routing actually exposed a public endpoint for
+    a real provider to call. The service function existing without a
+    reachable URL is the same as it not existing at all from a
+    provider's point of view. AllowAny is correct HERE specifically —
+    a payment provider's webhook call is never an authenticated
+    Oaziland user; authenticity is established by the SIGNATURE
+    verification inside confirm_payment(), not a Bearer token."""
+    # WHY raw_body is captured FIRST, before request.data is touched:
+    # DRF's request.data parses and consumes the underlying request
+    # stream — accessing request.body AFTER that raises
+    # RawPostDataException. Found while testing this endpoint for real
+    # (not caught by writing the code alone) and fixed by reading the
+    # raw body before anything else touches the request.
+    raw_body = request.body
+
+    booking_id = request.data.get("booking_id")
+    provider = request.data.get("provider")
+    provider_reference = request.data.get("provider_reference")
+    signature_header = request.META.get("HTTP_X_WEBHOOK_SIGNATURE", "")
+
+    try:
+        booking = Booking.objects.get(id=booking_id)
+    except Booking.DoesNotExist:
+        return Response({"detail": "Unknown booking."}, status=status.HTTP_404_NOT_FOUND)
+
+    from payments.gateways import get_active_gateway
+    from transactions.views import FakeRedisLock  # see FakeRedisLock's own docstring re: real Redis wiring
+
+    try:
+        confirm_payment(
+            lock_client=FakeRedisLock(), booking=booking, provider=provider, provider_reference=provider_reference,
+            payment_gateway=get_active_gateway(), raw_webhook_payload=raw_body,
+            webhook_signature_header=signature_header,
+        )
+    except WebhookSignatureError:
+        return Response({"detail": "Invalid webhook signature."}, status=status.HTTP_403_FORBIDDEN)
+
+    return Response({"detail": "Payment confirmed."}, status=status.HTTP_200_OK)
