@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'drf_spectacular',
     'django_filters',
+    'corsheaders',
     # Oaziland domain apps
     'identity',
     'geo',
@@ -83,6 +84,7 @@ AUTH_USER_MODEL = 'identity.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -90,6 +92,13 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# WHY this is dev-only and permissive: the web app (Next.js, Prompt 17)
+# runs on a different port during development and needs to call this
+# API from the browser. Production should replace this with an
+# explicit CORS_ALLOWED_ORIGINS list (the real deployed frontend
+# domain only), never CORS_ALLOW_ALL_ORIGINS.
+CORS_ALLOW_ALL_ORIGINS = True
 
 ROOT_URLCONF = 'oaziland.urls'
 
