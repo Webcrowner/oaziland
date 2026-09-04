@@ -163,10 +163,15 @@ def send_message_now(*, conversation, sender, text, client_message_id=None):
         conversation=conversation, sender=sender, text=text,
         client_message_id=client_message_id, folder=MessageFolder.SENT, sent_at=timezone.now(),
     )
+    create_receipts_for_message(message)
 
     from notifications.services import notify
     for recipient in conversation.participants.exclude(id=sender.id):
-        if not is_user_online(recipient):
+        if is_user_online(recipient):
+            # An online recipient's device is presumed to receive it
+            # immediately — the tick moves straight to DELIVERED.
+            mark_message_delivered(message=message, recipient=recipient)
+        else:
             notify(
                 recipient=recipient, notification_type="NEW_MESSAGE_WHILE_OFFLINE",
                 title=f"New message from {sender.full_name or sender.username}",
@@ -263,3 +268,111 @@ def purge_expired_trash(now=None):
     count = expired.count()
     expired.delete()
     return count
+
+
+# ---------------------------------------------------------------------------
+# Follow — one-tap follow/unfollow (the founder's 'tap to give or get
+# followers' requirement).
+# ---------------------------------------------------------------------------
+def follow_user(*, follower, followee):
+    if follower.id == followee.id:
+        raise ValueError("A user cannot follow themselves.")
+    from .models import Follow
+    relationship, _ = Follow.objects.get_or_create(follower=follower, followee=followee)
+    return relationship
+
+
+def unfollow_user(*, follower, followee):
+    from .models import Follow
+    Follow.objects.filter(follower=follower, followee=followee).delete()
+
+
+def is_following(*, follower, followee) -> bool:
+    from .models import Follow
+    return Follow.objects.filter(follower=follower, followee=followee).exists()
+
+
+def toggle_follow(*, follower, followee):
+    """The actual 'one tap' behavior: a single button whose action
+    depends on current state — already following, unfollow; not yet
+    following, follow. Returns (is_now_following: bool)."""
+    if is_following(follower=follower, followee=followee):
+        unfollow_user(follower=follower, followee=followee)
+        return False
+    follow_user(follower=follower, followee=followee)
+    return True
+
+
+def is_mutual_follow(*, user_a, user_b) -> bool:
+    """Both follow each other — the 'get followers' half: shown on a
+    profile as 'Follows you' alongside the tap-to-follow button."""
+    return is_following(follower=user_a, followee=user_b) and is_following(follower=user_b, followee=user_a)
+
+
+# ---------------------------------------------------------------------------
+# Message delivery ticks — sent / delivered / seen, WhatsApp-style,
+# generalized to group conversations via a per-recipient receipt.
+# ---------------------------------------------------------------------------
+def create_receipts_for_message(message):
+    """Called right after a message is created — one MessageReceipt per
+    OTHER participant in the conversation. WHY per-recipient rather than
+    a single delivered_at/seen_at on Message itself: a group chat with
+    5 people needs to know delivery/read status PER PERSON, not one
+    shared timestamp that only makes sense for a 1:1 conversation."""
+    from .models import MessageReceipt
+    other_participants = message.conversation.participants.exclude(id=message.sender_id)
+    return [
+        MessageReceipt.objects.get_or_create(message=message, recipient=participant)[0]
+        for participant in other_participants
+    ]
+
+
+def mark_message_delivered(*, message, recipient):
+    """Idempotent — delivering the same message twice to the same
+    device (a common real-world occurrence) never overwrites an
+    earlier, more accurate delivered_at with a later one."""
+    from django.utils import timezone
+    from .models import MessageReceipt
+    receipt, _ = MessageReceipt.objects.get_or_create(message=message, recipient=recipient)
+    if receipt.delivered_at is None:
+        receipt.delivered_at = timezone.now()
+        receipt.save(update_fields=["delivered_at"])
+    return receipt
+
+
+def mark_message_seen(*, message, recipient):
+    """Seeing a message implies it was also delivered — sets both if
+    delivered_at was somehow never recorded, since a message can't be
+    read without having arrived."""
+    from django.utils import timezone
+    from .models import MessageReceipt
+    receipt, _ = MessageReceipt.objects.get_or_create(message=message, recipient=recipient)
+    now = timezone.now()
+    updated_fields = []
+    if receipt.delivered_at is None:
+        receipt.delivered_at = now
+        updated_fields.append("delivered_at")
+    if receipt.seen_at is None:
+        receipt.seen_at = now
+        updated_fields.append("seen_at")
+    if updated_fields:
+        receipt.save(update_fields=updated_fields)
+    return receipt
+
+
+def get_message_tick_status(message) -> dict:
+    """The actual UI-facing answer: how many ticks, what color. ALL
+    recipients must have reached a state for the sender to see it at
+    that level — a group message shows 'delivered' only once everyone
+    has received it, matching how WhatsApp itself behaves for groups."""
+    from .models import MessageReceipt
+
+    receipts = MessageReceipt.objects.filter(message=message)
+    if not receipts.exists():
+        return {"ticks": 1, "color": "GREY", "label": "Sent"}
+
+    if all(r.seen_at is not None for r in receipts):
+        return {"ticks": 2, "color": "BLUE", "label": "Seen"}
+    if all(r.delivered_at is not None for r in receipts):
+        return {"ticks": 2, "color": "GREY", "label": "Delivered"}
+    return {"ticks": 1, "color": "GREY", "label": "Sent"}

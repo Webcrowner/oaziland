@@ -401,6 +401,23 @@ class Message(models.Model):
         self.save(update_fields=["folder"])
 
 
+class MessageReceipt(models.Model):
+    """One row per (message, recipient) — WHY this instead of a
+    delivered_at/seen_at pair directly on Message: Message.sender is
+    one person, but a Conversation can have many participants. Each
+    recipient's delivery/read status is genuinely independent — group
+    chats need per-person tracking, not one shared timestamp that only
+    makes sense for a two-person conversation."""
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="receipts")
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="message_receipts")
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    seen_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "message_receipts"
+        unique_together = [("message", "recipient")]
+
+
 class Favorite(models.Model):
     """A private save — deliberately separate from Follow (following a
     PERSON) and ShareEvent (sharing TO others). Saving a listing tells no
