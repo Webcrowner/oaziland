@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Oaziland",
+    "slug": "oaziland",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "oaziland",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.glorentech.oaziland",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Oaziland uses your camera to photograph properties you're listing.",
+        "NSPhotoLibraryUsageDescription": "Oaziland needs access to your photos to attach them to a property listing.",
+        "NSFaceIDUsageDescription": "Use Face ID to sign in to Oaziland quickly and securely."
+      }
+    },
+    "android": {
+      "package": "com.glorentech.oaziland",
+      "adaptiveIcon": {
+        "backgroundColor": "#1B2A4A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES", "USE_BIOMETRIC", "USE_FINGERPRINT"],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Oaziland uses your camera to photograph properties you're listing."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use Face ID to sign in to Oaziland quickly and securely."
+        }
+      ]
+    ]
+  }
+}
