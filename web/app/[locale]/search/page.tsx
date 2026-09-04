@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import PropertyCard from "@/components/PropertyCard";
 import { searchListings } from "@/lib/api";
 
@@ -12,18 +13,20 @@ export default async function SearchPage({
 }: {
   searchParams: Promise<{ quarter?: string; property_type?: string; finish_level?: string }>;
 }) {
+  const t = await getTranslations("SearchPage");
   const params = await searchParams;
   const data = await searchListings(params).catch(() => ({ count: 0, results: [] as never[] }));
 
   return (
     <main>
-
       <div className="max-w-6xl mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">Search Results</h1>
-        <p className="text-gray-600 mb-6">{data.count} propert{data.count === 1 ? "y" : "ies"} found</p>
+        <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
+        <p className="text-gray-600 mb-6">
+          {data.count === 1 ? t("countFoundOne", { count: data.count }) : t("countFoundOther", { count: data.count })}
+        </p>
 
         {data.results.length === 0 ? (
-          <p className="text-gray-500">No listings match your search yet. Try a different neighborhood or filter.</p>
+          <p className="text-gray-500">{t("noResults")}</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {data.results.map((listing) => (

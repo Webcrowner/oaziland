@@ -1,8 +1,10 @@
 "use client";
-import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { usePathname } from "@/i18n/navigation";
+import { Link } from "@/i18n/navigation";
 import { useState } from "react";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 /**
  * Header — the responsive, animated navigation. Desktop shows the full
@@ -12,12 +14,13 @@ import { useState } from "react";
  * easily-overlooked piece of "easy to navigate."
  */
 export default function Header() {
+  const t = useTranslations("Header");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
 
   const navLinks = [
-    { href: "/search", label: "Explore Properties" },
-    { href: "/list-property", label: "List a Property" },
+    { href: "/search", label: t("exploreProperties") },
+    { href: "/list-property", label: t("listAProperty") },
   ];
 
   const linkClass = (href: string) =>
@@ -42,16 +45,17 @@ export default function Header() {
                 {link.label}
               </Link>
             ))}
-            <span className="text-gray-300">10,000+ Verified Listings</span>
+            <span className="text-gray-300">{t("verifiedListingsCount")}</span>
           </nav>
 
           <div className="hidden md:flex items-center gap-4 text-sm">
-            <Link href="/login" className={linkClass("/login")}>Sign In</Link>
+            <LanguageSwitcher />
+            <Link href="/login" className={linkClass("/login")}>{t("signIn")}</Link>
             <Link
               href="/register"
               className="bg-[#C9A227] text-[#1B2A4A] px-4 py-2 rounded font-semibold transition-all duration-150 hover:opacity-90 hover:scale-[1.03]"
             >
-              Register
+              {t("register")}
             </Link>
           </div>
 
@@ -59,7 +63,7 @@ export default function Header() {
           <button
             className="md:hidden text-2xl w-8 h-8 flex items-center justify-center"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            aria-label="Toggle menu"
+            aria-label={t("toggleMenu")}
             aria-expanded={mobileMenuOpen}
           >
             <span className={`inline-block transition-transform duration-200 ${mobileMenuOpen ? "rotate-90" : ""}`}>
@@ -72,7 +76,7 @@ export default function Header() {
             an abrupt show/hide, so it feels considered rather than jarring. */}
         <div
           className={`md:hidden overflow-hidden transition-all duration-300 ease-in-out ${
-            mobileMenuOpen ? "max-h-60 opacity-100" : "max-h-0 opacity-0"
+            mobileMenuOpen ? "max-h-72 opacity-100" : "max-h-0 opacity-0"
           }`}
         >
           <div className="flex flex-col gap-3 text-sm border-t border-white/20 pt-3 pb-4">
@@ -81,8 +85,9 @@ export default function Header() {
                 {link.label}
               </Link>
             ))}
-            <Link href="/login" className={linkClass("/login")} onClick={() => setMobileMenuOpen(false)}>Sign In</Link>
-            <Link href="/register" className={linkClass("/register")} onClick={() => setMobileMenuOpen(false)}>Register</Link>
+            <Link href="/login" className={linkClass("/login")} onClick={() => setMobileMenuOpen(false)}>{t("signIn")}</Link>
+            <Link href="/register" className={linkClass("/register")} onClick={() => setMobileMenuOpen(false)}>{t("register")}</Link>
+            <LanguageSwitcher />
           </div>
         </div>
       </div>

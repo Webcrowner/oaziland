@@ -1,14 +1,13 @@
-import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
 import type { Listing } from "@/lib/api";
 
-const FINISH_LABELS: Record<string, string> = {
-  MODERN: "Modern",
-  STANDARD: "Standard",
-};
-
 export default function PropertyCard({ listing }: { listing: Listing }) {
+  const t = useTranslations("PropertyCard");
+  const finishLabels: Record<string, string> = { MODERN: t("finishModern"), STANDARD: t("finishStandard") };
+
   const price = Number(listing.price_xaf).toLocaleString();
-  const finish = FINISH_LABELS[listing.property_asset.finish_level] || null;
+  const finish = finishLabels[listing.property_asset.finish_level] || null;
 
   return (
     <Link
@@ -16,7 +15,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
       className="block border rounded-lg overflow-hidden bg-white transition-all duration-200 hover:shadow-lg hover:-translate-y-1"
     >
       <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-600 text-sm">
-        No photo yet
+        {t("noPhotoYet")}
       </div>
       <div className="p-4">
         <div className="flex items-center gap-2 mb-1">

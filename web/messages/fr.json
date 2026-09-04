@@ -1,0 +1,93 @@
+{
+  "Header": {
+    "exploreProperties": "Explorer les propriétés",
+    "listAProperty": "Publier une propriété",
+    "verifiedListingsCount": "Plus de 10 000 annonces vérifiées",
+    "signIn": "Se connecter",
+    "register": "S'inscrire",
+    "toggleMenu": "Ouvrir le menu"
+  },
+  "Footer": {
+    "tagline": "Annonces immobilières vérifiées à travers le Cameroun.",
+    "discover": "Découvrir",
+    "searchProperties": "Rechercher des propriétés",
+    "listAProperty": "Publier une propriété",
+    "account": "Compte",
+    "signIn": "Se connecter",
+    "register": "S'inscrire",
+    "brandName": "Oaziland",
+    "address": "Messassi, Yaoundé, Cameroun",
+    "copyright": "© {year} Oaziland. Tous droits réservés."
+  },
+  "PropertyCard": {
+    "noPhotoYet": "Pas encore de photo",
+    "finishModern": "Moderne",
+    "finishStandard": "Standard"
+  },
+  "HomePage": {
+    "heroTitle": "Trouvez votre prochain logement au Cameroun",
+    "heroSubtitle": "Des annonces vérifiées, des paiements sécurisés et des agents de confiance — tout au même endroit.",
+    "chooseNeighborhood": "Choisissez un quartier",
+    "anyPropertyType": "Tout type de propriété",
+    "house": "Maison",
+    "land": "Terrain",
+    "shop": "Boutique",
+    "modernOrStandard": "Moderne ou standard",
+    "modern": "Moderne",
+    "standard": "Standard",
+    "search": "Rechercher",
+    "trustVerifiedListings": "✓ Annonces vérifiées",
+    "trustSecurePayments": "✓ Paiements Mobile Money sécurisés",
+    "trustLocalAgents": "✓ Agents locaux de confiance"
+  },
+  "SearchPage": {
+    "title": "Résultats de recherche",
+    "countFoundOne": "{count} propriété trouvée",
+    "countFoundOther": "{count} propriétés trouvées",
+    "noResults": "Aucune annonce ne correspond encore à votre recherche. Essayez un autre quartier ou filtre."
+  },
+  "ListingDetailPage": {
+    "noPhotoYet": "Pas encore de photo",
+    "finishModern": "Moderne",
+    "finishStandard": "Standard (non moderne)",
+    "size": "Superficie",
+    "listingType": "Type d'annonce",
+    "contactOnWhatsApp": "Contacter sur WhatsApp"
+  },
+  "LoginPage": {
+    "title": "Se connecter",
+    "usernamePlaceholder": "Nom d'utilisateur",
+    "passwordPlaceholder": "Mot de passe",
+    "signingIn": "Connexion en cours...",
+    "signIn": "Se connecter",
+    "loginFailed": "Échec de la connexion"
+  },
+  "RegisterPage": {
+    "title": "Créez votre compte",
+    "continueWithGoogle": "Continuer avec Google (pas encore connecté)",
+    "continueWithFacebook": "Continuer avec Facebook (pas encore connecté)",
+    "orDivider": "— ou —",
+    "usernamePlaceholder": "Nom d'utilisateur",
+    "phonePlaceholder": "Numéro de téléphone (+237...)",
+    "passwordPlaceholder": "Mot de passe",
+    "creatingAccount": "Création du compte...",
+    "register": "S'inscrire",
+    "registrationFailed": "Échec de l'inscription",
+    "mfaNotice": "L'authentification multifacteur et la vérification d'identité (KYC) seront configurées lors de votre prochaine connexion, conformément aux exigences de sécurité de la plateforme."
+  },
+  "ListPropertyPage": {
+    "title": "Publier une propriété",
+    "description": "Ceci est un formulaire de base pour publier une annonce. Les détails spécifiques à chaque type de propriété (chambres, niveau de finition, informations sur le titre foncier, etc.) suivront le même modèle et constituent une extension naturelle à venir.",
+    "listingTypeLabel": "Type d'annonce",
+    "forRent": "À louer",
+    "forSale": "À vendre",
+    "priceLabel": "Prix (XAF)",
+    "submitting": "Envoi en cours...",
+    "submit": "Publier l'annonce",
+    "signInFirst": "Veuillez d'abord vous connecter.",
+    "mfaRequired": "Vous devez compléter l'authentification multifacteur et la vérification d'identité avant de publier une propriété — il s'agit d'une exigence de sécurité de la plateforme, pas d'un bug.",
+    "somethingWentWrong": "Une erreur s'est produite. Veuillez réessayer.",
+    "success": "Votre annonce a été créée en tant que brouillon — un administrateur l'examinera avant sa publication.",
+    "couldNotReachServer": "Impossible de joindre le serveur."
+  }
+}

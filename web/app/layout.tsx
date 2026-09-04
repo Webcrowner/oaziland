@@ -1,13 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
 
-// WHY no next/font/google here: this sandbox has no network access to
-// Google Fonts at build time. A system font stack is a legitimate,
-// fast-loading choice for production too — many real sites use one
-// deliberately to avoid a font-loading network request entirely.
+// WHY this root layout is deliberately minimal: with next-intl,
+// [locale]/layout.tsx is where the real page shell (Header, Footer,
+// translation provider) lives — this root layout only needs to exist
+// so <html>/<body> are defined once, above the locale split.
 
 export const metadata: Metadata = {
   title: "Oaziland — Real Estate in Cameroon",
@@ -15,18 +12,11 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html className="h-full antialiased">
       <body className="min-h-full flex flex-col font-sans" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        {/* WHY Header/Footer live here, once, instead of being repeated
-            on every page: it's the only way to GUARANTEE every page has
-            consistent navigation — a page file simply can't forget to
-            include it if it's not that page's responsibility at all. */}
-        <Header />
-        <div className="flex-1">{children}</div>
-        <Footer />
-        <ServiceWorkerRegister />
+        {children}
       </body>
     </html>
   );

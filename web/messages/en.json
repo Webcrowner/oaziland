@@ -1,0 +1,93 @@
+{
+  "Header": {
+    "exploreProperties": "Explore Properties",
+    "listAProperty": "List a Property",
+    "verifiedListingsCount": "10,000+ Verified Listings",
+    "signIn": "Sign In",
+    "register": "Register",
+    "toggleMenu": "Toggle menu"
+  },
+  "Footer": {
+    "tagline": "Verified real estate listings across Cameroon.",
+    "discover": "Discover",
+    "searchProperties": "Search Properties",
+    "listAProperty": "List a Property",
+    "account": "Account",
+    "signIn": "Sign In",
+    "register": "Register",
+    "brandName": "Oaziland",
+    "address": "Messassi, Yaoundé, Cameroon",
+    "copyright": "© {year} Oaziland. All rights reserved."
+  },
+  "PropertyCard": {
+    "noPhotoYet": "No photo yet",
+    "finishModern": "Modern",
+    "finishStandard": "Standard"
+  },
+  "HomePage": {
+    "heroTitle": "Find your next home in Cameroon",
+    "heroSubtitle": "Verified listings, secure payments, and trusted agents — all in one place.",
+    "chooseNeighborhood": "Choose a neighborhood",
+    "anyPropertyType": "Any property type",
+    "house": "House",
+    "land": "Land",
+    "shop": "Shop",
+    "modernOrStandard": "Modern or standard",
+    "modern": "Modern",
+    "standard": "Standard",
+    "search": "Search",
+    "trustVerifiedListings": "✓ Verified Listings",
+    "trustSecurePayments": "✓ Secure Mobile Money Payments",
+    "trustLocalAgents": "✓ Trusted Local Agents"
+  },
+  "SearchPage": {
+    "title": "Search Results",
+    "countFoundOne": "{count} property found",
+    "countFoundOther": "{count} properties found",
+    "noResults": "No listings match your search yet. Try a different neighborhood or filter."
+  },
+  "ListingDetailPage": {
+    "noPhotoYet": "No photo yet",
+    "finishModern": "Modern",
+    "finishStandard": "Standard (Not Modern)",
+    "size": "Size",
+    "listingType": "Listing Type",
+    "contactOnWhatsApp": "Contact on WhatsApp"
+  },
+  "LoginPage": {
+    "title": "Sign in",
+    "usernamePlaceholder": "Username",
+    "passwordPlaceholder": "Password",
+    "signingIn": "Signing in...",
+    "signIn": "Sign In",
+    "loginFailed": "Login failed"
+  },
+  "RegisterPage": {
+    "title": "Create your account",
+    "continueWithGoogle": "Continue with Google (not yet connected)",
+    "continueWithFacebook": "Continue with Facebook (not yet connected)",
+    "orDivider": "— or —",
+    "usernamePlaceholder": "Username",
+    "phonePlaceholder": "Phone number (+237...)",
+    "passwordPlaceholder": "Password",
+    "creatingAccount": "Creating account...",
+    "register": "Register",
+    "registrationFailed": "Registration failed",
+    "mfaNotice": "Multi-factor authentication and identity verification (KYC) will be set up on your next login, per the platform's security requirements."
+  },
+  "ListPropertyPage": {
+    "title": "List a Property",
+    "description": "This is a basic listing form. Full property-type-specific details (bedrooms, finish level, land title info, etc.) follow the same pattern shown here and are a natural next extension.",
+    "listingTypeLabel": "Listing Type",
+    "forRent": "For Rent",
+    "forSale": "For Sale",
+    "priceLabel": "Price (XAF)",
+    "submitting": "Submitting...",
+    "submit": "Submit Listing",
+    "signInFirst": "Please sign in first.",
+    "mfaRequired": "You need to complete multi-factor authentication and identity verification before listing a property — this is a platform-wide security requirement, not a bug.",
+    "somethingWentWrong": "Something went wrong. Please try again.",
+    "success": "Your listing was created as a draft — an admin will review it before it goes live.",
+    "couldNotReachServer": "Could not reach the server."
+  }
+}
