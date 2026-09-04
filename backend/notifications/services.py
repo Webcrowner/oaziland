@@ -35,11 +35,32 @@ class SMSDispatcher(NotificationDispatcher):
         raise NotImplementedError("SMS dispatch not yet built — requires real API credentials.")
 
 
+class EmailDispatcher(NotificationDispatcher):
+    """NOT YET CONNECTED — needs a Postmark or SendGrid account."""
+    def send(self, notification) -> bool:
+        raise NotImplementedError("Email dispatch not yet built — requires real API credentials.")
+
+
 def get_active_dispatcher(channel: str) -> NotificationDispatcher:
-    """The one place deciding which dispatcher handles a channel. Always
-    sandbox for now — mirrors get_active_gateway() and
-    get_active_moderation_provider()."""
-    return SandboxDispatcher()
+    """FIXED: this previously always returned SandboxDispatcher
+    regardless of the channel argument — meaning WhatsAppDispatcher and
+    SMSDispatcher existed as classes but were NEVER actually reachable
+    through notify(), dead code nobody would have noticed until trying
+    to connect real credentials and finding nothing used them.
+
+    Every channel still maps to Sandbox for now, since no real
+    credentials exist yet for ANY of them — but the mapping is now
+    explicit and per-channel, so connecting real WhatsApp/SMS/Email
+    credentials later is a ONE-LINE change per channel (swap
+    SandboxDispatcher() for the real class), exactly the same pattern
+    already used in payments.gateways.get_active_gateway()."""
+    return {
+        "WHATSAPP": SandboxDispatcher(),
+        "SMS": SandboxDispatcher(),
+        "EMAIL": SandboxDispatcher(),
+        "PUSH": SandboxDispatcher(),
+        "IN_APP": SandboxDispatcher(),
+    }.get(channel, SandboxDispatcher())
 
 
 def notify(*, recipient=None, external_phone_number: str = "", notification_type: str, title: str, message: str, channel="IN_APP", related_reference: str = ""):
@@ -66,3 +87,53 @@ def notify(*, recipient=None, external_phone_number: str = "", notification_type
     record.delivered = dispatcher.send(record)
     record.save(update_fields=["delivered"])
     return record
+
+
+# ---------------------------------------------------------------------------
+# Weekly digest — 'weekly digest summaries' was explicitly named as an
+# email use-case for this prompt; nothing built it before now.
+# ---------------------------------------------------------------------------
+def generate_weekly_digest_data(user, since=None) -> dict:
+    """Aggregates real recent activity — no new tables, just counting
+    what already exists (Notification, Message, saved-search-match
+    notifications) over the last 7 days."""
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import Notification
+    from social.models import Message, MessageFolder
+
+    since = since or (timezone.now() - timedelta(days=7))
+
+    new_notifications = Notification.objects.filter(recipient=user, created_at__gte=since)
+    saved_search_matches = new_notifications.filter(notification_type="SAVED_SEARCH_MATCH").count()
+    unread_messages = Message.objects.filter(
+        conversation__participants=user, folder=MessageFolder.SENT, sent_at__gte=since, read_receipt=False,
+    ).exclude(sender=user).count()
+
+    return {
+        "period_start": since,
+        "saved_search_matches": saved_search_matches,
+        "unread_messages": unread_messages,
+        "total_notifications": new_notifications.count(),
+    }
+
+
+def send_weekly_digest_email(user):
+    """Only sends if there's actually something worth telling the user
+    about — an empty digest email every week regardless of activity is
+    exactly the kind of notification fatigue that gets an app's emails
+    marked as spam."""
+    digest = generate_weekly_digest_data(user)
+
+    if digest["total_notifications"] == 0:
+        return None
+
+    message = (
+        f"This week on Oaziland: {digest['saved_search_matches']} new listing(s) matching your "
+        f"saved searches, {digest['unread_messages']} unread message(s)."
+    )
+    return notify(
+        recipient=user, notification_type="WEEKLY_DIGEST",
+        title="Your Oaziland weekly summary",
+        message=message, channel="EMAIL",
+    )

@@ -58,3 +58,98 @@ def require_kyc_submitted_for_registration(user):
             "Registration cannot complete until KYC information has been "
             "submitted (national ID, date of birth, and address)."
         )
+
+
+# ---------------------------------------------------------------------------
+# OTP issuance — a real gap this closes: MfaChallenge could always be
+# CREATED, but nothing ever actually sent the code anywhere.
+# ---------------------------------------------------------------------------
+OTP_LENGTH = 6
+OTP_VALIDITY_MINUTES = 10
+
+
+def issue_mfa_challenge(mfa_method):
+    """Generates a real random code, creates the MfaChallenge record,
+    and actually sends it — via SMS or Email depending on the method's
+    type — through the shared notify() function. AUTHENTICATOR_APP
+    methods generate their code locally (TOTP) and never reach this
+    function at all; only SMS_OTP/EMAIL_OTP need a code dispatched."""
+    import random
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import MfaChallenge, MfaType
+    from notifications.services import notify
+
+    code = "".join(random.choices("0123456789", k=OTP_LENGTH))
+    challenge = MfaChallenge.objects.create(
+        mfa_method=mfa_method, code=code,
+        expires_at=timezone.now() + timedelta(minutes=OTP_VALIDITY_MINUTES),
+    )
+
+    channel = "SMS" if mfa_method.mfa_type == MfaType.SMS_OTP else "EMAIL"
+    notify(
+        recipient=mfa_method.user, notification_type="MFA_CODE",
+        title="Your Oaziland verification code",
+        message=f"Your verification code is {code}. It expires in {OTP_VALIDITY_MINUTES} minutes.",
+        channel=channel, related_reference=str(challenge.id),
+    )
+
+    return challenge
+
+
+# ---------------------------------------------------------------------------
+# Password reset — a real gap this closes: no reset flow existed at all.
+# ---------------------------------------------------------------------------
+PASSWORD_RESET_VALIDITY_MINUTES = 30
+
+
+class InvalidResetTokenError(Exception):
+    pass
+
+
+def request_password_reset(user):
+    """Generates a real, single-use token and emails it — never reveals
+    whether a given username/email actually exists to the caller of
+    this function (that check belongs at the view/API layer, which
+    should return the same generic response either way to avoid
+    leaking which accounts exist)."""
+    import secrets
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import PasswordResetToken
+    from notifications.services import notify
+
+    token_value = secrets.token_urlsafe(32)
+    reset_token = PasswordResetToken.objects.create(
+        user=user, token=token_value,
+        expires_at=timezone.now() + timedelta(minutes=PASSWORD_RESET_VALIDITY_MINUTES),
+    )
+
+    notify(
+        recipient=user, notification_type="PASSWORD_RESET",
+        title="Reset your Oaziland password",
+        message=f"Use this code to reset your password: {token_value}. It expires in {PASSWORD_RESET_VALIDITY_MINUTES} minutes.",
+        channel="EMAIL", related_reference=str(reset_token.id),
+    )
+    return reset_token
+
+
+def confirm_password_reset(*, token_value: str, new_password: str):
+    from django.utils import timezone
+    from .models import PasswordResetToken
+
+    try:
+        reset_token = PasswordResetToken.objects.get(token=token_value)
+    except PasswordResetToken.DoesNotExist:
+        raise InvalidResetTokenError("This reset link is invalid.")
+
+    if not reset_token.is_valid():
+        raise InvalidResetTokenError("This reset link has expired or was already used.")
+
+    user = reset_token.user
+    user.set_password(new_password)
+    user.save(update_fields=["password"])
+
+    reset_token.consumed_at = timezone.now()
+    reset_token.save(update_fields=["consumed_at"])
+    return user

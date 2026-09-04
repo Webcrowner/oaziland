@@ -312,3 +312,25 @@ class KYCProfile(models.Model):
 
     class Meta:
         db_table = "kyc_profiles"
+
+
+class PasswordResetToken(models.Model):
+    """A single-use, expiring token sent by EMAIL — 'password resets'
+    was one of the three email use-cases this prompt explicitly names,
+    and no reset flow existed at all before this. WHY consumed_at
+    (not a simple boolean) mirrors MfaChallenge.consumed's reasoning:
+    an explicit timestamp is more useful for audit than a bare flag,
+    and prevents a used token from ever being replayed."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="password_reset_tokens")
+    token = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "password_reset_tokens"
+
+    def is_valid(self) -> bool:
+        from django.utils import timezone
+        return self.consumed_at is None and timezone.now() < self.expires_at

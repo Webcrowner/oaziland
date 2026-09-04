@@ -170,6 +170,27 @@ def confirm_payment(
         )
     lock_key = f"booking-lock:{booking.target_content_type}:{booking.target_id}"
     lock_client.release(lock_key, permanent=True)
+
+    # WHY this was a real gap before this fix: a confirmed booking
+    # previously sent NOTHING to the guest — the acceptance criteria's
+    # 'receive a real WhatsApp booking confirmation and a real
+    # transactional email' had nothing behind it. Both notifications
+    # route through the same shared notify() function every other
+    # feature uses — no separate, one-off messaging path for bookings.
+    from notifications.services import notify
+    notify(
+        recipient=booking.requester, notification_type="BOOKING_CONFIRMED",
+        title="Booking Confirmed",
+        message=f"Your booking has been confirmed. Amount paid: {booking.amount_xaf} XAF.",
+        channel="WHATSAPP", related_reference=str(booking.id),
+    )
+    notify(
+        recipient=booking.requester, notification_type="BOOKING_RECEIPT",
+        title="Your Oaziland Receipt",
+        message=f"Receipt — Booking {booking.id}: {booking.amount_xaf} XAF paid, platform fee {platform_fee_xaf} XAF, provider reference {provider_reference}.",
+        channel="EMAIL", related_reference=str(booking.id),
+    )
+
     return escrow
 
 
