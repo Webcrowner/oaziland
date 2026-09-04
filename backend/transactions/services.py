@@ -29,6 +29,8 @@ def _fee_category_for_booking_type(booking_type: str):
     from monetization.models import TransactionCategory
     return {
         BookingType.SERVICE_REQUEST: TransactionCategory.SERVICE_PAYMENT,
+        BookingType.MARKETPLACE_ITEM: TransactionCategory.MARKETPLACE_SALE,
+        BookingType.RIDE: TransactionCategory.RIDE_FARE,
     }.get(booking_type, TransactionCategory.PROPERTY_BOOKING)
 
 

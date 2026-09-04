@@ -132,6 +132,7 @@ class TransactionCategory(models.TextChoices):
     AD_SPEND = "AD_SPEND", "Ad Spend"
     GIFT_CONVERSION = "GIFT_CONVERSION", "Gift-to-Cash Conversion"
     WALLET_WITHDRAWAL = "WALLET_WITHDRAWAL", "Wallet Withdrawal"
+    RIDE_FARE = "RIDE_FARE", "Ride Fare"
 
 
 class PlatformFeePolicy(models.Model):
