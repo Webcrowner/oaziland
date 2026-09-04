@@ -49,6 +49,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework_simplejwt',
+    'drf_spectacular',
+    'django_filters',
     # Oaziland domain apps
     'identity',
     'geo',
@@ -168,3 +171,47 @@ STATIC_URL = 'static/'
 # the code that calls it" pattern used for payments/moderation/notifications.
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# ---------------------------------------------------------------------------
+# Django REST Framework — Prompt 16.
+#
+# WHY these specific defaults: IsAuthenticated as the DEFAULT permission
+# means every new endpoint is locked down unless a developer explicitly
+# opens it up (e.g. property search, which is public) — the safer
+# failure mode is "accidentally too restrictive," never "accidentally
+# public." Rate limiting defaults are conservative and can be raised
+# per-endpoint where genuinely needed (e.g. a search-heavy screen).
+# ---------------------------------------------------------------------------
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.AnonRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '300/hour',
+        'anon': '60/hour',
+        # A higher rate for search specifically — browsing listings is
+        # the platform's single most common action and shouldn't be
+        # rate-limited as tightly as, say, account creation.
+        'search': '600/hour',
+    },
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Oaziland API',
+    'DESCRIPTION': 'Real estate super-app for Cameroon and Africa — property, land, hospitality, marketplace, social, and financial services.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
