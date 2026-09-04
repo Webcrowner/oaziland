@@ -215,16 +215,28 @@ def is_user_online(user) -> bool:
     return presence.is_currently_online()
 
 
-def get_presence_display(user) -> str:
+def get_presence_display(user, viewer=None) -> str:
     """Returns a human-readable presence string — 'Online' or 'Last
     seen 12 minutes ago' — the actual thing a chat UI would show next to
-    someone's name."""
+    someone's name.
+
+    WHY `viewer` matters: if `user` has hidden their online status
+    (UserPresence.show_online_status=False), everyone EXCEPT the user
+    themselves sees a generic 'Offline' — checking your own profile
+    always shows your real status, since hiding it from yourself would
+    just be confusing, not private. Pass viewer=user (or leave it
+    unset, for 'some other/public viewer') depending on who's asking."""
     from django.utils import timezone
     from .models import UserPresence
 
     presence = UserPresence.objects.filter(user=user).first()
     if presence is None:
         return "Offline"
+
+    is_own_status_check = viewer is not None and viewer.id == user.id
+    if not presence.show_online_status and not is_own_status_check:
+        return "Offline"
+
     if presence.is_currently_online():
         return "Online"
 
@@ -234,6 +246,18 @@ def get_presence_display(user) -> str:
         return f"Last seen {minutes} minute{'s' if minutes != 1 else ''} ago"
     hours = minutes // 60
     return f"Last seen {hours} hour{'s' if hours != 1 else ''} ago"
+
+
+def set_presence_visibility(*, user, visible: bool):
+    """Toggles whether OTHER people can see this user's real online
+    status. Does NOT affect is_user_online()/is_currently_online() —
+    the underlying functional presence detection message delivery
+    ticks rely on keeps working correctly regardless of this setting."""
+    from .models import UserPresence
+    presence, _ = UserPresence.objects.get_or_create(user=user)
+    presence.show_online_status = visible
+    presence.save(update_fields=["show_online_status"])
+    return presence
 
 
 def send_due_scheduled_messages(now=None):

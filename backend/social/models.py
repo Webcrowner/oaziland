@@ -316,10 +316,20 @@ class UserPresence(models.Model):
     gets to explicitly set itself OFFLINE — it just stops sending
     heartbeats. is_currently_online() below treats a stale last_seen_at
     as offline regardless of the stored status, so a crashed app doesn't
-    show as permanently 'online' to everyone else."""
+    show as permanently 'online' to everyone else.
+
+    show_online_status is a DISPLAY-ONLY privacy preference — WHY it
+    doesn't change is_currently_online() itself: hiding your online
+    status from other people is a UI/privacy choice, not a change to
+    the underlying functional presence detection message delivery
+    ticks (Prompt 15's founder addition) rely on to work correctly.
+    Real presence detection keeps working exactly the same; only what
+    OTHER people are shown changes. Defaults to True (visible), per the
+    founder's explicit 'by default it shows when you are online.'"""
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="presence")
     status = models.CharField(max_length=10, choices=PresenceStatus.choices, default=PresenceStatus.OFFLINE)
     last_seen_at = models.DateTimeField(auto_now=True)
+    show_online_status = models.BooleanField(default=True)
 
     class Meta:
         db_table = "user_presence"
