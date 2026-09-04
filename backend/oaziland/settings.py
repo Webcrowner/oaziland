@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'finance',
     'property_management',
     'marketplace',
+    'engagement',
     'student',
     'services',
     'social',

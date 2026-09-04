@@ -309,16 +309,57 @@ class Conversation(models.Model):
         db_table = "conversations"
 
 
+class MessageFolder(models.TextChoices):
+    """WHY a status/folder field on the existing Message rather than a
+    second messaging system: a draft, a scheduled message, and a sent
+    message are the SAME underlying object at different points in its
+    life — sent_at being null already distinguished drafts implicitly;
+    this makes every state explicit and queryable (an inbox view, a
+    trash view, a drafts view are now just filters on one field)."""
+    DRAFT = "DRAFT", "Draft"
+    SCHEDULED = "SCHEDULED", "Scheduled"
+    SENT = "SENT", "Sent"
+    ARCHIVED = "ARCHIVED", "Archived"
+    TRASH = "TRASH", "Trash"
+    SPAM = "SPAM", "Spam"
+
+
+TRASH_RETENTION_DAYS = 30  # a trashed message is recoverable for this long before real deletion
+
+
 class Message(models.Model):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     text = models.TextField(blank=True)
-    sent_at = models.DateTimeField(auto_now_add=True)
+    folder = models.CharField(max_length=10, choices=MessageFolder.choices, default=MessageFolder.SENT)
+    scheduled_send_at = models.DateTimeField(null=True, blank=True)  # set only when folder=SCHEDULED
+    sent_at = models.DateTimeField(null=True, blank=True)  # null while still a DRAFT/SCHEDULED
+    trashed_at = models.DateTimeField(null=True, blank=True)  # drives the retention window
+    created_at = models.DateTimeField(auto_now_add=True)
     read_receipt = models.BooleanField(default=False)
 
     class Meta:
         db_table = "messages"
-        ordering = ["sent_at"]
+        ordering = ["created_at"]
+
+    def move_to_trash(self):
+        from django.utils import timezone
+        self.folder = MessageFolder.TRASH
+        self.trashed_at = timezone.now()
+        self.save(update_fields=["folder", "trashed_at"])
+
+    def restore_from_trash(self):
+        self.folder = MessageFolder.SENT if self.sent_at else MessageFolder.DRAFT
+        self.trashed_at = None
+        self.save(update_fields=["folder", "trashed_at"])
+
+    def archive(self):
+        self.folder = MessageFolder.ARCHIVED
+        self.save(update_fields=["folder"])
+
+    def mark_spam(self):
+        self.folder = MessageFolder.SPAM
+        self.save(update_fields=["folder"])
 
 
 class Favorite(models.Model):

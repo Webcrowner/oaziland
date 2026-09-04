@@ -119,3 +119,66 @@ def get_recommended_feed(user, limit=20):
 
     scored.sort(key=lambda pair: (pair[1], pair[0].created_at), reverse=True)
     return [post for post, score in scored[:limit]]
+
+
+# ---------------------------------------------------------------------------
+# Message lifecycle — drafts, scheduled send-later, and the trash
+# retention window (Part C of the additional module).
+# ---------------------------------------------------------------------------
+def save_draft(*, conversation, sender, text):
+    from .models import Message, MessageFolder
+    return Message.objects.create(conversation=conversation, sender=sender, text=text, folder=MessageFolder.DRAFT)
+
+
+def schedule_message(*, conversation, sender, text, send_at):
+    from .models import Message, MessageFolder
+    return Message.objects.create(
+        conversation=conversation, sender=sender, text=text,
+        folder=MessageFolder.SCHEDULED, scheduled_send_at=send_at,
+    )
+
+
+def send_message_now(*, conversation, sender, text):
+    """The primary way an ordinary, immediately-sent message gets
+    created — sent_at and folder=SENT are always set together, in one
+    place, rather than left to whichever caller remembers to set both."""
+    from django.utils import timezone
+    from .models import Message, MessageFolder
+    return Message.objects.create(
+        conversation=conversation, sender=sender, text=text,
+        folder=MessageFolder.SENT, sent_at=timezone.now(),
+    )
+
+
+def send_due_scheduled_messages(now=None):
+    """Finds every SCHEDULED message whose time has arrived and marks
+    it SENT — meant to run on a schedule, fully callable/testable
+    directly."""
+    from django.utils import timezone
+    from .models import Message, MessageFolder
+
+    now = now or timezone.now()
+    due = Message.objects.filter(folder=MessageFolder.SCHEDULED, scheduled_send_at__lte=now)
+    sent = []
+    for message in due:
+        message.folder = MessageFolder.SENT
+        message.sent_at = now
+        message.save(update_fields=["folder", "sent_at"])
+        sent.append(message)
+    return sent
+
+
+def purge_expired_trash(now=None):
+    """Permanently deletes messages that have sat in Trash beyond the
+    retention window — the actual enforcement of 'recoverable retention
+    window', not just a comment saying trash should eventually clear."""
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import Message, MessageFolder, TRASH_RETENTION_DAYS
+
+    now = now or timezone.now()
+    cutoff = now - timedelta(days=TRASH_RETENTION_DAYS)
+    expired = Message.objects.filter(folder=MessageFolder.TRASH, trashed_at__lt=cutoff)
+    count = expired.count()
+    expired.delete()
+    return count
