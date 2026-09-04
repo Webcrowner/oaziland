@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'marketplace',
     'engagement',
     'careers',
+    'verification_audit',
     'student',
     'services',
     'social',

@@ -106,6 +106,29 @@ class MonetbilGateway(PaymentGateway):
         raise NotImplementedError("Monetbil integration not yet built.")
 
 
+class FlutterwaveGateway(PaymentGateway):
+    """NOT YET CONNECTED — needs real Flutterwave API credentials. A
+    third real option alongside CinetPay and Monetbil.
+
+    WHY this is just another PaymentGateway implementation and NOT a
+    replacement for PaymentEscrow: PaymentEscrow is the ledger/business-
+    logic layer (gross amount, platform fee, payee amount, held/
+    released/refunded/disputed status) — it doesn't know or care HOW
+    money moved. Flutterwave, like CinetPay and Monetbil, is only ever
+    the HOW. Activating it is a one-line change in get_active_gateway()
+    below; nothing about escrow, commission splitting, or dispute
+    handling changes."""
+
+    def initiate_debit(self, *, phone_number: str, amount_xaf, idempotency_key: str) -> DebitResult:
+        raise NotImplementedError(
+            "Flutterwave integration not yet built — requires real API credentials. "
+            "See FLUTTERWAVE_API_KEY in .env.example."
+        )
+
+    def verify_webhook(self, *, raw_payload: bytes, signature_header: str) -> WebhookVerificationResult:
+        raise NotImplementedError("Flutterwave integration not yet built.")
+
+
 def get_active_gateway() -> PaymentGateway:
     """The ONE place that decides which gateway is actually in use. Right
     now it always returns the sandbox. Once real credentials exist, this
