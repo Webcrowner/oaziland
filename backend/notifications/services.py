@@ -137,3 +137,120 @@ def send_weekly_digest_email(user):
         title="Your Oaziland weekly summary",
         message=message, channel="EMAIL",
     )
+
+
+# ---------------------------------------------------------------------------
+# Celebratory lifecycle messages — birthdays, new-month greetings, and
+# platform-anniversary messages. Meant to run once daily via a scheduled
+# job; each function is self-guarding against being run twice in the
+# same day, since (unlike a one-time state transition such as a booking
+# confirmation) there's no natural 'already handled' flag for a
+# recurring yearly/monthly event.
+# ---------------------------------------------------------------------------
+def _already_greeted_today(user, notification_type: str) -> bool:
+    """WHY this uses the REAL current date, not the `today` parameter
+    the caller passed in for birthday/anniversary MATCHING: those two
+    concepts are different. `today` answers 'which calendar date are
+    we evaluating birthdays/anniversaries against' (normally real
+    today, but can be simulated for testing or a manual backfill).
+    This function answers 'has this actually already been sent during
+    this real invocation' — a Notification's created_at is always set
+    from the real wall clock (auto_now_add), so the dedup check must
+    compare against the real clock too, not a simulated date, or the
+    guard silently never matches when today is overridden."""
+    from django.utils import timezone
+    from .models import Notification
+    return Notification.objects.filter(
+        recipient=user, notification_type=notification_type, created_at__date=timezone.now().date(),
+    ).exists()
+
+
+def _active_users_queryset():
+    from identity.models import User, AccountStatus
+    return User.objects.filter(account_status=AccountStatus.ACTIVE, deleted_at__isnull=True)
+
+
+def send_birthday_greetings(today=None):
+    """Finds every active user whose KYCProfile.date_of_birth matches
+    today's month and day, and sends a personalized birthday message —
+    skipping anyone with no KYC/birthdate on file entirely (never
+    guesses or defaults a birthdate) and anyone already greeted today."""
+    from django.utils import timezone
+    from identity.models import KYCProfile
+
+    today = today or timezone.now().date()
+    birthday_profiles = KYCProfile.objects.filter(
+        date_of_birth__month=today.month, date_of_birth__day=today.day,
+        user__in=_active_users_queryset(),
+    ).select_related("user")
+
+    sent = []
+    for profile in birthday_profiles:
+        user = profile.user
+        if _already_greeted_today(user, "BIRTHDAY_GREETING"):
+            continue
+        name = user.full_name or user.username
+        notification = notify(
+            recipient=user, notification_type="BIRTHDAY_GREETING",
+            title="Happy Birthday! 🎉",
+            message=f"Happy Birthday, {name}! Wishing you a wonderful year ahead, from all of us at Oaziland.",
+            channel="WHATSAPP",
+        )
+        sent.append(notification)
+    return sent
+
+
+def send_happy_new_month_greetings(today=None):
+    """Sends to every active user on the 1st of each calendar month —
+    per the founder's explicit request, personalized with their name."""
+    from django.utils import timezone
+    import calendar
+
+    today = today or timezone.now().date()
+    if today.day != 1:
+        return []
+
+    month_name = calendar.month_name[today.month]
+    sent = []
+    for user in _active_users_queryset():
+        if _already_greeted_today(user, "HAPPY_NEW_MONTH"):
+            continue
+        name = user.full_name or user.username
+        notification = notify(
+            recipient=user, notification_type="HAPPY_NEW_MONTH",
+            title=f"Happy New Month, {name}!",
+            message=f"Happy {month_name}, {name}! Wishing you a productive and successful month ahead, from Oaziland.",
+            channel="WHATSAPP",
+        )
+        sent.append(notification)
+    return sent
+
+
+def send_platform_anniversary_greetings(today=None):
+    """Finds every active user whose join date (month + day) matches
+    today AND at least one full year has passed — the registration day
+    itself is not an anniversary yet, so a brand-new user never gets
+    congratulated for 'zero years' on the platform."""
+    from django.utils import timezone
+
+    today = today or timezone.now().date()
+    sent = []
+    for user in _active_users_queryset():
+        joined = user.date_joined.date()
+        years = today.year - joined.year
+        if years < 1:
+            continue
+        if (joined.month, joined.day) != (today.month, today.day):
+            continue
+        if _already_greeted_today(user, "PLATFORM_ANNIVERSARY"):
+            continue
+
+        name = user.full_name or user.username
+        notification = notify(
+            recipient=user, notification_type="PLATFORM_ANNIVERSARY",
+            title=f"Happy {years}-Year Anniversary!",
+            message=f"Happy {years}-year anniversary with Oaziland, {name}! Thank you for being with us.",
+            channel="WHATSAPP",
+        )
+        sent.append(notification)
+    return sent
