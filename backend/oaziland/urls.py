@@ -19,6 +19,10 @@ from property.views import ListingViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
 from social.views import SocialAccountLinkViewSet
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
+from hotels.views import HotelViewSet, ReservationViewSet
+from events.views import VenueViewSet, EventBookingViewSet
+from student_hostels.views import StudentHostelViewSet, MyRoomAllocationViewSet
+from guest_houses.views import GuestHouseLodgeViewSet
 
 router = DefaultRouter()
 router.register(r"quarters", QuarterViewSet, basename="quarter")
@@ -28,6 +32,13 @@ router.register(r"social-accounts", SocialAccountLinkViewSet, basename="social-a
 router.register(r"consent", ConsentRecordViewSet, basename="consent")
 router.register(r"data-exports", DataExportRequestViewSet, basename="data-export")
 router.register(r"policy-documents", PolicyDocumentViewSet, basename="policy-document")
+router.register(r"hotels", HotelViewSet, basename="hotel")
+router.register(r"reservations", ReservationViewSet, basename="reservation")
+router.register(r"venues", VenueViewSet, basename="venue")
+router.register(r"event-bookings", EventBookingViewSet, basename="event-booking")
+router.register(r"student-hostels", StudentHostelViewSet, basename="student-hostel")
+router.register(r"my-room-allocations", MyRoomAllocationViewSet, basename="my-room-allocation")
+router.register(r"guest-houses", GuestHouseLodgeViewSet, basename="guest-house")
 
 from django.http import JsonResponse
 
