@@ -42,16 +42,25 @@ def get_active_dispatcher(channel: str) -> NotificationDispatcher:
     return SandboxDispatcher()
 
 
-def notify(*, recipient, notification_type: str, title: str, message: str, channel="IN_APP", related_reference: str = ""):
+def notify(*, recipient=None, external_phone_number: str = "", notification_type: str, title: str, message: str, channel="IN_APP", related_reference: str = ""):
     """The ONE shared way any part of the platform sends someone a
     notification. Creates the record, attempts delivery through the
     active dispatcher for that channel, and marks the real outcome —
-    never assumes success just because the record was created."""
+    never assumes success just because the record was created.
+
+    Exactly one of recipient/external_phone_number must be given —
+    a registered user gets a normal notification; an external contact
+    (e.g. an agent's emergency contact with no Oaziland account) gets
+    one addressed by phone number instead."""
     from .models import Notification
 
+    if not recipient and not external_phone_number:
+        raise ValueError("notify() requires either a recipient or an external_phone_number.")
+
     record = Notification.objects.create(
-        recipient=recipient, notification_type=notification_type, title=title,
-        message=message, channel=channel, related_reference=related_reference,
+        recipient=recipient, external_phone_number=external_phone_number,
+        notification_type=notification_type, title=title, message=message,
+        channel=channel, related_reference=related_reference,
     )
     dispatcher = get_active_dispatcher(channel)
     record.delivered = dispatcher.send(record)

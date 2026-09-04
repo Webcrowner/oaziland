@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'student_hostels',
     'discovery',
     'finance',
+    'property_management',
     'student',
     'services',
     'social',

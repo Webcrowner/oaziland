@@ -24,7 +24,16 @@ class Notification(models.Model):
     visible and auditable, not silently indistinguishable from a
     successful one."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications",
+        null=True, blank=True,
+    )
+    # WHY nullable + this field: not every notification target is a
+    # registered platform user — an agent's safety-check-in emergency
+    # contact (Prompt 14) may be a family member with no Oaziland
+    # account at all. When recipient is None, external_phone_number
+    # must be set instead.
+    external_phone_number = models.CharField(max_length=20, blank=True)
     notification_type = models.CharField(max_length=50)  # e.g. "SAVED_SEARCH_MATCH", "BOOKING_CONFIRMED"
     title = models.CharField(max_length=200)
     message = models.TextField()
