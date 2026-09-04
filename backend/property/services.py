@@ -78,6 +78,54 @@ def search_listings_by_quarter(quarter, property_type: str = None):
     return boosted_listings + organic_listings  # boosted always first, regardless of recency
 
 
+def get_property_status_summary(property_asset):
+    """The founder's explicit requirement: know when a property is
+    taken, available, or scheduled — not just a bare status flag. Reads
+    real Booking and Lease data rather than trusting Listing.status
+    alone, since a listing can show PUBLISHED while an active booking
+    hold is quietly in progress, or a lease is scheduled to start in
+    the future.
+
+    Returns one of:
+      - 'AVAILABLE' — no active booking, no upcoming lease
+      - 'RESERVATION_IN_PROGRESS' — someone is mid-checkout right now
+      - 'TAKEN' — a confirmed booking/lease currently covers today
+      - 'SCHEDULED' — a future booking/lease exists, but not yet started
+    """
+    from django.utils import timezone
+    from transactions.models import Booking, BookingStatus
+    from property_management.models import Lease
+
+    listings = property_asset.listings.all()
+    listing_ids = list(listings.values_list("id", flat=True))
+
+    active_bookings = Booking.objects.filter(
+        target_content_type="property.Listing", target_id__in=listing_ids,
+        status__in=[BookingStatus.PENDING, BookingStatus.PAYMENT_PROCESSING],
+    )
+    if active_bookings.exists():
+        return {"status": "RESERVATION_IN_PROGRESS", "detail": None}
+
+    confirmed_bookings = Booking.objects.filter(
+        target_content_type="property.Listing", target_id__in=listing_ids,
+        status__in=[BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN],
+    )
+    today = timezone.now().date()
+
+    for booking in confirmed_bookings:
+        lease = Lease.objects.filter(booking=booking).first()
+        if lease is None:
+            # Confirmed with no defined lease term yet (e.g. a sale, or
+            # a rental awaiting a formal lease record) — treat as taken now.
+            return {"status": "TAKEN", "detail": {"booking_id": str(booking.id)}}
+        if lease.start_date <= today <= lease.end_date:
+            return {"status": "TAKEN", "detail": {"lease_end_date": lease.end_date}}
+        if lease.start_date > today:
+            return {"status": "SCHEDULED", "detail": {"scheduled_from": lease.start_date}}
+
+    return {"status": "AVAILABLE", "detail": None}
+
+
 def build_property_location_from_device_gps(latitude, longitude, quarter=None):
     """Supports 'use my location when posting a property' — Prompt 3's
     other explicit requirement. This is a thin, named helper (rather than

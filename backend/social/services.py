@@ -138,16 +138,97 @@ def schedule_message(*, conversation, sender, text, send_at):
     )
 
 
-def send_message_now(*, conversation, sender, text):
+def send_message_now(*, conversation, sender, text, client_message_id=None):
     """The primary way an ordinary, immediately-sent message gets
     created — sent_at and folder=SENT are always set together, in one
-    place, rather than left to whichever caller remembers to set both."""
+    place, rather than left to whichever caller remembers to set both.
+
+    WHY this checks client_message_id FIRST: this is what makes offline
+    sending safe. If a mobile client's first send attempt actually
+    reached the server but the success response was lost (a classic
+    offline/flaky-connection failure), retrying with the SAME
+    client_message_id returns the original message instead of creating
+    a duplicate. Also notifies any offline recipient, so a message sent
+    to someone who's offline isn't just silently waiting for them to
+    happen to open the app."""
     from django.utils import timezone
-    from .models import Message, MessageFolder
-    return Message.objects.create(
+    from .models import Message, MessageFolder, PresenceStatus
+
+    if client_message_id:
+        existing = Message.objects.filter(client_message_id=client_message_id).first()
+        if existing:
+            return existing
+
+    message = Message.objects.create(
         conversation=conversation, sender=sender, text=text,
-        folder=MessageFolder.SENT, sent_at=timezone.now(),
+        client_message_id=client_message_id, folder=MessageFolder.SENT, sent_at=timezone.now(),
     )
+
+    from notifications.services import notify
+    for recipient in conversation.participants.exclude(id=sender.id):
+        if not is_user_online(recipient):
+            notify(
+                recipient=recipient, notification_type="NEW_MESSAGE_WHILE_OFFLINE",
+                title=f"New message from {sender.full_name or sender.username}",
+                message=text[:100], related_reference=str(message.id),
+            )
+
+    return message
+
+
+# ---------------------------------------------------------------------------
+# Presence — online/offline/last-seen (the founder's explicit
+# 'I have to know when you are offline or not' requirement).
+# ---------------------------------------------------------------------------
+def record_heartbeat(user):
+    """Called periodically by a connected client (e.g. every 60
+    seconds) — the ONLY way status moves to/stays ONLINE. last_seen_at
+    updates via auto_now every time this is called."""
+    from .models import UserPresence, PresenceStatus
+    presence, _ = UserPresence.objects.get_or_create(user=user)
+    presence.status = PresenceStatus.ONLINE
+    presence.save(update_fields=["status", "last_seen_at"])
+    return presence
+
+
+def set_explicitly_offline(user):
+    """Called when a user deliberately logs out or closes the app
+    cleanly — distinct from just going silent (a crash/lost connection
+    still falls back to the last_seen_at timeout in is_user_online)."""
+    from .models import UserPresence, PresenceStatus
+    presence, _ = UserPresence.objects.get_or_create(user=user)
+    presence.status = PresenceStatus.OFFLINE
+    presence.save(update_fields=["status", "last_seen_at"])
+    return presence
+
+
+def is_user_online(user) -> bool:
+    from .models import UserPresence
+    presence = UserPresence.objects.filter(user=user).first()
+    if presence is None:
+        return False  # never seen — treated as offline, not an error
+    return presence.is_currently_online()
+
+
+def get_presence_display(user) -> str:
+    """Returns a human-readable presence string — 'Online' or 'Last
+    seen 12 minutes ago' — the actual thing a chat UI would show next to
+    someone's name."""
+    from django.utils import timezone
+    from .models import UserPresence
+
+    presence = UserPresence.objects.filter(user=user).first()
+    if presence is None:
+        return "Offline"
+    if presence.is_currently_online():
+        return "Online"
+
+    delta = timezone.now() - presence.last_seen_at
+    minutes = int(delta.total_seconds() // 60)
+    if minutes < 60:
+        return f"Last seen {minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = minutes // 60
+    return f"Last seen {hours} hour{'s' if hours != 1 else ''} ago"
 
 
 def send_due_scheduled_messages(now=None):

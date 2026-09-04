@@ -301,6 +301,37 @@ class Group(models.Model):
         db_table = "groups_"  # trailing underscore avoids clashing with Django's built-in auth Group
 
 
+class PresenceStatus(models.TextChoices):
+    ONLINE = "ONLINE", "Online"
+    AWAY = "AWAY", "Away"
+    OFFLINE = "OFFLINE", "Offline"
+
+
+PRESENCE_TIMEOUT_MINUTES = 5  # no heartbeat within this window = treated as offline, regardless of stored status
+
+
+class UserPresence(models.Model):
+    """WHY status alone isn't trusted, and last_seen_at is what actually
+    decides offline: a mobile app that crashes or loses signal never
+    gets to explicitly set itself OFFLINE — it just stops sending
+    heartbeats. is_currently_online() below treats a stale last_seen_at
+    as offline regardless of the stored status, so a crashed app doesn't
+    show as permanently 'online' to everyone else."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="presence")
+    status = models.CharField(max_length=10, choices=PresenceStatus.choices, default=PresenceStatus.OFFLINE)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_presence"
+
+    def is_currently_online(self) -> bool:
+        from django.utils import timezone
+        from datetime import timedelta
+        if self.status == PresenceStatus.OFFLINE:
+            return False
+        return timezone.now() - self.last_seen_at < timedelta(minutes=PRESENCE_TIMEOUT_MINUTES)
+
+
 class Conversation(models.Model):
     participants = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="conversations")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -328,9 +359,17 @@ TRASH_RETENTION_DAYS = 30  # a trashed message is recoverable for this long befo
 
 
 class Message(models.Model):
+    """WHY client_message_id exists: a mobile app composing a message
+    while offline (per the founder's explicit 'offline messaging'
+    requirement) must be able to safely RETRY sending it once
+    connectivity returns, without risking a duplicate if the first
+    attempt actually succeeded but the confirmation never reached the
+    device. The client generates this ID once, locally, at compose
+    time — the same idempotency-key pattern already used for Booking."""
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     text = models.TextField(blank=True)
+    client_message_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     folder = models.CharField(max_length=10, choices=MessageFolder.choices, default=MessageFolder.SENT)
     scheduled_send_at = models.DateTimeField(null=True, blank=True)  # set only when folder=SCHEDULED
     sent_at = models.DateTimeField(null=True, blank=True)  # null while still a DRAFT/SCHEDULED
