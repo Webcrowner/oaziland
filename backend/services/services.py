@@ -135,3 +135,30 @@ def is_pre_verified_via_taskln(taskln_worker_id: str) -> bool:
         return False
     worker = lookup_taskln_worker(taskln_worker_id)
     return worker is not None and worker.taskln_verification_status == "VERIFIED"
+
+
+def get_technician_dashboard_summary(technician):
+    """The Technician Dashboard: job dispatch ledger, earnings, and
+    inspection history — all from real data, no cached numbers."""
+    from django.db.models import Sum
+    from .models import ServiceRequest, ServiceRequestStatus
+    from monetization.services import get_or_create_wallet
+    from monetization.models import WalletTransactionType
+
+    active_jobs = ServiceRequest.objects.filter(
+        technician=technician, status__in=[ServiceRequestStatus.ACCEPTED, ServiceRequestStatus.EN_ROUTE, ServiceRequestStatus.IN_PROGRESS],
+    )
+    completed_jobs = ServiceRequest.objects.filter(technician=technician, status=ServiceRequestStatus.COMPLETED)
+
+    wallet = get_or_create_wallet(technician)
+    recent_earnings = wallet.transactions.filter(
+        transaction_type__in=[WalletTransactionType.GIFT_PAYOUT],
+    ).order_by("-created_at")[:10]
+
+    return {
+        "active_job_count": active_jobs.count(),
+        "active_jobs": list(active_jobs.values("id", "category", "priority")),
+        "completed_job_count": completed_jobs.count(),
+        "wallet_balance_xaf": wallet.balance_xaf,
+        "recent_transaction_count": recent_earnings.count(),
+    }

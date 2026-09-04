@@ -123,3 +123,19 @@ def issue_strike_and_apply_consequences(*, subject, reason: str, issued_by=None)
             subject.save(update_fields=["account_status", "suspended_until"])
 
     return warning
+
+
+def get_admin_console_summary():
+    """The Admin Console: every queue an admin needs to work through,
+    in one place — verification requests, content reports, and dispute
+    cases — pulled from their real, existing models rather than a
+    separate 'admin summary' table that could drift out of sync."""
+    from .models import ContentReport, ReportStatus
+    from property_management.models import DisputeCase, DisputeStatus
+    from engagement.models import VerificationRequest, VerificationRequestStatus
+
+    return {
+        "pending_verification_requests": VerificationRequest.objects.filter(status=VerificationRequestStatus.PENDING).count(),
+        "open_content_reports": ContentReport.objects.filter(status=ReportStatus.OPEN).count(),
+        "open_dispute_cases": DisputeCase.objects.filter(status__in=[DisputeStatus.OPEN, DisputeStatus.ADMIN_RESPONDED]).count(),
+    }

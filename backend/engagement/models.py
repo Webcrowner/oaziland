@@ -225,3 +225,25 @@ class SupportMessage(models.Model):
     class Meta:
         db_table = "support_messages"
         ordering = ["sent_at"]
+
+
+class BadgeCode(models.TextChoices):
+    """A fixed, explainable set — each badge's award RULE lives in
+    engagement/services.py's evaluate_badges_for_user(), so anyone can
+    see exactly what earns each one, not a hidden scoring system."""
+    TOP_REVIEWER = "TOP_REVIEWER", "Top Reviewer"
+    VERIFIED_RENTER = "VERIFIED_RENTER", "Verified Renter"
+    FIVE_SUCCESSFUL_DEALS = "FIVE_SUCCESSFUL_DEALS", "5 Successful Deals"
+
+
+class UserBadge(models.Model):
+    """A user can only earn each badge ONCE — unique_together enforces
+    this, so re-running the award check never duplicates a badge
+    someone already has."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="badges")
+    badge_code = models.CharField(max_length=25, choices=BadgeCode.choices)
+    awarded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "user_badges"
+        unique_together = [("user", "badge_code")]

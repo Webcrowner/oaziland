@@ -189,3 +189,37 @@ def get_recommended_listings(user, limit=20):
 
     scored.sort(key=lambda pair: (pair[1], pair[0].published_at or pair[0].created_at), reverse=True)
     return [listing for listing, score in scored[:limit]]
+
+
+# ---------------------------------------------------------------------------
+# Platform-wide listing waitlist.
+# ---------------------------------------------------------------------------
+def join_listing_waitlist(*, user, listing_id):
+    from .models import ListingWaitlistEntry
+    entry, _ = ListingWaitlistEntry.objects.get_or_create(user=user, listing_id=listing_id)
+    return entry
+
+
+def notify_waitlist_on_availability(listing_id):
+    """Called when a previously-taken listing becomes available again —
+    e.g. from property.services.get_property_status_summary's callers
+    once a booking ends. Notifies EVERY waitlisted user, in join order,
+    and marks each notified so they're not alerted twice for the same
+    availability window."""
+    from django.utils import timezone
+    from notifications.services import notify
+    from .models import ListingWaitlistEntry
+
+    entries = ListingWaitlistEntry.objects.filter(listing_id=listing_id, notified_at__isnull=True).order_by("joined_at")
+    notified = []
+    for entry in entries:
+        notify(
+            recipient=entry.user, notification_type="WAITLIST_LISTING_AVAILABLE",
+            title="A listing you're waiting for is available!",
+            message=f"The listing you joined the waitlist for is now available.",
+            related_reference=str(listing_id),
+        )
+        entry.notified_at = timezone.now()
+        entry.save(update_fields=["notified_at"])
+        notified.append(entry)
+    return notified

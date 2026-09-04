@@ -220,3 +220,45 @@ def resolve_ticket(ticket):
     ticket.resolved_at = timezone.now()
     ticket.save(update_fields=["status", "resolved_at"])
     return ticket
+
+
+# ---------------------------------------------------------------------------
+# Gamified badges — explainable rules, no hidden scoring.
+# ---------------------------------------------------------------------------
+TOP_REVIEWER_MIN_REVIEWS = 10
+FIVE_SUCCESSFUL_DEALS_THRESHOLD = 5
+
+
+def evaluate_badges_for_user(user):
+    """Checks every badge rule for a user and awards any newly-earned
+    ones. Idempotent — running this repeatedly never re-awards a badge
+    already held (the model's unique_together also backstops this)."""
+    from django.db.models import Count
+    from .models import UserBadge, BadgeCode
+    from social.models import Review
+    from transactions.models import Booking, BookingStatus
+    from identity.models import KYCProfile, VerificationStatus
+
+    newly_awarded = []
+
+    review_count = Review.objects.filter(author=user).count()
+    if review_count >= TOP_REVIEWER_MIN_REVIEWS:
+        _, created = UserBadge.objects.get_or_create(user=user, badge_code=BadgeCode.TOP_REVIEWER)
+        if created:
+            newly_awarded.append(BadgeCode.TOP_REVIEWER)
+
+    try:
+        if user.kyc_profile.kyc_status == VerificationStatus.VERIFIED:
+            _, created = UserBadge.objects.get_or_create(user=user, badge_code=BadgeCode.VERIFIED_RENTER)
+            if created:
+                newly_awarded.append(BadgeCode.VERIFIED_RENTER)
+    except KYCProfile.DoesNotExist:
+        pass
+
+    completed_deals = Booking.objects.filter(requester=user, status=BookingStatus.COMPLETED).count()
+    if completed_deals >= FIVE_SUCCESSFUL_DEALS_THRESHOLD:
+        _, created = UserBadge.objects.get_or_create(user=user, badge_code=BadgeCode.FIVE_SUCCESSFUL_DEALS)
+        if created:
+            newly_awarded.append(BadgeCode.FIVE_SUCCESSFUL_DEALS)
+
+    return newly_awarded

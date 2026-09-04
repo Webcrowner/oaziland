@@ -53,3 +53,20 @@ class VisualSearchQuery(models.Model):
 
     class Meta:
         db_table = "visual_search_queries"
+
+
+class ListingWaitlistEntry(models.Model):
+    """WHY this is separate from student_hostels.Waitlist: that one is
+    scoped specifically to hostel unit types within one hostel/semester.
+    This is the GENERAL-PURPOSE version — anyone can join a waitlist for
+    ANY property.Listing that's currently taken, and gets notified the
+    moment it becomes available again."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="listing_waitlist_entries")
+    listing_id = models.UUIDField()
+    joined_at = models.DateTimeField(auto_now_add=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "listing_waitlist_entries"
+        unique_together = [("user", "listing_id")]
