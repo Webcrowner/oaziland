@@ -36,7 +36,7 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
       />
 
       <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="h-64 md:h-96 bg-gray-200 rounded-lg flex items-center justify-center text-gray-400 mb-6">
+        <div className="h-64 md:h-96 bg-gray-200 rounded-lg flex items-center justify-center text-gray-600 mb-6">
           No photo yet
         </div>
 

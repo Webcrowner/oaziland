@@ -10,12 +10,15 @@
   --color-foreground: var(--foreground);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* WHY there's no @media (prefers-color-scheme: dark) block here: the
+   leftover default template had one that flipped ONLY these two CSS
+   variables to dark values, while every component in this app uses
+   fixed light-theme Tailwind classes (bg-white, text-gray-600, etc.)
+   that never read these variables at all. A user with dark mode
+   enabled on their device would have gotten a jarring, half-broken
+   mix — a dark page background with light-mode-designed cards and
+   text on top. Removing it keeps the app consistently, deliberately
+   light until real dark-mode support is built as its own feature. */
 
 body {
   background: var(--background);

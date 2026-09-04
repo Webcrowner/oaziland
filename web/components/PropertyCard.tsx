@@ -15,7 +15,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
       href={`/listing/${listing.id}`}
       className="block border rounded-lg overflow-hidden bg-white transition-all duration-200 hover:shadow-lg hover:-translate-y-1"
     >
-      <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-400 text-sm">
+      <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-600 text-sm">
         No photo yet
       </div>
       <div className="p-4">
@@ -24,7 +24,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
             {listing.property_asset.type}
           </span>
           {finish && (
-            <span className="text-xs font-semibold uppercase text-[#C9A227] bg-[#1B2A4A]/5 px-2 py-1 rounded">
+            <span className="text-xs font-semibold uppercase text-white bg-[#1B2A4A] px-2 py-1 rounded">
               {finish}
             </span>
           )}
