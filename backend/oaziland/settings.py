@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     'flyers',
     'compliance',
     'hotels',
+    'events',
     'student',
     'services',
     'social',
