@@ -22,7 +22,16 @@
     "register": "Register",
     "brandName": "Oaziland",
     "address": "Messassi, Yaoundé, Cameroon",
-    "copyright": "© {year} Oaziland. All rights reserved."
+    "copyright": "© {year} Oaziland. All rights reserved.",
+    "buy": "Buy",
+    "sell": "Sell",
+    "services": "Services",
+    "company": "Company",
+    "about": "About Us",
+    "agents": "Agents",
+    "agencies": "Agencies",
+    "testimonials": "Testimonials",
+    "contact": "Contact"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -196,5 +205,63 @@
     "success": "Your listing was created as a draft — an admin will review it before it goes live.",
     "couldNotReachServer": "Could not reach the server.",
     "completeMfaSetup": "Complete two-factor authentication"
+  },
+  "ServicesPage": {
+    "title": "Services",
+    "subtitle": "Trusted partner services for every step of your property journey — photography, financing, moving, and more.",
+    "noServicesYet": "No services are listed yet.",
+    "priceFrom": "From {price} XAF",
+    "priceOnRequest": "Price on request"
+  },
+  "AgentsDirectoryPage": {
+    "title": "Our Agents",
+    "subtitle": "Verified real estate agents across Cameroon.",
+    "noAgentsYet": "No agents are listed yet.",
+    "listingsCount": "{count} active listing",
+    "listingsCountOther": "{count} active listings",
+    "verifiedBadge": "Verified"
+  },
+  "AgenciesDirectoryPage": {
+    "title": "Our Agencies",
+    "subtitle": "Registered real estate agencies across Cameroon.",
+    "noAgenciesYet": "No agencies are listed yet.",
+    "agentsCount": "{count} agent",
+    "agentsCountOther": "{count} agents"
+  },
+  "TestimonialsPage": {
+    "title": "What Our Users Say",
+    "subtitle": "Real feedback from people who found their next home, hotel, or venue through Oaziland.",
+    "noTestimonialsYet": "We're just getting started — real testimonials from our users will appear here soon."
+  },
+  "BuyPage": {
+    "title": "Buy a Property in Cameroon",
+    "subtitle": "Verified houses, land, and shops for sale, with secure Mobile Money payment and trusted local agents.",
+    "cta": "Browse Properties for Sale"
+  },
+  "SellPage": {
+    "title": "Sell Your Property",
+    "subtitle": "Reach thousands of verified buyers across Cameroon. List your property in minutes.",
+    "cta": "List Your Property"
+  },
+  "AboutPage": {
+    "title": "About Oaziland",
+    "intro": "Oaziland is a Glorentech™ platform, built to make finding and listing property, hotels, hostels, and venues across Cameroon simple, verified, and trustworthy.",
+    "missionTitle": "Our Mission",
+    "missionText": "To connect landlords, agents, agencies, and everyday people directly and safely — whether you're renting, buying, selling, or booking a stay.",
+    "basedTitle": "Based in Cameroon",
+    "basedText": "Headquartered in Messassi, Yaoundé, and built for the way people actually search for property and services here — including WhatsApp-first communication and Mobile Money payments."
+  },
+  "ContactPage": {
+    "title": "Contact Us",
+    "subtitle": "Questions, feedback, or partnership inquiries — we'd like to hear from you.",
+    "nameLabel": "Your Name",
+    "emailLabel": "Your Email",
+    "messageLabel": "Message",
+    "send": "Send Message",
+    "sending": "Sending...",
+    "success": "Thank you — your message has been sent.",
+    "error": "Could not send your message. Please try again.",
+    "addressTitle": "Our Address",
+    "address": "Messassi, Yaoundé, Cameroon"
   }
 }

@@ -22,7 +22,16 @@
     "register": "S'inscrire",
     "brandName": "Oaziland",
     "address": "Messassi, Yaoundé, Cameroun",
-    "copyright": "© {year} Oaziland. Tous droits réservés."
+    "copyright": "© {year} Oaziland. Tous droits réservés.",
+    "buy": "Acheter",
+    "sell": "Vendre",
+    "services": "Services",
+    "company": "Entreprise",
+    "about": "À Propos",
+    "agents": "Agents",
+    "agencies": "Agences",
+    "testimonials": "Témoignages",
+    "contact": "Contact"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -196,5 +205,63 @@
     "success": "Votre annonce a été créée en tant que brouillon — un administrateur l'examinera avant sa publication.",
     "couldNotReachServer": "Impossible de joindre le serveur.",
     "completeMfaSetup": "Terminer l'authentification à deux facteurs"
+  },
+  "ServicesPage": {
+    "title": "Services",
+    "subtitle": "Des services partenaires de confiance à chaque étape de votre projet immobilier — photographie, financement, déménagement, et plus.",
+    "noServicesYet": "Aucun service n'est encore répertorié.",
+    "priceFrom": "À partir de {price} XAF",
+    "priceOnRequest": "Prix sur demande"
+  },
+  "AgentsDirectoryPage": {
+    "title": "Nos Agents",
+    "subtitle": "Des agents immobiliers vérifiés à travers le Cameroun.",
+    "noAgentsYet": "Aucun agent n'est encore répertorié.",
+    "listingsCount": "{count} annonce active",
+    "listingsCountOther": "{count} annonces actives",
+    "verifiedBadge": "Vérifié"
+  },
+  "AgenciesDirectoryPage": {
+    "title": "Nos Agences",
+    "subtitle": "Des agences immobilières enregistrées à travers le Cameroun.",
+    "noAgenciesYet": "Aucune agence n'est encore répertoriée.",
+    "agentsCount": "{count} agent",
+    "agentsCountOther": "{count} agents"
+  },
+  "TestimonialsPage": {
+    "title": "Ce Que Disent Nos Utilisateurs",
+    "subtitle": "De vrais retours de personnes ayant trouvé leur prochain logement, hôtel ou salle via Oaziland.",
+    "noTestimonialsYet": "Nous ne faisons que commencer — de vrais témoignages de nos utilisateurs apparaîtront ici bientôt."
+  },
+  "BuyPage": {
+    "title": "Acheter une Propriété au Cameroun",
+    "subtitle": "Des maisons, terrains et boutiques vérifiés à vendre, avec paiement Mobile Money sécurisé et agents locaux de confiance.",
+    "cta": "Parcourir les Propriétés à Vendre"
+  },
+  "SellPage": {
+    "title": "Vendez Votre Propriété",
+    "subtitle": "Atteignez des milliers d'acheteurs vérifiés à travers le Cameroun. Publiez votre propriété en quelques minutes.",
+    "cta": "Publier Votre Propriété"
+  },
+  "AboutPage": {
+    "title": "À Propos d'Oaziland",
+    "intro": "Oaziland est une plateforme Glorentech™, conçue pour simplifier la recherche et la publication de propriétés, hôtels, résidences et salles à travers le Cameroun, de manière vérifiée et fiable.",
+    "missionTitle": "Notre Mission",
+    "missionText": "Connecter propriétaires, agents, agences et particuliers directement et en toute sécurité — que vous louiez, achetiez, vendiez ou réserviez un séjour.",
+    "basedTitle": "Basé au Cameroun",
+    "basedText": "Basé à Messassi, Yaoundé, et conçu pour la façon dont les gens recherchent réellement des propriétés et services ici — y compris la communication via WhatsApp et les paiements Mobile Money."
+  },
+  "ContactPage": {
+    "title": "Contactez-Nous",
+    "subtitle": "Questions, retours ou demandes de partenariat — nous aimerions vous entendre.",
+    "nameLabel": "Votre Nom",
+    "emailLabel": "Votre E-mail",
+    "messageLabel": "Message",
+    "send": "Envoyer le Message",
+    "sending": "Envoi en cours...",
+    "success": "Merci — votre message a été envoyé.",
+    "error": "Impossible d'envoyer votre message. Veuillez réessayer.",
+    "addressTitle": "Notre Adresse",
+    "address": "Messassi, Yaoundé, Cameroun"
   }
 }

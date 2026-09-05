@@ -25,6 +25,7 @@ from student_hostels.views import StudentHostelViewSet, MyRoomAllocationViewSet
 from guest_houses.views import GuestHouseLodgeViewSet
 from discovery.views import WantedListingViewSet
 from catalogue.views import PartnerServiceCategoryViewSet
+from engagement.views import ContactMessageView
 from agency.views import AgentPublicProfileView, AgencyPublicProfileView, MyAgentDashboardView, AgentDirectoryView, AgencyDirectoryView
 
 router = DefaultRouter()
@@ -89,6 +90,7 @@ urlpatterns = [
     path('api/agencies/', AgencyDirectoryView.as_view(), name='agency-directory'),
     path('api/my-agent-dashboard/', MyAgentDashboardView.as_view(), name='my-agent-dashboard'),
     path('api/testimonials/', TestimonialsView.as_view(), name='testimonials'),
+    path('api/contact/', ContactMessageView.as_view(), name='contact'),
 
     # Interactive API documentation — the acceptance criteria's
     # explicit requirement: "open the Swagger documentation yourself."

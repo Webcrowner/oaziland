@@ -257,3 +257,20 @@ class UserBadge(models.Model):
     class Meta:
         db_table = "user_badges"
         unique_together = [("user", "badge_code")]
+
+
+class ContactMessage(models.Model):
+    """A genuinely public 'Contact Us' submission — deliberately
+    separate from SupportTicket, which requires an authenticated user
+    (submitted_by is a required FK). A prospective user reaching out
+    BEFORE ever creating an account is a real, common case a contact
+    form must handle, which SupportTicket structurally cannot."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200)
+    email = models.EmailField()
+    message = models.TextField()
+    resolved = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "contact_messages"

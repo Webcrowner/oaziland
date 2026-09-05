@@ -249,6 +249,82 @@ export async function getMfaStatus(accessToken: string): Promise<{ mfa_enabled: 
   return res.json();
 }
 
+export interface ServiceOffering {
+  id: string;
+  name: string;
+  category_name: string;
+  description: string;
+  sourced_via: string;
+  price_hint_xaf: string | null;
+}
+
+export interface ServiceCategory {
+  id: string;
+  name: string;
+  offerings: ServiceOffering[];
+}
+
+export async function listServiceCategories(): Promise<PaginatedResponse<ServiceCategory>> {
+  const res = await fetch(`${API_BASE_URL}/api/service-categories/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Service catalogue fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AgentDirectoryEntry {
+  user_id: string;
+  full_name: string;
+  is_kyc_verified: boolean;
+  average_rating: number | null;
+  rating_count: number;
+  active_listing_count: number;
+  agency_name: string | null;
+}
+
+export async function listAgents(): Promise<{ count: number; results: AgentDirectoryEntry[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/agents/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Agent directory fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AgencyDirectoryEntry {
+  agency_id: string;
+  agency_name: string;
+  registration_number: string;
+  agent_count: number;
+  average_rating: number | null;
+  rating_count: number;
+  active_listing_count: number;
+}
+
+export async function listAgencies(): Promise<{ count: number; results: AgencyDirectoryEntry[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/agencies/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Agency directory fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface Testimonial {
+  author_name: string;
+  score: number;
+  text: string;
+  created_at: string;
+}
+
+export async function listTestimonials(): Promise<{ count: number; results: Testimonial[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/testimonials/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Testimonials fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function submitContactMessage(payload: { name: string; email: string; message: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/contact/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Contact submission failed");
+  return res.json();
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;

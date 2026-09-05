@@ -264,3 +264,24 @@ def evaluate_badges_for_user(user):
             newly_awarded.append(BadgeCode.FIVE_SUCCESSFUL_DEALS)
 
     return newly_awarded
+
+
+def submit_contact_message(*, name: str, email: str, message: str):
+    """Notifies every AdminProfile user via the existing notification
+    system — a genuinely public message needs SOMEONE real to see it,
+    not just a row silently added to a table nobody checks."""
+    from .models import ContactMessage
+    from identity.models import AdminProfile
+    from notifications.services import notify
+
+    contact_message = ContactMessage.objects.create(name=name, email=email, message=message)
+
+    for admin_profile in AdminProfile.objects.select_related("user"):
+        notify(
+            recipient=admin_profile.user, notification_type="CONTACT_FORM_SUBMISSION", channel="IN_APP",
+            title=f"New contact message from {name}",
+            message=f"{name} ({email}) wrote: {message[:200]}",
+            related_reference=str(contact_message.id),
+        )
+
+    return contact_message
