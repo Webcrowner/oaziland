@@ -102,12 +102,22 @@ def check_saved_searches_for_new_listing(listing):
 
 
 def publish_listing_and_notify(listing):
-    """The enforced publish pathway for listings that also triggers
-    saved-search alerts — mirrors publish_post_with_moderation's role
-    for posts. Real application code should call this, not
-    listing.publish() directly, once moderation (Prompt 9) and saved-
-    search notification both need to happen."""
-    listing.publish()
+    """THE real, complete enforced publish pathway for a Listing —
+    composes BOTH of the two 'enforced pathways' that existed
+    separately and had never actually been combined:
+    trust_safety.publish_listing_with_moderation() (blocks publishing
+    outright on AUTO_REMOVE) and this function's own saved-search
+    alerting. WHY this was a real bug, not just a missing feature: the
+    real API's approve() endpoint had to call ONE of these two
+    functions, and whichever one it called, the OTHER'S protection
+    was silently skipped — moderation was never actually applied to
+    any real, admin-approved listing, or saved-search alerts never
+    fired, depending on which single function got wired in. Fixed by
+    making this the one true pathway that does both, in the right order:
+    moderation gates publishing; only a successfully published listing
+    can match a saved search."""
+    from trust_safety.services import publish_listing_with_moderation
+    publish_listing_with_moderation(listing)
     return check_saved_searches_for_new_listing(listing)
 
 

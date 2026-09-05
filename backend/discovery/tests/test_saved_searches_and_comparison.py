@@ -111,3 +111,29 @@ def test_property_comparison_enforces_the_2_to_4_limit():
 
     too_many = client.post("/api/my-comparison/", {"listing_ids": [f"1111111{i}-1111-1111-1111-111111111111" for i in range(5)]}, format="json")
     assert too_many.status_code == 400
+
+
+@pytest.mark.django_db
+def test_approve_endpoint_now_actually_enforces_moderation_not_just_notifications(quarter):
+    """A THIRD real bug in the same class as the saved-search one:
+    publish_listing_with_moderation() (blocks AUTO_REMOVE content) and
+    publish_listing_and_notify() (saved-search alerts) each existed as
+    a separate 'enforced pathway', built without knowing about each
+    other — the real approve() endpoint could only call ONE of them,
+    silently skipping the other's protection. Confirms a listing with
+    moderation-blocked content is genuinely rejected by the real API,
+    not just by a bare listing.publish() call."""
+    from identity.models import AdminProfile
+
+    landlord = User.objects.create(username="moderation_gap_landlord", phone="+237699666609")
+    admin_user = User.objects.create(username="moderation_gap_admin", phone="+237699666610")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+
+    house = House.objects.create(owner=landlord, quarter=quarter, type="HOUSE", description="This is a badword description.")
+    listing = Listing.objects.create(property_asset=house, listed_by=landlord, listing_type=ListingType.RENT, status=ListingStatus.PENDING_REVIEW, price_xaf=Decimal("80000"))
+
+    response = _auth_client(admin_user).post(f"/api/listings/{listing.id}/approve/")
+    assert response.status_code == 400
+
+    listing.refresh_from_db()
+    assert listing.status == ListingStatus.PENDING_REVIEW  # never actually published

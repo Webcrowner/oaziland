@@ -110,10 +110,21 @@ class ListingViewSet(viewsets.ModelViewSet):
         SKIPPED check_saved_searches_for_new_listing() entirely —
         meaning saved-search alerts had never actually fired for any
         real, admin-approved listing through the real API, despite
-        the notification-triggering function existing and being tested."""
+        the notification-triggering function existing and being tested.
+
+        WHY ContentBlockedError is caught explicitly here: without
+        this, a moderation-blocked listing crashed with an uncaught
+        500 instead of a clean, expected 400 — found by this
+        endpoint's own test on the first run, the same class of gap as
+        AlreadyEnrolledError needing to be caught in the training
+        enrollment endpoint."""
         from discovery.services import publish_listing_and_notify
+        from trust_safety.services import ContentBlockedError
         listing = self.get_object()
-        publish_listing_and_notify(listing)
+        try:
+            publish_listing_and_notify(listing)
+        except ContentBlockedError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
