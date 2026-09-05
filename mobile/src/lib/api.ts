@@ -310,3 +310,37 @@ export async function listWantedListings(): Promise<PaginatedResponse<WantedList
   if (!res.ok) throw new Error(`Wanted-listing fetch failed: ${res.status}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Notifications inbox — mirrors the web app's real notifications API.
+// ---------------------------------------------------------------------------
+export interface AppNotification {
+  id: string;
+  notification_type: string;
+  title: string;
+  message: string;
+  channel: string;
+  delivered: boolean;
+  read_at: string | null;
+  created_at: string;
+}
+
+export async function listMyNotifications(): Promise<PaginatedResponse<AppNotification>> {
+  const res = await fetch(`${API_BASE_URL}/api/my-notifications/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch notifications");
+  return res.json();
+}
+
+export async function markNotificationRead(id: string) {
+  return fetch(`${API_BASE_URL}/api/my-notifications/${id}/mark_read/`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+}
+
+export async function markAllNotificationsRead() {
+  return fetch(`${API_BASE_URL}/api/my-notifications/mark-all-read/`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+}

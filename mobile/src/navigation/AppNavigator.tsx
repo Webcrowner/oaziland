@@ -13,6 +13,8 @@ import EventsScreen from "../screens/EventsScreen";
 import GuestHousesScreen from "../screens/GuestHousesScreen";
 import StudentHostelsScreen from "../screens/StudentHostelsScreen";
 import WantedBoardScreen from "../screens/WantedBoardScreen";
+import FavoritesScreen from "../screens/FavoritesScreen";
+import NotificationsScreen from "../screens/NotificationsScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -27,6 +29,8 @@ export type RootStackParamList = {
   GuestHouses: undefined;
   StudentHostels: undefined;
   WantedBoard: undefined;
+  Favorites: undefined;
+  Notifications: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -60,6 +64,8 @@ export default function AppNavigator() {
         <Stack.Screen name="GuestHouses" component={GuestHousesScreen} options={{ title: "Guest Houses" }} />
         <Stack.Screen name="StudentHostels" component={StudentHostelsScreen} options={{ title: "Student Hostels" }} />
         <Stack.Screen name="WantedBoard" component={WantedBoardScreen} options={{ title: "Looking For..." }} />
+        <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: "Saved Listings" }} />
+        <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
