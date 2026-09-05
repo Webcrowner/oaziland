@@ -11,7 +11,7 @@ import MfaSetupScreen from "../screens/MfaSetupScreen";
 
 export type RootStackParamList = {
   Home: undefined;
-  Search: { quarterId?: string; propertyType?: string; finishLevel?: string } | undefined;
+  Search: { quarterId?: string; propertyType?: string; finishLevel?: string; listingType?: string } | undefined;
   ListingDetail: { listingId: string };
   Login: undefined;
   Register: undefined;

@@ -15,6 +15,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "Home">;
 export default function HomeScreen({ navigation }: Props) {
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [selectedQuarter, setSelectedQuarter] = useState<string | undefined>();
+  const [listingType, setListingType] = useState<"RENT" | "SALE">("RENT");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,6 +29,23 @@ export default function HomeScreen({ navigation }: Props) {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Find your next home in Cameroon</Text>
       <Text style={styles.subtitle}>Verified listings, secure Mobile Money payments.</Text>
+
+      {/* Rent vs Sale — the platform's two most basic categories,
+          given their own explicit toggle, matching the exact same
+          redesign made on web earlier this session. */}
+      <View style={styles.listingTypeRow}>
+        {(["RENT", "SALE"] as const).map((type) => (
+          <TouchableOpacity
+            key={type}
+            style={[styles.listingTypeToggle, listingType === type && styles.listingTypeToggleSelected]}
+            onPress={() => setListingType(type)}
+          >
+            <Text style={[styles.listingTypeText, listingType === type && styles.listingTypeTextSelected]}>
+              {type === "RENT" ? "For Rent" : "For Sale"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {loading ? (
         <ActivityIndicator color="#1B2A4A" style={{ marginTop: 20 }} />
@@ -47,7 +65,7 @@ export default function HomeScreen({ navigation }: Props) {
 
       <TouchableOpacity
         style={styles.searchButton}
-        onPress={() => navigation.navigate("Search", { quarterId: selectedQuarter })}
+        onPress={() => navigation.navigate("Search", { quarterId: selectedQuarter, listingType })}
       >
         <Text style={styles.searchButtonText}>Search Properties</Text>
       </TouchableOpacity>
@@ -72,6 +90,11 @@ const styles = StyleSheet.create({
   content: { padding: 20 },
   title: { fontSize: 26, fontWeight: "bold", color: "#1B2A4A", marginBottom: 6 },
   subtitle: { fontSize: 14, color: "#6B7280", marginBottom: 20 },
+  listingTypeRow: { flexDirection: "row", borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: "#D1D5DB", marginBottom: 16 },
+  listingTypeToggle: { flex: 1, paddingVertical: 12, alignItems: "center" },
+  listingTypeToggleSelected: { backgroundColor: "#1B2A4A" },
+  listingTypeText: { color: "#374151", fontWeight: "600" },
+  listingTypeTextSelected: { color: "#fff" },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 20 },
   chip: { borderWidth: 1, borderColor: "#1B2A4A", borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14 },
   chipSelected: { backgroundColor: "#1B2A4A" },
