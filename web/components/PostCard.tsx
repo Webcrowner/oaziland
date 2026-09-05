@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { reactToPost, getPostComments, addPostComment, type SocialPost, type PostComment } from "@/lib/api";
 
@@ -8,12 +8,12 @@ const EMOJIS: Record<string, string> = { LIKE: "👍", LOVE: "❤️", LAUGH: "�
 
 export default function PostCard({ post }: { post: SocialPost }) {
   const t = useTranslations("FeedPage");
-  const locale = useLocale();
   const [reactionCounts, setReactionCounts] = useState(post.reaction_counts);
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<PostComment[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [commentCount, setCommentCount] = useState(post.comment_count);
+  const [error, setError] = useState("");
 
   async function handleReact(emoji: string) {
     const token = localStorage.getItem("access_token");
@@ -21,14 +21,24 @@ export default function PostCard({ post }: { post: SocialPost }) {
       window.location.href = "/login";
       return;
     }
-    const result = await reactToPost(post.id, emoji, token);
-    setReactionCounts(result.reaction_counts);
+    setError("");
+    try {
+      const result = await reactToPost(post.id, emoji, token);
+      setReactionCounts(result.reaction_counts);
+    } catch {
+      setError(t("actionFailed"));
+    }
   }
 
   async function toggleComments() {
     if (!showComments) {
-      const fetched = await getPostComments(post.id);
-      setComments(fetched);
+      try {
+        const fetched = await getPostComments(post.id);
+        setComments(fetched);
+      } catch {
+        setError(t("actionFailed"));
+        return;
+      }
     }
     setShowComments(!showComments);
   }
@@ -41,10 +51,15 @@ export default function PostCard({ post }: { post: SocialPost }) {
       return;
     }
     if (!commentDraft.trim()) return;
-    const comment = await addPostComment(post.id, commentDraft, token);
-    setComments((prev) => [...prev, comment]);
-    setCommentDraft("");
-    setCommentCount((c) => c + 1);
+    setError("");
+    try {
+      const comment = await addPostComment(post.id, commentDraft, token);
+      setComments((prev) => [...prev, comment]);
+      setCommentDraft("");
+      setCommentCount((c) => c + 1);
+    } catch {
+      setError(t("actionFailed"));
+    }
   }
 
   return (
@@ -89,6 +104,8 @@ export default function PostCard({ post }: { post: SocialPost }) {
           💬 {t("comments", { count: commentCount })}
         </button>
       </div>
+
+      {error && <p className="text-red-600 text-xs px-4 pb-2">{error}</p>}
 
       {showComments && (
         <div className="p-4 border-t bg-gray-50">

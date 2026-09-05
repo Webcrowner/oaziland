@@ -11,6 +11,7 @@ export default function PremiumPage() {
   const [phone, setPhone] = useState("");
   const [status, setStatus] = useState<"idle" | "subscribing">("idle");
   const [error, setError] = useState("");
+  const [cancelled, setCancelled] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -40,7 +41,12 @@ export default function PremiumPage() {
   async function handleCancel() {
     const token = localStorage.getItem("access_token");
     if (!token) return;
-    await cancelCreatorPremium(token);
+    try {
+      await cancelCreatorPremium(token);
+      setCancelled(true);
+    } catch {
+      setError(t("cancelFailed"));
+    }
   }
 
   if (!loggedIn) {
@@ -69,7 +75,12 @@ export default function PremiumPage() {
       {isPremium ? (
         <>
           <p className="text-green-700 font-semibold mb-4">✓ {t("alreadySubscribed")}</p>
-          <button onClick={handleCancel} className="text-sm text-red-600 underline">{t("cancel")}</button>
+          {cancelled ? (
+            <p className="text-sm text-gray-600">{t("cancelConfirmed")}</p>
+          ) : (
+            <button onClick={handleCancel} className="text-sm text-red-600 underline">{t("cancel")}</button>
+          )}
+          {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
         </>
       ) : (
         <form onSubmit={handleSubscribe} className="flex flex-col gap-3">

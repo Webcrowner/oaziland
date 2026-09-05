@@ -13,6 +13,7 @@ export default function FavoriteButton({ listingId, variant = "card" }: { listin
   const t = useTranslations(variant === "card" ? "PropertyCard" : "ListingDetailPage");
   const [isFavorited, setIsFavorited] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -31,9 +32,12 @@ export default function FavoriteButton({ listingId, variant = "card" }: { listin
       return;
     }
     setLoading(true);
+    setFailed(false);
     try {
       const result = await toggleFavoriteListing(listingId, token);
       setIsFavorited(result.is_favorited);
+    } catch {
+      setFailed(true);
     } finally {
       setLoading(false);
     }
@@ -55,14 +59,17 @@ export default function FavoriteButton({ listingId, variant = "card" }: { listin
   }
 
   return (
-    <button
-      onClick={handleToggle}
-      disabled={loading}
-      className={`font-semibold px-4 py-2 rounded border ${
-        isFavorited ? "bg-[#C9A227] text-white border-[#C9A227]" : "border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50"
-      }`}
-    >
-      {isFavorited ? "★ " + t("saved") : "☆ " + t("save")}
-    </button>
+    <div>
+      <button
+        onClick={handleToggle}
+        disabled={loading}
+        className={`font-semibold px-4 py-2 rounded border ${
+          isFavorited ? "bg-[#C9A227] text-white border-[#C9A227]" : "border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50"
+        }`}
+      >
+        {isFavorited ? "★ " + t("saved") : "☆ " + t("save")}
+      </button>
+      {failed && <p className="text-red-600 text-xs mt-1">{t("saveFailed")}</p>}
+    </div>
   );
 }

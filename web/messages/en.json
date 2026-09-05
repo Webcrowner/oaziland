@@ -104,7 +104,8 @@
     "saved": "Saved ✓",
     "compare": "Add to Compare",
     "removeFromCompare": "Remove from Compare",
-    "shareOnSocial": "Share on Social Feed"
+    "shareOnSocial": "Share on Social Feed",
+    "saveFailed": "Could not save. Please try again."
   },
   "LoginPage": {
     "title": "Sign in",
@@ -461,7 +462,8 @@
     "verifiedBadge": "Premium",
     "sponsoredBadge": "Sponsored",
     "realEstateBadge": "Property",
-    "comments": "{count} comments"
+    "comments": "{count} comments",
+    "actionFailed": "That action failed. Please try again."
   },
   "CreatePostPage": {
     "title": "Create a Post",
@@ -486,6 +488,8 @@
     "alreadySubscribed": "You're already a Premium subscriber.",
     "cancel": "Cancel Subscription",
     "phonePlaceholder": "Phone number for payment",
-    "signInRequired": "Sign in to subscribe"
+    "signInRequired": "Sign in to subscribe",
+    "cancelConfirmed": "Your subscription has been cancelled. Perks remain active until the end of this period.",
+    "cancelFailed": "Could not cancel your subscription. Please try again."
   }
 }

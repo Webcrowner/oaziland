@@ -18,6 +18,7 @@ export default function CompareButton({ listingId }: { listingId: string }) {
   const t = useTranslations("ListingDetailPage");
   const [staged, setStaged] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const raw = localStorage.getItem(STAGING_KEY);
@@ -34,22 +35,36 @@ export default function CompareButton({ listingId }: { listingId: string }) {
     }
 
     const next = isStaged ? staged.filter((id) => id !== listingId) : [...staged, listingId].slice(-4);
-    localStorage.setItem(STAGING_KEY, JSON.stringify(next));
-    setStaged(next);
+    setFailed(false);
 
     if (next.length >= 2) {
       setSaving(true);
       try {
         await setMyComparison(next, token);
+        localStorage.setItem(STAGING_KEY, JSON.stringify(next));
+        setStaged(next);
+      } catch {
+        // WHY the local state is never updated on failure: staging
+        // locally BEFORE a successful backend sync would show this
+        // listing as "in comparison" when the server never actually
+        // received it — the UI would silently lie about what's saved.
+        setFailed(true);
       } finally {
         setSaving(false);
       }
+    } else {
+      // Fewer than 2 items never touches the backend at all — always safe to update locally.
+      localStorage.setItem(STAGING_KEY, JSON.stringify(next));
+      setStaged(next);
     }
   }
 
   return (
-    <button onClick={handleToggle} disabled={saving} className="font-semibold px-4 py-2 rounded border border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50 disabled:opacity-50">
-      {isStaged ? t("removeFromCompare") : t("compare")}
-    </button>
+    <div>
+      <button onClick={handleToggle} disabled={saving} className="font-semibold px-4 py-2 rounded border border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50 disabled:opacity-50">
+        {isStaged ? t("removeFromCompare") : t("compare")}
+      </button>
+      {failed && <p className="text-red-600 text-xs mt-1">{t("saveFailed")}</p>}
+    </div>
   );
 }

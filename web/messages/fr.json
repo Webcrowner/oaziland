@@ -104,7 +104,8 @@
     "saved": "Enregistré ✓",
     "compare": "Ajouter à la Comparaison",
     "removeFromCompare": "Retirer de la Comparaison",
-    "shareOnSocial": "Partager sur le Fil Social"
+    "shareOnSocial": "Partager sur le Fil Social",
+    "saveFailed": "Impossible d'enregistrer. Veuillez réessayer."
   },
   "LoginPage": {
     "title": "Se connecter",
@@ -461,7 +462,8 @@
     "verifiedBadge": "Premium",
     "sponsoredBadge": "Sponsorisé",
     "realEstateBadge": "Propriété",
-    "comments": "{count} commentaires"
+    "comments": "{count} commentaires",
+    "actionFailed": "Cette action a échoué. Veuillez réessayer."
   },
   "CreatePostPage": {
     "title": "Créer une Publication",
@@ -486,6 +488,8 @@
     "alreadySubscribed": "Vous êtes déjà abonné Premium.",
     "cancel": "Annuler l'Abonnement",
     "phonePlaceholder": "Numéro de téléphone pour le paiement",
-    "signInRequired": "Connectez-vous pour vous abonner"
+    "signInRequired": "Connectez-vous pour vous abonner",
+    "cancelConfirmed": "Votre abonnement a été annulé. Les avantages restent actifs jusqu'à la fin de cette période.",
+    "cancelFailed": "Impossible d'annuler votre abonnement. Veuillez réessayer."
   }
 }
