@@ -50,6 +50,10 @@ export default function Footer() {
             <li><Link href="/login" className="hover:text-[#8A6D14] transition-colors">{t("signIn")}</Link></li>
             <li><Link href="/register" className="hover:text-[#8A6D14] transition-colors">{t("register")}</Link></li>
             <li><Link href="/messages" className="hover:text-[#8A6D14] transition-colors">{t("messages")}</Link></li>
+            <li><Link href="/notifications" className="hover:text-[#8A6D14] transition-colors">{t("notifications")}</Link></li>
+            <li><Link href="/favorites" className="hover:text-[#8A6D14] transition-colors">{t("favorites")}</Link></li>
+            <li><Link href="/saved-searches" className="hover:text-[#8A6D14] transition-colors">{t("savedSearches")}</Link></li>
+            <li><Link href="/compare" className="hover:text-[#8A6D14] transition-colors">{t("compare")}</Link></li>
             <li><Link href="/dashboard" className="hover:text-[#8A6D14] transition-colors">{t("dashboard")}</Link></li>
             <li><Link href="/referrals" className="hover:text-[#8A6D14] transition-colors">{t("referrals")}</Link></li>
           </ul>

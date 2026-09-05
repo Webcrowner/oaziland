@@ -1,0 +1,68 @@
+"use client";
+import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
+import { getMyFavorites, toggleFavoriteListing } from "@/lib/api";
+
+/**
+ * A small, self-contained client island — kept separate from
+ * PropertyCard (and the listing detail page) so those stay server-
+ * rendered for SEO, exactly like ContactListingButton does for the
+ * WhatsApp contact action.
+ */
+export default function FavoriteButton({ listingId, variant = "card" }: { listingId: string; variant?: "card" | "detail" }) {
+  const t = useTranslations(variant === "card" ? "PropertyCard" : "ListingDetailPage");
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    getMyFavorites(token)
+      .then((data) => setIsFavorited(data.listing_ids.includes(listingId)))
+      .catch(() => {});
+  }, [listingId]);
+
+  async function handleToggle(e: React.MouseEvent) {
+    e.preventDefault(); // stop the surrounding card <Link> from navigating
+    e.stopPropagation();
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await toggleFavoriteListing(listingId, token);
+      setIsFavorited(result.is_favorited);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (variant === "card") {
+    return (
+      <button
+        onClick={handleToggle}
+        disabled={loading}
+        className={`absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center text-lg transition-colors ${
+          isFavorited ? "bg-[#C9A227] text-white" : "bg-white/90 text-gray-500 hover:text-[#C9A227]"
+        }`}
+        aria-label={t(isFavorited ? "saved" : "save")}
+      >
+        {isFavorited ? "★" : "☆"}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleToggle}
+      disabled={loading}
+      className={`font-semibold px-4 py-2 rounded border ${
+        isFavorited ? "bg-[#C9A227] text-white border-[#C9A227]" : "border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50"
+      }`}
+    >
+      {isFavorited ? "★ " + t("saved") : "☆ " + t("save")}
+    </button>
+  );
+}

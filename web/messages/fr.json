@@ -36,7 +36,11 @@
     "howItWorks": "Comment Ça Marche",
     "referrals": "Parrainer un Ami",
     "messages": "Messages",
-    "dashboard": "Mon Tableau de Bord"
+    "dashboard": "Mon Tableau de Bord",
+    "notifications": "Notifications",
+    "favorites": "Annonces Enregistrées",
+    "savedSearches": "Recherches Enregistrées",
+    "compare": "Comparer"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -46,7 +50,9 @@
     "listerOwnerSale": "Propriétaire",
     "listerAgent": "Agent",
     "listerAgency": "Agence",
-    "postedOn": "Publié le {date}"
+    "postedOn": "Publié le {date}",
+    "save": "Enregistrer",
+    "saved": "Enregistré"
   },
   "HomePage": {
     "heroTitle": "Trouvez votre prochain logement au Cameroun",
@@ -91,7 +97,11 @@
     "listerAgentFull": "Publié par un Agent",
     "listerAgencyFull": "Publié par une Agence",
     "postedOnFull": "Publié le {date}",
-    "locationOnMap": "Emplacement"
+    "locationOnMap": "Emplacement",
+    "save": "Enregistrer",
+    "saved": "Enregistré ✓",
+    "compare": "Ajouter à la Comparaison",
+    "removeFromCompare": "Retirer de la Comparaison"
   },
   "LoginPage": {
     "title": "Se connecter",
@@ -400,5 +410,41 @@
     "signInRequired": "Connectez-vous pour accéder à la console d'administration",
     "submit": "Soumettre",
     "actionFailed": "Cette action a échoué. Veuillez réessayer."
+  },
+  "FavoritesPage": {
+    "title": "Annonces Enregistrées",
+    "subtitle": "Les propriétés que vous avez enregistrées pour plus tard.",
+    "noFavoritesYet": "Vous n'avez encore enregistré aucune annonce.",
+    "signInRequired": "Connectez-vous pour voir vos annonces enregistrées"
+  },
+  "SavedSearchesPage": {
+    "title": "Recherches Enregistrées",
+    "subtitle": "Soyez averti automatiquement quand une nouvelle annonce correspond.",
+    "noSavedSearchesYet": "Vous n'avez encore enregistré aucune recherche. Enregistrez-en une depuis la page de recherche.",
+    "nameLabel": "Nommez cette recherche",
+    "delete": "Supprimer",
+    "lastNotified": "Dernière notification : {date}",
+    "neverNotified": "Aucune correspondance pour le moment",
+    "signInRequired": "Connectez-vous pour gérer vos recherches enregistrées",
+    "saveThisSearch": "Enregistrer Cette Recherche",
+    "searchSaved": "Recherche enregistrée ! Vous serez averti des nouvelles correspondances."
+  },
+  "ComparisonPage": {
+    "title": "Comparer les Propriétés",
+    "subtitle": "Comparaison côte à côte de vos propriétés sélectionnées.",
+    "noComparisonYet": "Ajoutez 2 à 4 annonces à comparer depuis n'importe quelle page d'annonce.",
+    "signInRequired": "Connectez-vous pour comparer des propriétés",
+    "price": "Prix",
+    "location": "Emplacement",
+    "type": "Type",
+    "size": "Superficie",
+    "finish": "Finition",
+    "viewListing": "Voir l'Annonce"
+  },
+  "NotificationsPage": {
+    "title": "Notifications",
+    "noNotificationsYet": "Vous n'avez aucune notification pour le moment.",
+    "markAllRead": "Tout marquer comme lu",
+    "signInRequired": "Connectez-vous pour voir vos notifications"
   }
 }

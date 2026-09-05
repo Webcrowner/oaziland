@@ -1,5 +1,6 @@
 import { useTranslations, useLocale } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import FavoriteButton from "@/components/FavoriteButton";
 import type { Listing } from "@/lib/api";
 
 const LISTER_ROLE_LABEL_KEYS: Record<string, string> = {
@@ -42,8 +43,9 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
       href={`/listing/${listing.id}`}
       className="block border rounded-lg overflow-hidden bg-white transition-all duration-200 hover:shadow-lg hover:-translate-y-1"
     >
-      <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-600 text-sm">
+      <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-600 text-sm relative">
         {t("noPhotoYet")}
+        <FavoriteButton listingId={listing.id} variant="card" />
       </div>
       <div className="p-4">
         <div className="flex items-center gap-2 mb-1 flex-wrap">

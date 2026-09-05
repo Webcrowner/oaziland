@@ -36,7 +36,7 @@ export default function ContactListingButton({ listingId }: { listingId: string 
   }
 
   return (
-    <div className="mt-8">
+    <div>
       <button
         onClick={handleContact}
         disabled={loading}

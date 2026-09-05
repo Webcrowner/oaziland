@@ -578,6 +578,107 @@ export async function resolveDispute(id: string, outcome: "RELEASE" | "REFUND", 
   });
 }
 
+export async function getMyFavorites(accessToken: string): Promise<{ listing_ids: string[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/my-favorites/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch favorites");
+  return res.json();
+}
+
+export async function toggleFavoriteListing(listingId: string, accessToken: string): Promise<{ is_favorited: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/listings/${listingId}/toggle-favorite/`, {
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not update favorite");
+  return res.json();
+}
+
+export interface SavedSearch {
+  id: string;
+  name: string;
+  filters: Record<string, string>;
+  last_notified_at: string | null;
+}
+
+export async function listSavedSearches(accessToken: string): Promise<{ count: number; results: SavedSearch[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/saved-searches/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch saved searches");
+  return res.json();
+}
+
+export async function createSavedSearch(name: string, filters: Record<string, string>, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/saved-searches/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ name, filters }),
+  });
+  if (!res.ok) throw new Error("Could not create saved search");
+  return res.json();
+}
+
+export async function deleteSavedSearch(id: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/saved-searches/${id}/`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export interface PropertyComparisonData {
+  id: string;
+  listing_ids: string[];
+  created_at: string;
+}
+
+export async function getMyComparison(accessToken: string): Promise<PropertyComparisonData | null> {
+  const res = await fetch(`${API_BASE_URL}/api/my-comparison/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Could not fetch comparison");
+  return res.json();
+}
+
+export async function setMyComparison(listingIds: string[], accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/my-comparison/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ listing_ids: listingIds }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not update comparison");
+  return res.json();
+}
+
+export interface AppNotification {
+  id: string;
+  notification_type: string;
+  title: string;
+  message: string;
+  channel: string;
+  delivered: boolean;
+  read_at: string | null;
+  created_at: string;
+}
+
+export async function listMyNotifications(accessToken: string): Promise<{ count: number; results: AppNotification[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/my-notifications/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch notifications");
+  return res.json();
+}
+
+export async function getUnreadNotificationCount(accessToken: string): Promise<{ unread_count: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/my-notifications/unread-count/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) return { unread_count: 0 };
+  return res.json();
+}
+
+export async function markNotificationRead(id: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/my-notifications/${id}/mark_read/`, {
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function markAllNotificationsRead(accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/my-notifications/mark-all-read/`, {
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;

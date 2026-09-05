@@ -1,0 +1,55 @@
+"use client";
+import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
+import { setMyComparison } from "@/lib/api";
+
+const STAGING_KEY = "oaziland_comparison_staging";
+
+/**
+ * Adds/removes THIS listing from the comparison set. WHY selections
+ * are staged in localStorage first, not sent straight to the backend:
+ * create_or_update_comparison() genuinely requires 2-4 listings —
+ * sending a single listing the moment someone picks their first one
+ * would just fail. Staging locally lets someone pick items one at a
+ * time (the real, natural way to build a comparison) and only syncs
+ * to the backend once there are enough to actually be valid.
+ */
+export default function CompareButton({ listingId }: { listingId: string }) {
+  const t = useTranslations("ListingDetailPage");
+  const [staged, setStaged] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(STAGING_KEY);
+    setStaged(raw ? JSON.parse(raw) : []);
+  }, []);
+
+  const isStaged = staged.includes(listingId);
+
+  async function handleToggle() {
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
+
+    const next = isStaged ? staged.filter((id) => id !== listingId) : [...staged, listingId].slice(-4);
+    localStorage.setItem(STAGING_KEY, JSON.stringify(next));
+    setStaged(next);
+
+    if (next.length >= 2) {
+      setSaving(true);
+      try {
+        await setMyComparison(next, token);
+      } finally {
+        setSaving(false);
+      }
+    }
+  }
+
+  return (
+    <button onClick={handleToggle} disabled={saving} className="font-semibold px-4 py-2 rounded border border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50 disabled:opacity-50">
+      {isStaged ? t("removeFromCompare") : t("compare")}
+    </button>
+  );
+}

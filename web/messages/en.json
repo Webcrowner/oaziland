@@ -36,7 +36,11 @@
     "howItWorks": "How It Works",
     "referrals": "Refer a Friend",
     "messages": "Messages",
-    "dashboard": "My Dashboard"
+    "dashboard": "My Dashboard",
+    "notifications": "Notifications",
+    "favorites": "Saved Listings",
+    "savedSearches": "Saved Searches",
+    "compare": "Compare"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -46,7 +50,9 @@
     "listerOwnerSale": "Owner",
     "listerAgent": "Agent",
     "listerAgency": "Agency",
-    "postedOn": "Posted {date}"
+    "postedOn": "Posted {date}",
+    "save": "Save",
+    "saved": "Saved"
   },
   "HomePage": {
     "heroTitle": "Find your next home in Cameroon",
@@ -91,7 +97,11 @@
     "listerAgentFull": "Listed by an Agent",
     "listerAgencyFull": "Listed by an Agency",
     "postedOnFull": "Posted on {date}",
-    "locationOnMap": "Location"
+    "locationOnMap": "Location",
+    "save": "Save",
+    "saved": "Saved ✓",
+    "compare": "Add to Compare",
+    "removeFromCompare": "Remove from Compare"
   },
   "LoginPage": {
     "title": "Sign in",
@@ -400,5 +410,41 @@
     "signInRequired": "Sign in to access the admin console",
     "submit": "Submit",
     "actionFailed": "That action failed. Please try again."
+  },
+  "FavoritesPage": {
+    "title": "Saved Listings",
+    "subtitle": "Properties you've saved to look at later.",
+    "noFavoritesYet": "You haven't saved any listings yet.",
+    "signInRequired": "Sign in to see your saved listings"
+  },
+  "SavedSearchesPage": {
+    "title": "Saved Searches",
+    "subtitle": "Get notified automatically when a new listing matches.",
+    "noSavedSearchesYet": "You haven't saved any searches yet. Save one from the search page.",
+    "nameLabel": "Name this search",
+    "delete": "Delete",
+    "lastNotified": "Last notified: {date}",
+    "neverNotified": "No matches yet",
+    "signInRequired": "Sign in to manage your saved searches",
+    "saveThisSearch": "Save This Search",
+    "searchSaved": "Search saved! You'll be notified of new matches."
+  },
+  "ComparisonPage": {
+    "title": "Compare Properties",
+    "subtitle": "Side-by-side comparison of your selected properties.",
+    "noComparisonYet": "Add 2 to 4 listings to compare from any listing page.",
+    "signInRequired": "Sign in to compare properties",
+    "price": "Price",
+    "location": "Location",
+    "type": "Type",
+    "size": "Size",
+    "finish": "Finish",
+    "viewListing": "View Listing"
+  },
+  "NotificationsPage": {
+    "title": "Notifications",
+    "noNotificationsYet": "You have no notifications yet.",
+    "markAllRead": "Mark all as read",
+    "signInRequired": "Sign in to see your notifications"
   }
 }

@@ -3,6 +3,8 @@ import { getListing } from "@/lib/api";
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import ContactListingButton from "@/components/ContactListingButton";
+import FavoriteButton from "@/components/FavoriteButton";
+import CompareButton from "@/components/CompareButton";
 import PropertyMap from "@/components/PropertyMap";
 import type { Metadata } from "next";
 
@@ -160,7 +162,11 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
           </div>
         )}
 
-        <ContactListingButton listingId={listing.id} />
+        <div className="flex flex-wrap gap-3 mt-8">
+          <ContactListingButton listingId={listing.id} />
+          <FavoriteButton listingId={listing.id} variant="detail" />
+          <CompareButton listingId={listing.id} />
+        </div>
       </div>
     </main>
   );

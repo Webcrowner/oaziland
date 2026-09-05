@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import PropertyCard from "@/components/PropertyCard";
+import SaveSearchButton from "@/components/SaveSearchButton";
 import { searchListings } from "@/lib/api";
 import type { Metadata } from "next";
 
@@ -38,9 +39,14 @@ export default async function SearchPage({
     <main>
       <div className="max-w-6xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
-        <p className="text-gray-600 mb-6">
-          {data.count === 1 ? t("countFoundOne", { count: data.count }) : t("countFoundOther", { count: data.count })}
-        </p>
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
+          <p className="text-gray-600">
+            {data.count === 1 ? t("countFoundOne", { count: data.count }) : t("countFoundOther", { count: data.count })}
+          </p>
+          {Object.keys(params).length > 0 && (
+            <SaveSearchButton filters={params as Record<string, string>} />
+          )}
+        </div>
 
         {data.results.length === 0 ? (
           <p className="text-gray-500">{t("noResults")}</p>
