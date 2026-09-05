@@ -382,6 +382,64 @@ export async function getMyAgentDashboard(accessToken: string): Promise<AgentDas
   return res.json();
 }
 
+export interface TickStatus {
+  delivered: boolean;
+  seen: boolean;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversation: string;
+  sender: string;
+  sender_name: string;
+  text: string;
+  folder: string;
+  sent_at: string | null;
+  created_at: string;
+  tick_status: TickStatus;
+}
+
+export interface ConversationSummary {
+  id: string;
+  participant_usernames: string[];
+  last_message: ConversationMessage | null;
+  unread_count: number;
+  created_at: string;
+}
+
+export async function listConversations(accessToken: string): Promise<{ results: ConversationSummary[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not fetch conversations");
+  return res.json();
+}
+
+export async function getConversationMessages(conversationId: string, accessToken: string): Promise<ConversationMessage[]> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not fetch messages");
+  return res.json();
+}
+
+export async function sendConversationMessage(conversationId: string, text: string, accessToken: string): Promise<ConversationMessage> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/send/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ text, client_message_id: `web-${Date.now()}-${Math.random().toString(36).slice(2)}` }),
+  });
+  if (!res.ok) throw new Error("Could not send message");
+  return res.json();
+}
+
+export async function markConversationSeen(conversationId: string, accessToken: string) {
+  await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/mark_seen/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;

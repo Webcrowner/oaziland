@@ -49,6 +49,8 @@ export default function Footer() {
           <ul className="text-sm text-gray-600 flex flex-col gap-2">
             <li><Link href="/login" className="hover:text-[#8A6D14] transition-colors">{t("signIn")}</Link></li>
             <li><Link href="/register" className="hover:text-[#8A6D14] transition-colors">{t("register")}</Link></li>
+            <li><Link href="/messages" className="hover:text-[#8A6D14] transition-colors">{t("messages")}</Link></li>
+            <li><Link href="/dashboard" className="hover:text-[#8A6D14] transition-colors">{t("dashboard")}</Link></li>
             <li><Link href="/referrals" className="hover:text-[#8A6D14] transition-colors">{t("referrals")}</Link></li>
           </ul>
           <h3 className="text-sm font-semibold text-[#1B2A4A] mb-3 mt-6">{t("brandName")}</h3>

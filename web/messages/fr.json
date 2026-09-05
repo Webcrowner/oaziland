@@ -34,7 +34,9 @@
     "contact": "Contact",
     "trainings": "Formation & Cours",
     "howItWorks": "Comment Ça Marche",
-    "referrals": "Parrainer un Ami"
+    "referrals": "Parrainer un Ami",
+    "messages": "Messages",
+    "dashboard": "Mon Tableau de Bord"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -347,5 +349,17 @@
     "agencyCommission": "Commission Totale de l'Agence",
     "notAnAgent": "Ce compte n'est pas enregistré en tant qu'agent.",
     "signInRequired": "Connectez-vous pour voir votre tableau de bord."
+  },
+  "InboxPage": {
+    "title": "Messages",
+    "noConversationsYet": "Aucune conversation pour le moment — les messages provenant du contact d'une annonce apparaîtront ici.",
+    "typeMessage": "Écrire un message...",
+    "send": "Envoyer",
+    "sending": "Envoi en cours...",
+    "selectConversation": "Sélectionnez une conversation pour voir les messages",
+    "signInRequired": "Connectez-vous pour voir vos messages",
+    "delivered": "Distribué",
+    "seen": "Vu",
+    "sent": "Envoyé"
   }
 }

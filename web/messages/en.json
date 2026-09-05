@@ -34,7 +34,9 @@
     "contact": "Contact",
     "trainings": "Training & Courses",
     "howItWorks": "How It Works",
-    "referrals": "Refer a Friend"
+    "referrals": "Refer a Friend",
+    "messages": "Messages",
+    "dashboard": "My Dashboard"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -347,5 +349,17 @@
     "agencyCommission": "Total Agency Commission",
     "notAnAgent": "This account is not registered as an agent.",
     "signInRequired": "Sign in to view your dashboard."
+  },
+  "InboxPage": {
+    "title": "Messages",
+    "noConversationsYet": "No conversations yet — messages from contacting a listing will show up here.",
+    "typeMessage": "Type a message...",
+    "send": "Send",
+    "sending": "Sending...",
+    "selectConversation": "Select a conversation to view messages",
+    "signInRequired": "Sign in to view your messages",
+    "delivered": "Delivered",
+    "seen": "Seen",
+    "sent": "Sent"
   }
 }
