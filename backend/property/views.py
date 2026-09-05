@@ -93,6 +93,13 @@ class ListingViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(listing_type=listing_type)
         return queryset
 
+    def perform_create(self, serializer):
+        """WHY listed_by must be set HERE, never accepted from the
+        request body: it must always be the actual authenticated
+        requester — accepting it as client input would let anyone
+        create a listing attributed to someone else's account."""
+        serializer.save(listed_by=self.request.user)
+
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         """Admin-only, per the RBAC matrix's explicit rule: 'only Admin
