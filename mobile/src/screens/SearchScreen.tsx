@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { searchListings, Listing } from "../lib/api";
+import { searchListings, createSavedSearch, Listing } from "../lib/api";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
@@ -21,6 +22,7 @@ export default function SearchScreen({ route, navigation }: Props) {
   const { quarterId, propertyType, finishLevel, listingType } = route.params || {};
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingSearch, setSavingSearch] = useState(false);
 
   useEffect(() => {
     searchListings({ quarter: quarterId, property_type: propertyType, finish_level: finishLevel, listing_type: listingType })
@@ -28,6 +30,29 @@ export default function SearchScreen({ route, navigation }: Props) {
       .catch(() => setListings([]))
       .finally(() => setLoading(false));
   }, [quarterId, propertyType, finishLevel, listingType]);
+
+  async function handleSaveSearch() {
+    const token = await SecureStore.getItemAsync("access_token");
+    if (!token) {
+      navigation.navigate("Login");
+      return;
+    }
+    const filters: Record<string, string> = {};
+    if (quarterId) filters.quarter_id = quarterId;
+    if (propertyType) filters.property_type = propertyType;
+    if (finishLevel) filters.finish_level = finishLevel;
+    if (listingType) filters.listing_type = listingType;
+
+    setSavingSearch(true);
+    try {
+      await createSavedSearch("", filters);
+      Alert.alert("Saved", "You'll be notified when a new listing matches this search.");
+    } catch {
+      Alert.alert("Could not save", "Please try again.");
+    } finally {
+      setSavingSearch(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -42,6 +67,11 @@ export default function SearchScreen({ route, navigation }: Props) {
       data={listings}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}
+      ListHeaderComponent={
+        <TouchableOpacity onPress={handleSaveSearch} disabled={savingSearch} style={styles.saveSearchButton}>
+          <Text style={styles.saveSearchText}>{savingSearch ? "Saving..." : "Save This Search"}</Text>
+        </TouchableOpacity>
+      }
       ListEmptyComponent={<Text style={styles.empty}>No listings match your search yet.</Text>}
       renderItem={({ item }) => (
         <TouchableOpacity
@@ -73,6 +103,8 @@ export default function SearchScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   list: { padding: 16 },
+  saveSearchButton: { borderWidth: 1, borderColor: "#1B2A4A", borderRadius: 8, paddingVertical: 10, alignItems: "center", marginBottom: 16 },
+  saveSearchText: { color: "#1B2A4A", fontWeight: "600", fontSize: 13 },
   empty: { textAlign: "center", color: "#6B7280", marginTop: 40 },
   card: { backgroundColor: "#fff", borderRadius: 10, marginBottom: 16, overflow: "hidden", borderWidth: 1, borderColor: "#E5E7EB" },
   imagePlaceholder: { height: 140, backgroundColor: "#E5E7EB", justifyContent: "center", alignItems: "center" },

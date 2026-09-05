@@ -344,3 +344,59 @@ export async function markAllNotificationsRead() {
     headers: await authHeaders(),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Saved Searches and Property Comparison — mirrors the web app's real APIs.
+// ---------------------------------------------------------------------------
+export interface SavedSearch {
+  id: string;
+  name: string;
+  filters: Record<string, string>;
+  last_notified_at: string | null;
+}
+
+export async function listSavedSearches(): Promise<PaginatedResponse<SavedSearch>> {
+  const res = await fetch(`${API_BASE_URL}/api/saved-searches/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch saved searches");
+  return res.json();
+}
+
+export async function createSavedSearch(name: string, filters: Record<string, string>) {
+  const res = await fetch(`${API_BASE_URL}/api/saved-searches/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ name, filters }),
+  });
+  if (!res.ok) throw new Error("Could not create saved search");
+  return res.json();
+}
+
+export async function deleteSavedSearch(id: string) {
+  return fetch(`${API_BASE_URL}/api/saved-searches/${id}/`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+}
+
+export interface PropertyComparisonData {
+  id: string;
+  listing_ids: string[];
+  created_at: string;
+}
+
+export async function getMyComparison(): Promise<PropertyComparisonData | null> {
+  const res = await fetch(`${API_BASE_URL}/api/my-comparison/`, { headers: await authHeaders() });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Could not fetch comparison");
+  return res.json();
+}
+
+export async function setMyComparison(listingIds: string[]) {
+  const res = await fetch(`${API_BASE_URL}/api/my-comparison/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ listing_ids: listingIds }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not update comparison");
+  return res.json();
+}

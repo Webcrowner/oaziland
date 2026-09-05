@@ -15,6 +15,8 @@ import StudentHostelsScreen from "../screens/StudentHostelsScreen";
 import WantedBoardScreen from "../screens/WantedBoardScreen";
 import FavoritesScreen from "../screens/FavoritesScreen";
 import NotificationsScreen from "../screens/NotificationsScreen";
+import SavedSearchesScreen from "../screens/SavedSearchesScreen";
+import ComparisonScreen from "../screens/ComparisonScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -31,6 +33,8 @@ export type RootStackParamList = {
   WantedBoard: undefined;
   Favorites: undefined;
   Notifications: undefined;
+  SavedSearches: undefined;
+  Comparison: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -66,6 +70,8 @@ export default function AppNavigator() {
         <Stack.Screen name="WantedBoard" component={WantedBoardScreen} options={{ title: "Looking For..." }} />
         <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: "Saved Listings" }} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
+        <Stack.Screen name="SavedSearches" component={SavedSearchesScreen} options={{ title: "Saved Searches" }} />
+        <Stack.Screen name="Comparison" component={ComparisonScreen} options={{ title: "Compare Properties" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

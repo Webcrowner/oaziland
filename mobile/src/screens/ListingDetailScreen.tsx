@@ -25,6 +25,9 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [isFavorited, setIsFavorited] = useState(false);
   const [contacting, setContacting] = useState(false);
+  const [isStagedForCompare, setIsStagedForCompare] = useState(false);
+
+  const COMPARE_STAGING_KEY = "oaziland_comparison_staging";
 
   useEffect(() => {
     getListing(listingId)
@@ -32,6 +35,38 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
       .catch(() => setListing(null))
       .finally(() => setLoading(false));
   }, [listingId]);
+
+  useEffect(() => {
+    SecureStore.getItemAsync(COMPARE_STAGING_KEY).then((raw) => {
+      const staged: string[] = raw ? JSON.parse(raw) : [];
+      setIsStagedForCompare(staged.includes(listingId));
+    });
+  }, [listingId]);
+
+  const handleToggleCompare = useCallback(async () => {
+    const token = await SecureStore.getItemAsync("access_token");
+    if (!token) {
+      navigation.navigate("Login");
+      return;
+    }
+    const raw = await SecureStore.getItemAsync(COMPARE_STAGING_KEY);
+    const staged: string[] = raw ? JSON.parse(raw) : [];
+    const next = isStagedForCompare ? staged.filter((id) => id !== listingId) : [...staged, listingId].slice(-4);
+
+    if (next.length >= 2) {
+      try {
+        const { setMyComparison } = await import("../lib/api");
+        await setMyComparison(next);
+        await SecureStore.setItemAsync(COMPARE_STAGING_KEY, JSON.stringify(next));
+        setIsStagedForCompare(!isStagedForCompare);
+      } catch {
+        Alert.alert("Could not save", "Please try again.");
+      }
+    } else {
+      await SecureStore.setItemAsync(COMPARE_STAGING_KEY, JSON.stringify(next));
+      setIsStagedForCompare(!isStagedForCompare);
+    }
+  }, [listingId, isStagedForCompare, navigation]);
 
   useEffect(() => {
     SecureStore.getItemAsync("access_token").then((token) => {
@@ -132,6 +167,10 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
         <TouchableOpacity style={styles.whatsappButton} onPress={handleContact} disabled={contacting}>
           {contacting ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.whatsappButtonText}>Contact on WhatsApp</Text>}
         </TouchableOpacity>
+
+        <TouchableOpacity style={styles.compareButton} onPress={handleToggleCompare}>
+          <Text style={styles.compareButtonText}>{isStagedForCompare ? "Remove from Compare" : "Add to Compare"}</Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
@@ -160,6 +199,8 @@ const styles = StyleSheet.create({
   listerName: { fontSize: 15, fontWeight: "700", color: "#1B2A4A" },
   listerAgency: { fontSize: 13, color: "#6B7280" },
   detail: { fontSize: 14, color: "#374151", marginBottom: 4 },
-  whatsappButton: { backgroundColor: "#C9A227", borderRadius: 8, paddingVertical: 14, alignItems: "center", marginTop: 20, marginBottom: 30 },
+  whatsappButton: { backgroundColor: "#C9A227", borderRadius: 8, paddingVertical: 14, alignItems: "center", marginTop: 20 },
   whatsappButtonText: { color: "#1B2A4A", fontWeight: "bold", fontSize: 16 },
+  compareButton: { borderWidth: 1, borderColor: "#1B2A4A", borderRadius: 8, paddingVertical: 14, alignItems: "center", marginTop: 10, marginBottom: 30 },
+  compareButtonText: { color: "#1B2A4A", fontWeight: "700", fontSize: 14 },
 });
