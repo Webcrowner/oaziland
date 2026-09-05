@@ -440,6 +440,44 @@ export async function markConversationSeen(conversationId: string, accessToken: 
   });
 }
 
+export async function sendTypingHeartbeat(conversationId: string, accessToken: string) {
+  await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/typing/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+export async function getTypingStatus(conversationId: string, accessToken: string): Promise<{ typing_usernames: string[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/typing-status/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return { typing_usernames: [] };
+  return res.json();
+}
+
+export interface PresenceSettings {
+  show_online_status: boolean;
+  show_typing_indicator: boolean;
+}
+
+export async function getMyPresenceSettings(accessToken: string): Promise<PresenceSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/my-presence-settings/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not fetch presence settings");
+  return res.json();
+}
+
+export async function updateMyPresenceSettings(settings: Partial<PresenceSettings>, accessToken: string): Promise<PresenceSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/my-presence-settings/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error("Could not update presence settings");
+  return res.json();
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;

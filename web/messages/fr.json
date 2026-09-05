@@ -360,6 +360,18 @@
     "signInRequired": "Connectez-vous pour voir vos messages",
     "delivered": "Distribué",
     "seen": "Vu",
-    "sent": "Envoyé"
+    "sent": "Envoyé",
+    "isTyping": "{name} est en train d'écrire...",
+    "typingSettingsLink": "Gérer la visibilité de l'indicateur de saisie"
+  },
+  "PrivacySettingsPage": {
+    "title": "Paramètres de Confidentialité",
+    "subtitle": "Contrôlez ce que les autres peuvent voir de vous.",
+    "onlineStatusLabel": "Afficher quand je suis en ligne",
+    "onlineStatusDescription": "Les autres peuvent voir quand vous êtes actif sur Oaziland.",
+    "typingIndicatorLabel": "Afficher quand j'écris",
+    "typingIndicatorDescription": "Les autres peuvent voir « ...est en train d'écrire » pendant que vous rédigez une réponse.",
+    "saved": "Enregistré",
+    "signInRequired": "Connectez-vous pour gérer vos paramètres de confidentialité"
   }
 }

@@ -1,9 +1,10 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
   listConversations, getConversationMessages, sendConversationMessage, markConversationSeen,
+  sendTypingHeartbeat, getTypingStatus,
   type ConversationSummary, type ConversationMessage,
 } from "@/lib/api";
 
@@ -21,6 +22,8 @@ export default function MessagesPage() {
   const [thread, setThread] = useState<ConversationMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [typingUsernames, setTypingUsernames] = useState<string[]>([]);
+  const lastHeartbeatRef = useRef<number>(0);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
 
@@ -45,6 +48,30 @@ export default function MessagesPage() {
       .catch(() => {});
     markConversationSeen(selectedId, token).then(loadConversations);
   }, [selectedId, token, loadConversations]);
+
+  // Poll the OTHER participant's typing status every 2 seconds while
+  // a conversation is open — this is a REST backend, not WebSocket,
+  // so polling (not push) is the real, working mechanism here.
+  useEffect(() => {
+    if (!selectedId || !token) return;
+    const interval = setInterval(() => {
+      getTypingStatus(selectedId, token).then((data) => setTypingUsernames(data.typing_usernames));
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [selectedId, token]);
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    if (!selectedId || !token) return;
+    // Throttled to at most once every 3 seconds — sending a heartbeat
+    // on every keystroke would be wasteful; the backend's own 8-second
+    // timeout gives plenty of margin for this interval.
+    const now = Date.now();
+    if (now - lastHeartbeatRef.current > 3000) {
+      lastHeartbeatRef.current = now;
+      sendTypingHeartbeat(selectedId, token);
+    }
+  }
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -73,7 +100,12 @@ export default function MessagesPage() {
 
   return (
     <main className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">{t("title")}</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-[#1B2A4A]">{t("title")}</h1>
+        <Link href="/privacy-settings" className="text-sm text-gray-500 hover:text-[#1B2A4A] underline">
+          {t("typingSettingsLink")}
+        </Link>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 border rounded-lg overflow-hidden" style={{ minHeight: "500px" }}>
         {/* Conversation list */}
@@ -119,10 +151,15 @@ export default function MessagesPage() {
                   </div>
                 ))}
               </div>
+              {typingUsernames.length > 0 && (
+                <p className="text-xs text-gray-500 italic px-3 pb-1">
+                  {t("isTyping", { name: typingUsernames.join(", ") })}
+                </p>
+              )}
               <form onSubmit={handleSend} className="border-t p-3 flex gap-2">
                 <input
                   type="text" placeholder={t("typeMessage")} className="flex-1 border rounded px-3 py-2 text-sm"
-                  value={draft} onChange={(e) => setDraft(e.target.value)}
+                  value={draft} onChange={(e) => handleDraftChange(e.target.value)}
                 />
                 <button type="submit" disabled={sending} className="bg-[#1B2A4A] text-white font-semibold px-4 py-2 rounded text-sm disabled:opacity-50">
                   {sending ? t("sending") : t("send")}

@@ -360,6 +360,18 @@
     "signInRequired": "Sign in to view your messages",
     "delivered": "Delivered",
     "seen": "Seen",
-    "sent": "Sent"
+    "sent": "Sent",
+    "isTyping": "{name} is typing...",
+    "typingSettingsLink": "Manage typing indicator visibility"
+  },
+  "PrivacySettingsPage": {
+    "title": "Privacy Settings",
+    "subtitle": "Control what other people can see about you.",
+    "onlineStatusLabel": "Show when I'm online",
+    "onlineStatusDescription": "Other people can see when you're active on Oaziland.",
+    "typingIndicatorLabel": "Show when I'm typing",
+    "typingIndicatorDescription": "Other people can see \"...is typing\" while you compose a reply to them.",
+    "saved": "Saved",
+    "signInRequired": "Sign in to manage your privacy settings"
   }
 }
