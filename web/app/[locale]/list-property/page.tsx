@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
 import { API_BASE_URL } from "@/lib/api";
 
 /**
@@ -15,6 +16,7 @@ export default function ListPropertyPage() {
   const [listingType, setListingType] = useState("RENT");
   const [price, setPrice] = useState("");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [needsMfa, setNeedsMfa] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -38,6 +40,7 @@ export default function ListPropertyPage() {
 
       if (res.status === 403) {
         setMessage({ type: "error", text: t("mfaRequired") });
+        setNeedsMfa(true);
       } else if (!res.ok) {
         setMessage({ type: "error", text: t("somethingWentWrong") });
       } else {
@@ -73,6 +76,11 @@ export default function ListPropertyPage() {
             <p className={message.type === "success" ? "text-green-700 text-sm" : "text-red-600 text-sm"}>
               {message.text}
             </p>
+          )}
+          {needsMfa && (
+            <Link href="/mfa-setup" className="text-sm font-semibold text-[#1B2A4A] hover:text-[#C9A227] underline">
+              {t("completeMfaSetup")} →
+            </Link>
           )}
 
           <button type="submit" disabled={loading} className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">

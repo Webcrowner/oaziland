@@ -160,6 +160,27 @@
     "agencyLabel": "Agency",
     "viewListings": "View Active Listings"
   },
+  "MfaSetupPage": {
+    "title": "Set Up Two-Factor Authentication",
+    "subtitle": "Required before you can list a property or make a booking — this keeps your account secure.",
+    "chooseMethod": "How should we send your verification code?",
+    "methodSms": "Text Message (SMS)",
+    "methodEmail": "Email",
+    "phonePlaceholder": "Phone number (+237...)",
+    "emailPlaceholder": "Email address",
+    "sendCode": "Send Code",
+    "sending": "Sending...",
+    "enterCode": "Enter the 6-digit code we sent you",
+    "codePlaceholder": "123456",
+    "verify": "Verify",
+    "verifying": "Verifying...",
+    "resendCode": "Send a new code",
+    "success": "Two-factor authentication is now enabled on your account.",
+    "continueToListProperty": "Continue to List a Property",
+    "alreadyEnabled": "Two-factor authentication is already enabled on your account.",
+    "setupFailed": "Could not send the code. Please check the details and try again.",
+    "verifyFailed": "Incorrect or expired code. Please try again."
+  },
   "ListPropertyPage": {
     "title": "List a Property",
     "description": "This is a basic listing form. Full property-type-specific details (bedrooms, finish level, land title info, etc.) follow the same pattern shown here and are a natural next extension.",
@@ -173,6 +194,7 @@
     "mfaRequired": "You need to complete multi-factor authentication and identity verification before listing a property — this is a platform-wide security requirement, not a bug.",
     "somethingWentWrong": "Something went wrong. Please try again.",
     "success": "Your listing was created as a draft — an admin will review it before it goes live.",
-    "couldNotReachServer": "Could not reach the server."
+    "couldNotReachServer": "Could not reach the server.",
+    "completeMfaSetup": "Complete two-factor authentication"
   }
 }

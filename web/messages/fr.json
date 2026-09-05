@@ -160,6 +160,27 @@
     "agencyLabel": "Agence",
     "viewListings": "Voir les Annonces Actives"
   },
+  "MfaSetupPage": {
+    "title": "Configurer l'Authentification à Deux Facteurs",
+    "subtitle": "Requis avant de pouvoir publier une propriété ou effectuer une réservation — cela protège votre compte.",
+    "chooseMethod": "Comment souhaitez-vous recevoir votre code de vérification ?",
+    "methodSms": "SMS",
+    "methodEmail": "E-mail",
+    "phonePlaceholder": "Numéro de téléphone (+237...)",
+    "emailPlaceholder": "Adresse e-mail",
+    "sendCode": "Envoyer le Code",
+    "sending": "Envoi en cours...",
+    "enterCode": "Entrez le code à 6 chiffres que nous vous avons envoyé",
+    "codePlaceholder": "123456",
+    "verify": "Vérifier",
+    "verifying": "Vérification en cours...",
+    "resendCode": "Envoyer un nouveau code",
+    "success": "L'authentification à deux facteurs est maintenant activée sur votre compte.",
+    "continueToListProperty": "Continuer vers Publier une Propriété",
+    "alreadyEnabled": "L'authentification à deux facteurs est déjà activée sur votre compte.",
+    "setupFailed": "Impossible d'envoyer le code. Veuillez vérifier les informations et réessayer.",
+    "verifyFailed": "Code incorrect ou expiré. Veuillez réessayer."
+  },
   "ListPropertyPage": {
     "title": "Publier une propriété",
     "description": "Ceci est un formulaire de base pour publier une annonce. Les détails spécifiques à chaque type de propriété (chambres, niveau de finition, informations sur le titre foncier, etc.) suivront le même modèle et constituent une extension naturelle à venir.",
@@ -173,6 +194,7 @@
     "mfaRequired": "Vous devez compléter l'authentification multifacteur et la vérification d'identité avant de publier une propriété — il s'agit d'une exigence de sécurité de la plateforme, pas d'un bug.",
     "somethingWentWrong": "Une erreur s'est produite. Veuillez réessayer.",
     "success": "Votre annonce a été créée en tant que brouillon — un administrateur l'examinera avant sa publication.",
-    "couldNotReachServer": "Impossible de joindre le serveur."
+    "couldNotReachServer": "Impossible de joindre le serveur.",
+    "completeMfaSetup": "Terminer l'authentification à deux facteurs"
   }
 }

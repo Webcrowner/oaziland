@@ -221,6 +221,34 @@ export async function getAgentPublicProfile(userId: string): Promise<AgentPublic
   return res.json();
 }
 
+export async function setupMfa(mfaType: "SMS_OTP" | "EMAIL_OTP", destination: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/mfa/setup/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ mfa_type: mfaType, destination }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "MFA setup failed");
+  return res.json();
+}
+
+export async function verifyMfa(challengeId: string, code: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/mfa/verify/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ challenge_id: challengeId, code }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Incorrect or expired code");
+  return res.json();
+}
+
+export async function getMfaStatus(accessToken: string): Promise<{ mfa_enabled: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/mfa/status/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not check MFA status");
+  return res.json();
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;
