@@ -7,8 +7,8 @@ any of them over HTTP — no real inbox was possible).
 """
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import SocialAccountLink, Conversation, Message
-from .services import get_message_tick_status
+from .models import SocialAccountLink, Conversation, Message, Post, Comment, PostMedia
+from .services import get_message_tick_status, get_post_reaction_counts
 
 
 class SocialAccountLinkSerializer(serializers.ModelSerializer):
@@ -59,3 +59,53 @@ class ConversationSerializer(serializers.ModelSerializer):
         return conversation.messages.filter(folder="SENT").exclude(sender=request.user).filter(
             receipts__recipient=request.user, receipts__seen_at__isnull=True,
         ).count()
+
+
+class CommentSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source="author.full_name", read_only=True)
+
+    class Meta:
+        model = Comment
+        fields = ["id", "post", "author", "author_name", "text", "created_at", "edited_at"]
+        read_only_fields = ["author", "created_at", "edited_at"]
+
+
+class PostMediaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PostMedia
+        fields = ["id", "media_type", "file_url"]
+
+
+class PostSerializer(serializers.ModelSerializer):
+    """WHY tags/media_urls are write-only inputs distinct from the
+    read-side tag_names/media fields: creating a post takes plain
+    strings (tag names, media URLs); reading one back should show the
+    real tag names and PostMedia rows actually created."""
+    author_name = serializers.CharField(source="author.full_name", read_only=True)
+    poster_role = serializers.CharField(source="attribution.poster_role", read_only=True)
+    tag_names = serializers.SerializerMethodField()
+    media = PostMediaSerializer(many=True, read_only=True)
+    reaction_counts = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
+    is_sponsored = serializers.BooleanField(read_only=True)
+
+    tags = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
+    media_urls = serializers.ListField(child=serializers.URLField(), write_only=True, required=False)
+
+    class Meta:
+        model = Post
+        fields = [
+            "id", "author", "author_name", "poster_role", "post_type", "caption",
+            "tag_names", "tags", "media", "media_urls", "linked_listing_id", "status",
+            "published_at", "created_at", "reaction_counts", "comment_count", "is_sponsored",
+        ]
+        read_only_fields = ["author", "status", "published_at", "created_at"]
+
+    def get_tag_names(self, post) -> list[str]:
+        return [tag.name for tag in post.tags.all()]
+
+    def get_reaction_counts(self, post) -> dict:
+        return get_post_reaction_counts(post)
+
+    def get_comment_count(self, post) -> int:
+        return post.comments.count()

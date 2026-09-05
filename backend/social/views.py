@@ -10,8 +10,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema
-from .models import SocialAccountLink, Conversation
-from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer
+from .models import SocialAccountLink, Conversation, Post, Comment, ContentStatus
+from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer, PostSerializer, CommentSerializer
 from .services import link_social_account
 
 
@@ -218,3 +218,114 @@ class ToggleFavoriteListingView(APIView):
         from .services import toggle_favorite_listing
         is_now_favorited = toggle_favorite_listing(user=request.user, listing_id=listing_id)
         return Response({"is_favorited": is_now_favorited})
+
+
+class PostViewSet(viewsets.ModelViewSet):
+    """The real, previously-total gap this closes: the entire
+    recommendation algorithm (real estate priority, boosted posts, the
+    dance-content policy) has been built and tested this session on
+    top of a feature nothing could actually create, view, react to, or
+    comment on. list is the recommended feed itself
+    (get_recommended_feed) — public browsing of a social feed doesn't
+    require an account, matching how every other browse surface on
+    this platform works; creating a post requires login."""
+    serializer_class = PostSerializer
+
+    def get_permissions(self):
+        # WHY "comments" is grouped with public browsing: viewing the
+        # comments on a public post shouldn't require an account any
+        # more than viewing the post itself does — this is the same
+        # class of mistake as an earlier fix this session (a custom
+        # @action needs its own explicit branch here, since falling
+        # through to the authenticated-only default silently applies
+        # to it too).
+        if self.action in ("list", "retrieve", "comments"):
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Post.objects.none()
+        if self.action == "list":
+            from .services import get_recommended_feed
+            # Anonymous browsing still needs SOME real ranking — the
+            # full personalized algorithm needs a real user for its
+            # interest-tag matching, so an anonymous request falls
+            # back to real-estate-priority + recency only (no
+            # interest-tag boost), never a broken/empty feed.
+            if self.request.user.is_authenticated:
+                feed = get_recommended_feed(self.request.user, limit=50)
+                return Post.objects.filter(id__in=[p.id for p in feed])
+            return Post.objects.filter(status=ContentStatus.PUBLISHED).order_by("-created_at")[:50]
+        return Post.objects.all()
+
+    def create(self, request, *args, **kwargs):
+        from .services import create_post, publish_users_post
+        from trust_safety.services import ContentBlockedError
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        post = create_post(
+            author=request.user, caption=serializer.validated_data.get("caption", ""),
+            post_type=serializer.validated_data.get("post_type"),
+            tags=serializer.validated_data.get("tags"),
+            linked_listing_id=serializer.validated_data.get("linked_listing_id"),
+            media_urls=serializer.validated_data.get("media_urls"),
+        )
+        try:
+            publish_users_post(post)
+        except ContentBlockedError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(PostSerializer(post).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def react(self, request, pk=None):
+        from .services import react_to_post
+        from .models import EmojiType
+        post = self.get_object()
+        emoji = request.data.get("emoji")
+        if emoji not in EmojiType.values:
+            return Response({"detail": f"emoji must be one of {EmojiType.values}."}, status=status.HTTP_400_BAD_REQUEST)
+        react_to_post(post=post, author=request.user, emoji=emoji)
+        return Response(PostSerializer(post).data)
+
+    @action(detail=True, methods=["post"], url_path="remove-reaction")
+    def remove_reaction_action(self, request, pk=None):
+        from .services import remove_reaction
+        post = self.get_object()
+        remove_reaction(post=post, author=request.user)
+        return Response(PostSerializer(post).data)
+
+    @action(detail=True, methods=["get"])
+    def comments(self, request, pk=None):
+        post = self.get_object()
+        return Response(CommentSerializer(post.comments.order_by("created_at"), many=True).data)
+
+
+class CommentViewSet(viewsets.ModelViewSet):
+    """Create/delete only — reading comments happens through Post's
+    own /comments/ action above, scoped to a specific post rather than
+    a global, unscoped comment list."""
+    serializer_class = CommentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Comment.objects.none()
+        return Comment.objects.filter(author=self.request.user)
+
+    def perform_create(self, serializer):
+        from .services import add_comment
+        post_id = self.request.data.get("post")
+        post = Post.objects.get(id=post_id)
+        comment = add_comment(post=post, author=self.request.user, text=serializer.validated_data["text"])
+        serializer.instance = comment
+
+    def destroy(self, request, *args, **kwargs):
+        from .services import delete_comment
+        comment = self.get_object()
+        try:
+            delete_comment(comment=comment, requester=request.user)
+        except PermissionError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -85,6 +85,91 @@ def suggest_connections(user, limit=10):
     return [user for user, score in scored[:limit]]
 
 
+# ---------------------------------------------------------------------------
+# Post creation, reactions, and comments — a real gap this closes: the
+# entire recommendation algorithm (real estate priority, boosted
+# posts, the dance-content policy) has been built and tested this
+# session on top of a feature nothing could actually create, react to,
+# or comment on. get_recommended_feed() below has had nothing to
+# recommend that a real user ever put there.
+# ---------------------------------------------------------------------------
+def create_post(*, author, caption: str = "", post_type=None, tags=None, linked_listing_id=None, poster_role=None, media_urls=None):
+    """Creates a real Post AND its mandatory PosterAttribution in one
+    step — Post.attribution is a required, one-per-post OneToOne per
+    the model's own docstring ('a viewer should never have to guess
+    whether they're talking to the landlord directly or an agent
+    working on commission'), so a post is never left without one.
+
+    WHY this does NOT publish the post itself: publish_post_with_
+    moderation() (trust_safety) is the real, enforced gate — this
+    function only creates the draft; the caller (the API view) decides
+    when to actually publish, exactly mirroring how Listing creation
+    and approval are two separate steps."""
+    from .models import Post, PostType, PostMedia, PosterAttribution, PosterRole
+
+    post = Post.objects.create(
+        author=author, caption=caption, post_type=post_type or PostType.STANDARD,
+        linked_listing_id=linked_listing_id,
+    )
+    if tags:
+        from .models import Tag
+        for tag_name in tags:
+            tag, _ = Tag.objects.get_or_create(name=tag_name.strip().lstrip("#"))
+            post.tags.add(tag)
+    for url in (media_urls or []):
+        PostMedia.objects.create(post=post, media_type=PostMedia.MediaType.PHOTO, file_url=url)
+
+    PosterAttribution.objects.create(post=post, poster_role=poster_role or PosterRole.LANDLORD)
+    return post
+
+
+def publish_users_post(post):
+    """The real, enforced pathway a real API view should call —
+    reuses trust_safety.publish_post_with_moderation() exactly, never
+    a bare post.publish()."""
+    from trust_safety.services import publish_post_with_moderation
+    return publish_post_with_moderation(post)
+
+
+def react_to_post(*, post, author, emoji):
+    """One reaction per person per post (unique_together on the
+    model) — changing your reaction UPDATES the existing row rather
+    than erroring on a duplicate, since 'I liked it, now I love it' is
+    a normal thing a real person does."""
+    from .models import Reaction
+    reaction, _ = Reaction.objects.update_or_create(post=post, author=author, defaults={"emoji": emoji})
+    return reaction
+
+
+def remove_reaction(*, post, author):
+    from .models import Reaction
+    Reaction.objects.filter(post=post, author=author).delete()
+
+
+def add_comment(*, post, author, text):
+    from .models import Comment
+    return Comment.objects.create(post=post, author=author, text=text)
+
+
+def delete_comment(*, comment, requester):
+    """Only the comment's own author can delete it — enforced here so
+    the rule lives in exactly one place, not re-checked differently by
+    every caller."""
+    if comment.author_id != requester.id:
+        raise PermissionError("Only the comment's own author can delete it.")
+    comment.delete()
+
+
+def get_post_reaction_counts(post) -> dict:
+    """Real counts per emoji type, not just a single 'likes' number —
+    the platform supports 5 distinct reactions (LIKE/LOVE/LAUGH/WOW/
+    SAD) and a feed UI needs to show which ones a post actually got."""
+    from django.db.models import Count
+    from .models import Reaction
+    counts = Reaction.objects.filter(post=post).values("emoji").annotate(count=Count("id"))
+    return {row["emoji"]: row["count"] for row in counts}
+
+
 def get_recommended_feed(user, limit=20):
     """The 'algorithm should always recommend similar or related posts,
     with real estate as top priority' requirement. Ranking, in order:

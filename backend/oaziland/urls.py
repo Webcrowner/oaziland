@@ -18,7 +18,7 @@ from geo.views import QuarterViewSet
 from property.views import ListingViewSet, HouseViewSet, ShopViewSet
 from land.views import LandViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
-from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView, MyFavoriteListingsView, ToggleFavoriteListingView
+from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView, MyFavoriteListingsView, ToggleFavoriteListingView, PostViewSet, CommentViewSet
 from trust_safety.views import AdminConsoleSummaryView, AdminVerificationRequestViewSet, AdminContentReportViewSet, AdminDisputeCaseViewSet
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 from hotels.views import HotelViewSet, ReservationViewSet
@@ -39,6 +39,8 @@ router.register(r"houses", HouseViewSet, basename="house")
 router.register(r"shops", ShopViewSet, basename="shop")
 router.register(r"lands", LandViewSet, basename="land")
 router.register(r"conversations", ConversationViewSet, basename="conversation")
+router.register(r"posts", PostViewSet, basename="post")
+router.register(r"comments", CommentViewSet, basename="comment")
 router.register(r"admin/verification-requests", AdminVerificationRequestViewSet, basename="admin-verification-request")
 router.register(r"admin/content-reports", AdminContentReportViewSet, basename="admin-content-report")
 router.register(r"admin/dispute-cases", AdminDisputeCaseViewSet, basename="admin-dispute-case")
