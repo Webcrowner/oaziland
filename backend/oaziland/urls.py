@@ -24,6 +24,7 @@ from events.views import VenueViewSet, EventBookingViewSet
 from student_hostels.views import StudentHostelViewSet, MyRoomAllocationViewSet
 from guest_houses.views import GuestHouseLodgeViewSet
 from discovery.views import WantedListingViewSet
+from catalogue.views import PartnerServiceCategoryViewSet
 from agency.views import AgentPublicProfileView, AgencyPublicProfileView, MyAgentDashboardView, AgentDirectoryView, AgencyDirectoryView
 
 router = DefaultRouter()
@@ -42,6 +43,7 @@ router.register(r"student-hostels", StudentHostelViewSet, basename="student-host
 router.register(r"my-room-allocations", MyRoomAllocationViewSet, basename="my-room-allocation")
 router.register(r"guest-houses", GuestHouseLodgeViewSet, basename="guest-house")
 router.register(r"wanted-listings", WantedListingViewSet, basename="wanted-listing")
+router.register(r"service-categories", PartnerServiceCategoryViewSet, basename="service-category")
 
 from django.http import JsonResponse
 
