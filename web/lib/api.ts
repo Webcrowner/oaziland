@@ -325,6 +325,46 @@ export async function submitContactMessage(payload: { name: string; email: strin
   return res.json();
 }
 
+export interface TrainingProgram {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  provider_name: string;
+  price_xaf: string | null;
+  issues_certification: boolean;
+}
+
+export async function listTrainings(): Promise<{ count: number; results: TrainingProgram[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/trainings/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Training fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function enrollInTraining(programId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/trainings/${programId}/enroll/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return res;
+}
+
+export async function getMyEnrollments(accessToken: string): Promise<{ count: number; results: { program: string }[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/my-enrollments/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not fetch enrollments");
+  return res.json();
+}
+
+export async function getMyReferralCode(accessToken: string): Promise<{ referral_code: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/my-referral-code/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not fetch referral code");
+  return res.json();
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;

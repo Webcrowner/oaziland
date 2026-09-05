@@ -28,6 +28,8 @@ export default function Footer() {
             <li><Link href="/buy" className="hover:text-[#8A6D14] transition-colors">{t("buy")}</Link></li>
             <li><Link href="/sell" className="hover:text-[#8A6D14] transition-colors">{t("sell")}</Link></li>
             <li><Link href="/services" className="hover:text-[#8A6D14] transition-colors">{t("services")}</Link></li>
+            <li><Link href="/trainings" className="hover:text-[#8A6D14] transition-colors">{t("trainings")}</Link></li>
+            <li><Link href="/how-it-works" className="hover:text-[#8A6D14] transition-colors">{t("howItWorks")}</Link></li>
           </ul>
         </div>
 
@@ -47,6 +49,7 @@ export default function Footer() {
           <ul className="text-sm text-gray-600 flex flex-col gap-2">
             <li><Link href="/login" className="hover:text-[#8A6D14] transition-colors">{t("signIn")}</Link></li>
             <li><Link href="/register" className="hover:text-[#8A6D14] transition-colors">{t("register")}</Link></li>
+            <li><Link href="/referrals" className="hover:text-[#8A6D14] transition-colors">{t("referrals")}</Link></li>
           </ul>
           <h3 className="text-sm font-semibold text-[#1B2A4A] mb-3 mt-6">{t("brandName")}</h3>
           <p className="text-sm text-gray-500">{t("address")}</p>
