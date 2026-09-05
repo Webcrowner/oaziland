@@ -1,5 +1,16 @@
 import { getTranslations } from "next-intl/server";
 import { searchVenues } from "@/lib/api";
+import type { Metadata } from "next";
+
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params;
+  return {
+    title: locale === "fr" ? "Salles d'Événements au Cameroun | Oaziland" : "Event Venues in Cameroon | Oaziland",
+    description: locale === "fr"
+      ? "Des espaces événementiels vérifiés pour conférences, mariages et célébrations à travers le Cameroun."
+      : "Verified event spaces for conferences, weddings, and celebrations across Cameroon.",
+  };
+}
 
 export default async function EventsPage() {
   const t = await getTranslations("VenuesPage");

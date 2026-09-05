@@ -1,5 +1,16 @@
 import { getTranslations } from "next-intl/server";
 import { searchHotels } from "@/lib/api";
+import type { Metadata } from "next";
+
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params;
+  return {
+    title: locale === "fr" ? "Hôtels Vérifiés au Cameroun | Oaziland" : "Verified Hotels in Cameroon | Oaziland",
+    description: locale === "fr"
+      ? "Réservez des hôtels vérifiés à travers le Cameroun avec tarification en temps réel et paiement Mobile Money sécurisé."
+      : "Book verified hotels across Cameroon with real-time pricing and secure Mobile Money payment.",
+  };
+}
 
 /**
  * Hotels — the representative example proving the new hospitality

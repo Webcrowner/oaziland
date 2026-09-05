@@ -3,6 +3,7 @@ import { getListing } from "@/lib/api";
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import ContactListingButton from "@/components/ContactListingButton";
+import type { Metadata } from "next";
 
 const LISTER_ROLE_LABEL_KEYS: Record<string, string> = {
   AGENT: "listerAgentFull",
@@ -14,6 +15,37 @@ function listerRoleLabelKey(role: string, listingType: string): string {
     return listingType === "SALE" ? "listerOwnerSaleFull" : "listerOwnerFull";
   }
   return LISTER_ROLE_LABEL_KEYS[role] || "listerOwnerFull";
+}
+
+/**
+ * WHY this page needs its own generateMetadata: without it, EVERY page
+ * on the site — including every individual property listing — shows
+ * the same generic homepage title and description in Google search
+ * results and, just as importantly for a WhatsApp-heavy platform, in
+ * the LINK PREVIEW CARD when someone shares a listing URL in a chat.
+ * A generic "Oaziland — Real Estate in Cameroon" preview for every
+ * single listing is a real missed opportunity — the actual price,
+ * property type, and neighborhood are exactly what makes someone tap
+ * a shared link.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ id: string; locale: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const listing = await getListing(id).catch(() => null);
+  if (!listing) return {};
+
+  const price = Number(listing.price_xaf).toLocaleString();
+  const typeLabel = listing.listing_type === "RENT" ? "For Rent" : "For Sale";
+  const title = `${listing.property_asset.type} ${typeLabel} in ${listing.property_asset.quarter_name} — ${price} XAF | Oaziland`;
+  const description = listing.property_asset.description
+    ? listing.property_asset.description.slice(0, 155)
+    : `${listing.property_asset.type} ${typeLabel.toLowerCase()} in ${listing.property_asset.quarter_name}, Cameroon. Verified listing on Oaziland.`;
+
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: "website" },
+    twitter: { card: "summary", title, description },
+  };
 }
 
 /**

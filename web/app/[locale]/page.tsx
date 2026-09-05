@@ -1,6 +1,28 @@
 import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { listQuarters } from "@/lib/api";
+import type { Metadata } from "next";
+
+/**
+ * WHY the home page needs its own generateMetadata, even though the
+ * root layout already has a static one: the root layout's metadata is
+ * English-only and identical regardless of locale — a French visitor
+ * (or French search results) would see an English title/description
+ * for the site's own homepage. This makes the home page's metadata
+ * genuinely locale-aware, the same fix applied to every other page in
+ * this pass.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params;
+  return {
+    title: locale === "fr"
+      ? "Oaziland — Immobilier, Hôtels et Plus au Cameroun"
+      : "Oaziland — Real Estate, Hotels, and More in Cameroon",
+    description: locale === "fr"
+      ? "Trouvez des propriétés à louer ou à vendre, des hôtels, des résidences étudiantes et des salles d'événements vérifiés à travers le Cameroun."
+      : "Find verified properties to rent or buy, hotels, student hostels, and event venues across Cameroon.",
+  };
+}
 
 /**
  * Home page — Page 1 of Prompt 17. Server Component: quarters are

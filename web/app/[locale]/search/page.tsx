@@ -1,6 +1,23 @@
 import { getTranslations } from "next-intl/server";
 import PropertyCard from "@/components/PropertyCard";
 import { searchListings } from "@/lib/api";
+import type { Metadata } from "next";
+
+/**
+ * WHY this page is set noindex (but follow) rather than given a
+ * dynamic per-filter title: search results with query-string filters
+ * (quarter, property_type, listing_type, finish_level) can combine
+ * into thousands of near-identical parameter permutations — indexing
+ * all of them creates a real duplicate/thin-content problem that can
+ * hurt the whole site's ranking, a well-documented SEO pitfall for
+ * marketplace search pages specifically. 'follow' still passes link
+ * equity through to the real content pages this page links to — the
+ * individual listing detail pages, which DO have their own real,
+ * unique, indexable metadata (see listing/[id]/page.tsx).
+ */
+export const metadata: Metadata = {
+  robots: { index: false, follow: true },
+};
 
 /**
  * Search results — Page 2 of Prompt 17. Server-rendered (a real

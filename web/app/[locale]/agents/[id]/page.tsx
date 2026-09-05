@@ -2,6 +2,29 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { getAgentPublicProfile } from "@/lib/api";
+import type { Metadata } from "next";
+
+/**
+ * Dynamic, real per-agent metadata — same reasoning as the listing
+ * detail page: a generic site-wide title would make every agent's
+ * profile indistinguishable in search results and in a shared
+ * WhatsApp link preview, when the whole point of this page is that
+ * it's THIS specific person's professional profile.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ id: string; locale: string }> }): Promise<Metadata> {
+  const { id, locale } = await params;
+  const profile = await getAgentPublicProfile(id).catch(() => null);
+  if (!profile) return {};
+
+  const title = locale === "fr"
+    ? `${profile.full_name} — Agent Immobilier | Oaziland`
+    : `${profile.full_name} — Real Estate Agent | Oaziland`;
+  const description = locale === "fr"
+    ? `Consultez les annonces vérifiées de ${profile.full_name} sur Oaziland — ${profile.active_listing_count} annonce(s) active(s).`
+    : `View ${profile.full_name}'s verified listings on Oaziland — ${profile.active_listing_count} active listing(s).`;
+
+  return { title, description, openGraph: { title, description }, twitter: { card: "summary", title, description } };
+}
 
 /**
  * Public agent profile — the founder's own explicit ask: 'my own

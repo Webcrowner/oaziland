@@ -1,6 +1,17 @@
 import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { listWantedListings } from "@/lib/api";
+import type { Metadata } from "next";
+
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params;
+  return {
+    title: locale === "fr" ? "Je Recherche... Annonces de Demande | Oaziland" : "Looking For... Wanted Listings | Oaziland",
+    description: locale === "fr"
+      ? "De vraies demandes de chambres, boutiques, entrepôts et entreprises au Cameroun — répondez si vous avez une correspondance."
+      : "Real requests for rooms, stores, warehouses, and businesses across Cameroon — respond if you have a match.",
+  };
+}
 
 const CATEGORY_LABEL_KEYS: Record<string, string> = {
   ROOM_RENTAL: "categoryRoom",
