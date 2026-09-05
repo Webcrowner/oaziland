@@ -299,3 +299,32 @@ class Gift(models.Model):
 
     class Meta:
         db_table = "gifts"
+
+
+class CreatorPremiumSubscription(models.Model):
+    """A small, deliberately low-cost monthly subscription unlocking
+    creator-side perks — distinct from SubscriptionTier above, which
+    is specifically an agent/agency LISTING plan (max_active_listings,
+    the Terres.cm pricing model). This is a general, per-user content
+    perk: any user posting on the social side can subscribe, not just
+    agents/agencies managing listings.
+
+    WHY this only stores what the subscription itself needs, not a
+    stored 'has_checkmark'/'boost_amount' pair: those are DERIVED from
+    is_active below, computed fresh every time — a stored flag can
+    drift out of sync (e.g. after the subscription silently expires);
+    checking is_active() directly never can."""
+    subscriber = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="creator_premium")
+    monthly_price_xaf = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("500"))
+    started_at = models.DateTimeField(auto_now_add=True)
+    renews_at = models.DateTimeField()
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "creator_premium_subscriptions"
+
+    def is_active(self) -> bool:
+        from django.utils import timezone
+        if self.cancelled_at is not None:
+            return False
+        return timezone.now() < self.renews_at

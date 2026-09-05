@@ -212,6 +212,10 @@ def get_recommended_feed(user, limit=20):
             campaign__starts_at__lte=now, campaign__ends_at__gte=now,
         ).values_list("post_id", flat=True)
     )
+    from monetization.models import CreatorPremiumSubscription
+    premium_creator_ids = set(
+        CreatorPremiumSubscription.objects.filter(cancelled_at__isnull=True, renews_at__gte=now).values_list("subscriber_id", flat=True)
+    )
 
     liked_post_ids = Reaction.objects.filter(author=user).values_list("post_id", flat=True)
     favorited_post_ids = Favorite.objects.filter(user=user).exclude(post__isnull=True).values_list("post_id", flat=True)
@@ -238,15 +242,20 @@ def get_recommended_feed(user, limit=20):
 
         is_real_estate = post.linked_listing_id is not None
         is_boosted = post.id in boosted_post_ids
+        is_premium_author = post.author_id in premium_creator_ids
         shares_interest_tag = post.tags.filter(id__in=interest_tag_ids).exists() if interest_tag_ids else False
         # Real estate is a HARD priority tier (10000+) — always wins,
-        # boosted or not. A paid boost lifts a NON-real-estate post
-        # into its own tier (5000+), above plain generic content but
-        # never above real estate itself.
+        # boosted or not. A paid ad boost lifts a NON-real-estate post
+        # into its own tier (5000+). A premium creator subscription is
+        # a SMALLER, cheaper perk than a paid ad boost — it gets its
+        # own tier (2500+), above plain generic content but below a
+        # real paid ad boost, matching how much less it actually costs.
         if is_real_estate:
             score = 10000 + (1 if shares_interest_tag else 0)
         elif is_boosted:
             score = 5000 + (1 if shares_interest_tag else 0)
+        elif is_premium_author:
+            score = 2500 + (1 if shares_interest_tag else 0)
         else:
             score = 1 if shares_interest_tag else 0
         scored.append((post, score))

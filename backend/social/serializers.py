@@ -82,6 +82,7 @@ class PostSerializer(serializers.ModelSerializer):
     strings (tag names, media URLs); reading one back should show the
     real tag names and PostMedia rows actually created."""
     author_name = serializers.CharField(source="author.full_name", read_only=True)
+    is_verified_creator = serializers.SerializerMethodField()
     poster_role = serializers.CharField(source="attribution.poster_role", read_only=True)
     tag_names = serializers.SerializerMethodField()
     media = PostMediaSerializer(many=True, read_only=True)
@@ -95,11 +96,15 @@ class PostSerializer(serializers.ModelSerializer):
     class Meta:
         model = Post
         fields = [
-            "id", "author", "author_name", "poster_role", "post_type", "caption",
+            "id", "author", "author_name", "is_verified_creator", "poster_role", "post_type", "caption",
             "tag_names", "tags", "media", "media_urls", "linked_listing_id", "status",
             "published_at", "created_at", "reaction_counts", "comment_count", "is_sponsored",
         ]
         read_only_fields = ["author", "status", "published_at", "created_at"]
+
+    def get_is_verified_creator(self, post) -> bool:
+        from monetization.services import is_premium_creator
+        return is_premium_creator(post.author)
 
     def get_tag_names(self, post) -> list[str]:
         return [tag.name for tag in post.tags.all()]

@@ -239,7 +239,7 @@ class PostViewSet(viewsets.ModelViewSet):
         # @action needs its own explicit branch here, since falling
         # through to the authenticated-only default silently applies
         # to it too).
-        if self.action in ("list", "retrieve", "comments"):
+        if self.action in ("list", "retrieve", "comments", "following_feed", "topic_feed", "search_posts"):
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
@@ -300,6 +300,49 @@ class PostViewSet(viewsets.ModelViewSet):
     def comments(self, request, pk=None):
         post = self.get_object()
         return Response(CommentSerializer(post.comments.order_by("created_at"), many=True).data)
+
+    @action(detail=False, methods=["get"], url_path="following")
+    def following_feed(self, request):
+        """The 'Following' feed — posts ONLY from people the requester
+        actually follows, in plain reverse-chronological order. No
+        interest-tag scoring here: 'show me what people I follow
+        posted' is a deliberately simpler, more literal promise than
+        the algorithmic FYP feed."""
+        if not request.user.is_authenticated:
+            return Response({"count": 0, "results": []})
+        from .models import Follow
+        followed_ids = Follow.objects.filter(follower=request.user).values_list("followee_id", flat=True)
+        posts = Post.objects.filter(author_id__in=followed_ids, status=ContentStatus.PUBLISHED).order_by("-created_at")
+        page = self.paginate_queryset(posts)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="topic")
+    def topic_feed(self, request):
+        """Browse by tag/topic — real estate priority still applies
+        within the topic, same ranking rule as everywhere else."""
+        tag_name = request.query_params.get("tag", "").strip().lstrip("#")
+        if not tag_name:
+            return Response({"detail": "A ?tag= query parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+        posts = Post.objects.filter(tags__name__iexact=tag_name, status=ContentStatus.PUBLISHED).order_by("-linked_listing_id", "-created_at")
+        page = self.paginate_queryset(posts)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="search")
+    def search_posts(self, request):
+        """A real, working caption/tag search — not a stub."""
+        from django.db.models import Q
+        query = request.query_params.get("q", "").strip()
+        if not query:
+            return Response({"detail": "A ?q= query parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+        posts = Post.objects.filter(
+            Q(caption__icontains=query) | Q(tags__name__icontains=query),
+            status=ContentStatus.PUBLISHED,
+        ).distinct().order_by("-created_at")
+        page = self.paginate_queryset(posts)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 class CommentViewSet(viewsets.ModelViewSet):

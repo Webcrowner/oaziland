@@ -198,3 +198,62 @@ def purchase_campaign_boost(
         BoostedContent.objects.create(campaign=campaign, post=target_post, listing_id=target_listing_id)
 
     return campaign, platform_fee
+
+
+# ---------------------------------------------------------------------------
+# Creator premium subscription — a small, low-cost perk unlocking a
+# checkmark, a small feed-ranking boost, and watermark-free downloads.
+# Deliberately separate from SubscriptionTier, which is an agent/
+# agency LISTING plan, not a general content-creator perk.
+# ---------------------------------------------------------------------------
+def subscribe_to_creator_premium(*, user, payment_gateway, phone_number: str, monthly_price_xaf: Decimal = Decimal("500")):
+    """Charges through the SAME PaymentGateway interface as every
+    other payment in the platform. Re-subscribing (or renewing) simply
+    extends renews_at by another month from now, rather than stacking
+    separate subscription rows — there is exactly one premium status
+    per user at a time."""
+    from django.utils import timezone
+    from .models import CreatorPremiumSubscription
+
+    debit_result = payment_gateway.initiate_debit(
+        phone_number=phone_number, amount_xaf=monthly_price_xaf,
+        idempotency_key=f"creator-premium-{user.id}-{timezone.now().timestamp()}",
+    )
+    if not debit_result.success:
+        raise ValueError("Creator premium subscription payment failed.")
+
+    subscription, _ = CreatorPremiumSubscription.objects.update_or_create(
+        subscriber=user,
+        defaults={
+            "monthly_price_xaf": monthly_price_xaf,
+            "renews_at": timezone.now() + timezone.timedelta(days=30),
+            "cancelled_at": None,
+        },
+    )
+    return subscription
+
+
+def cancel_creator_premium(user):
+    """WHY this doesn't delete the row or zero renews_at immediately:
+    someone who already paid for this month should keep their perks
+    until the period they paid for actually ends — cancelling just
+    stops the NEXT renewal, exactly like cancelling any real
+    subscription should work."""
+    from django.utils import timezone
+    from .models import CreatorPremiumSubscription
+
+    try:
+        subscription = CreatorPremiumSubscription.objects.get(subscriber=user)
+    except CreatorPremiumSubscription.DoesNotExist:
+        return None
+    subscription.cancelled_at = timezone.now()
+    subscription.save(update_fields=["cancelled_at"])
+    return subscription
+
+
+def is_premium_creator(user) -> bool:
+    from .models import CreatorPremiumSubscription
+    try:
+        return user.creator_premium.is_active()
+    except CreatorPremiumSubscription.DoesNotExist:
+        return False
