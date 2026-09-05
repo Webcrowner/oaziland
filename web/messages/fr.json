@@ -85,7 +85,8 @@
     "listerOwnerSaleFull": "Publié par le Propriétaire",
     "listerAgentFull": "Publié par un Agent",
     "listerAgencyFull": "Publié par une Agence",
-    "postedOnFull": "Publié le {date}"
+    "postedOnFull": "Publié le {date}",
+    "locationOnMap": "Emplacement"
   },
   "LoginPage": {
     "title": "Se connecter",

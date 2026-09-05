@@ -3,6 +3,7 @@ import { getListing } from "@/lib/api";
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import ContactListingButton from "@/components/ContactListingButton";
+import PropertyMap from "@/components/PropertyMap";
 import type { Metadata } from "next";
 
 const LISTER_ROLE_LABEL_KEYS: Record<string, string> = {
@@ -133,7 +134,7 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
           </div>
         </div>
 
-        <dl className="grid grid-cols-2 gap-4 text-sm border-t pt-4">
+        <dl className="grid grid-cols-2 gap-4 text-sm border-t pt-4 mb-6">
           {listing.property_asset.size_sqm && (
             <>
               <dt className="text-gray-500">{t("size")}</dt>
@@ -143,6 +144,21 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
           <dt className="text-gray-500">{t("listingType")}</dt>
           <dd>{listing.listing_type}</dd>
         </dl>
+
+        {/* WHY this only renders when real coordinates exist: not
+            every property has GPS data recorded yet — showing a map
+            centered on (0,0) or a fabricated default location would
+            be actively misleading, not just unhelpful. */}
+        {listing.property_asset.latitude && listing.property_asset.longitude && (
+          <div className="mb-6">
+            <h2 className="text-sm font-semibold text-gray-700 mb-2">{t("locationOnMap")}</h2>
+            <PropertyMap
+              latitude={Number(listing.property_asset.latitude)}
+              longitude={Number(listing.property_asset.longitude)}
+              label={`${listing.property_asset.type} — ${listing.property_asset.quarter_name}`}
+            />
+          </div>
+        )}
 
         <ContactListingButton listingId={listing.id} />
       </div>

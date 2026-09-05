@@ -85,7 +85,8 @@
     "listerOwnerSaleFull": "Listed by the Owner",
     "listerAgentFull": "Listed by an Agent",
     "listerAgencyFull": "Listed by an Agency",
-    "postedOnFull": "Posted on {date}"
+    "postedOnFull": "Posted on {date}",
+    "locationOnMap": "Location"
   },
   "LoginPage": {
     "title": "Sign in",
