@@ -40,7 +40,9 @@
     "notifications": "Notifications",
     "favorites": "Annonces Enregistrées",
     "savedSearches": "Recherches Enregistrées",
-    "compare": "Comparer"
+    "compare": "Comparer",
+    "feed": "Fil Social",
+    "premium": "Oaziland Premium"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -101,7 +103,8 @@
     "save": "Enregistrer",
     "saved": "Enregistré ✓",
     "compare": "Ajouter à la Comparaison",
-    "removeFromCompare": "Retirer de la Comparaison"
+    "removeFromCompare": "Retirer de la Comparaison",
+    "shareOnSocial": "Partager sur le Fil Social"
   },
   "LoginPage": {
     "title": "Se connecter",
@@ -446,5 +449,43 @@
     "noNotificationsYet": "Vous n'avez aucune notification pour le moment.",
     "markAllRead": "Tout marquer comme lu",
     "signInRequired": "Connectez-vous pour voir vos notifications"
+  },
+  "FeedPage": {
+    "title": "Fil d'Actualité",
+    "tabForYou": "Pour Vous",
+    "tabFollowing": "Abonnements",
+    "searchPlaceholder": "Rechercher des publications...",
+    "createPost": "Créer une Publication",
+    "noPostsYet": "Rien ici pour le moment.",
+    "signInForFollowing": "Connectez-vous pour voir les publications des personnes que vous suivez.",
+    "verifiedBadge": "Premium",
+    "sponsoredBadge": "Sponsorisé",
+    "realEstateBadge": "Propriété",
+    "comments": "{count} commentaires"
+  },
+  "CreatePostPage": {
+    "title": "Créer une Publication",
+    "captionPlaceholder": "Écrivez une légende...",
+    "tagsPlaceholder": "Tags (séparés par des virgules, ex. Bastos, ALouer)",
+    "linkedToListing": "Lié à votre annonce",
+    "post": "Publier",
+    "posting": "Publication en cours...",
+    "posted": "Publié !",
+    "blocked": "Cette publication a été bloquée par la modération. Veuillez la modifier et réessayer.",
+    "signInRequired": "Connectez-vous pour créer une publication"
+  },
+  "PremiumPage": {
+    "title": "Oaziland Premium",
+    "subtitle": "Un petit avantage mensuel pour ceux qui publient sur le fil social.",
+    "priceLabel": "500 XAF / mois",
+    "benefit1": "Un badge premium sur toutes vos publications",
+    "benefit2": "Une légère mise en avant de vos publications dans le fil",
+    "benefit3": "Support prioritaire",
+    "subscribe": "S'abonner",
+    "subscribing": "Abonnement en cours...",
+    "alreadySubscribed": "Vous êtes déjà abonné Premium.",
+    "cancel": "Annuler l'Abonnement",
+    "phonePlaceholder": "Numéro de téléphone pour le paiement",
+    "signInRequired": "Connectez-vous pour vous abonner"
   }
 }

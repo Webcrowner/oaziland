@@ -134,6 +134,16 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
             </p>
             {listing.lister_agency_name && <p className="text-sm text-gray-500">{listing.lister_agency_name}</p>}
           </div>
+          {/* The founder's explicit request: any listing posted by a
+              landlord/agent/owner/agency should suggest cross-posting
+              to the social feed — a natural, free way for the lister
+              to promote what they've already listed. */}
+          <Link
+            href={{ pathname: "/feed/create", query: { listing_id: listing.id } }}
+            className="text-xs font-semibold text-[#1B2A4A] underline hover:text-[#C9A227] whitespace-nowrap"
+          >
+            {t("shareOnSocial")}
+          </Link>
         </div>
 
         <dl className="grid grid-cols-2 gap-4 text-sm border-t pt-4 mb-6">

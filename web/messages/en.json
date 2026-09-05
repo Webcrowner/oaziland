@@ -40,7 +40,9 @@
     "notifications": "Notifications",
     "favorites": "Saved Listings",
     "savedSearches": "Saved Searches",
-    "compare": "Compare"
+    "compare": "Compare",
+    "feed": "Social Feed",
+    "premium": "Oaziland Premium"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -101,7 +103,8 @@
     "save": "Save",
     "saved": "Saved ✓",
     "compare": "Add to Compare",
-    "removeFromCompare": "Remove from Compare"
+    "removeFromCompare": "Remove from Compare",
+    "shareOnSocial": "Share on Social Feed"
   },
   "LoginPage": {
     "title": "Sign in",
@@ -446,5 +449,43 @@
     "noNotificationsYet": "You have no notifications yet.",
     "markAllRead": "Mark all as read",
     "signInRequired": "Sign in to see your notifications"
+  },
+  "FeedPage": {
+    "title": "Feed",
+    "tabForYou": "For You",
+    "tabFollowing": "Following",
+    "searchPlaceholder": "Search posts...",
+    "createPost": "Create Post",
+    "noPostsYet": "Nothing here yet.",
+    "signInForFollowing": "Sign in to see posts from people you follow.",
+    "verifiedBadge": "Premium",
+    "sponsoredBadge": "Sponsored",
+    "realEstateBadge": "Property",
+    "comments": "{count} comments"
+  },
+  "CreatePostPage": {
+    "title": "Create a Post",
+    "captionPlaceholder": "Write a caption...",
+    "tagsPlaceholder": "Tags (comma-separated, e.g. Bastos, ForRent)",
+    "linkedToListing": "Linked to your listing",
+    "post": "Post",
+    "posting": "Posting...",
+    "posted": "Posted!",
+    "blocked": "This post was blocked by content moderation. Please revise it and try again.",
+    "signInRequired": "Sign in to create a post"
+  },
+  "PremiumPage": {
+    "title": "Oaziland Premium",
+    "subtitle": "A small monthly perk for people who post on the social side.",
+    "priceLabel": "500 XAF / month",
+    "benefit1": "A premium checkmark on all your posts",
+    "benefit2": "A small boost in the feed for your posts",
+    "benefit3": "Priority support",
+    "subscribe": "Subscribe",
+    "subscribing": "Subscribing...",
+    "alreadySubscribed": "You're already a Premium subscriber.",
+    "cancel": "Cancel Subscription",
+    "phonePlaceholder": "Phone number for payment",
+    "signInRequired": "Sign in to subscribe"
   }
 }

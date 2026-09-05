@@ -679,6 +679,118 @@ export async function markAllNotificationsRead(accessToken: string) {
   });
 }
 
+export interface SocialPost {
+  id: string;
+  author: string;
+  author_name: string;
+  is_verified_creator: boolean;
+  poster_role: string;
+  post_type: string;
+  caption: string;
+  tag_names: string[];
+  media: { id: string; media_type: string; file_url: string }[];
+  linked_listing_id: string | null;
+  status: string;
+  published_at: string | null;
+  created_at: string;
+  reaction_counts: Record<string, number>;
+  comment_count: number;
+  is_sponsored: boolean;
+}
+
+export async function listFeedPosts(accessToken?: string): Promise<{ count: number; results: SocialPost[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("Could not fetch feed");
+  return res.json();
+}
+
+export async function listFollowingFeed(accessToken: string): Promise<{ count: number; results: SocialPost[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/following/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch following feed");
+  return res.json();
+}
+
+export async function searchPosts(query: string): Promise<{ count: number; results: SocialPost[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/search/?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error("Could not search posts");
+  return res.json();
+}
+
+export async function createPost(
+  payload: { caption: string; tags?: string[]; linked_listing_id?: string },
+  accessToken: string
+): Promise<{ id: string } & Record<string, unknown>> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not create post");
+  return data;
+}
+
+export async function reactToPost(postId: string, emoji: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/react/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ emoji }),
+  });
+  if (!res.ok) throw new Error("Could not react to post");
+  return res.json();
+}
+
+export interface PostComment {
+  id: string;
+  post: string;
+  author: string;
+  author_name: string;
+  text: string;
+  created_at: string;
+}
+
+export async function getPostComments(postId: string): Promise<PostComment[]> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/comments/`);
+  if (!res.ok) throw new Error("Could not fetch comments");
+  return res.json();
+}
+
+export async function addPostComment(postId: string, text: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/comments/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ post: postId, text }),
+  });
+  if (!res.ok) throw new Error("Could not add comment");
+  return res.json();
+}
+
+export async function getMyCreatorPremiumStatus(accessToken: string): Promise<{ is_premium: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/my-creator-premium/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch premium status");
+  return res.json();
+}
+
+export async function subscribeCreatorPremium(phoneNumber: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/my-creator-premium/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ phone_number: phoneNumber }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Subscription failed");
+  return data;
+}
+
+export async function cancelCreatorPremium(accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/my-creator-premium/`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;
