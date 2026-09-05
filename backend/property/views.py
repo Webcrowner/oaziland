@@ -10,7 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from .models import Listing, ListingStatus
+from .models import Listing, ListingStatus, ListingType
 from .serializers import ListingSerializer
 from oaziland.permissions import IsAdminRole, IsOwnerOrReadOnly, IsVerifiedAndMfaEnabled
 
@@ -120,7 +120,16 @@ class ListingViewSet(viewsets.ModelViewSet):
         from engagement.models import WhatsAppContext
 
         listing = self.get_object()
-        context = WhatsAppContext.CONTACT_AGENT if listing.lister_role != "OWNER" else WhatsAppContext.CONTACT_LANDLORD
+        if listing.lister_role != "OWNER":
+            context = WhatsAppContext.CONTACT_AGENT
+        elif listing.listing_type == ListingType.RENT:
+            # A direct owner renting out their property IS a landlord.
+            context = WhatsAppContext.CONTACT_LANDLORD
+        else:
+            # A direct owner selling outright is a seller, not a
+            # landlord — see WhatsAppContext's own docstring for why
+            # this distinction is real, not just wording preference.
+            context = WhatsAppContext.CONTACT_SELLER
         action_result = build_whatsapp_action(
             context=context, triggered_by=request.user,
             target_object=listing, recipient_phone=listing.listed_by.phone,

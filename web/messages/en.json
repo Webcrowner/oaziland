@@ -28,7 +28,8 @@
     "noPhotoYet": "No photo yet",
     "finishModern": "Modern",
     "finishStandard": "Standard",
-    "listerOwner": "Owner",
+    "listerOwner": "Landlord",
+    "listerOwnerSale": "Owner",
     "listerAgent": "Agent",
     "listerAgency": "Agency",
     "postedOn": "Posted {date}"
@@ -71,7 +72,8 @@
     "contactOnWhatsApp": "Contact on WhatsApp",
     "contacting": "Opening WhatsApp...",
     "contactFailed": "Could not start the conversation. Please try again.",
-    "listerOwnerFull": "Listed by the Property Owner",
+    "listerOwnerFull": "Listed by the Landlord",
+    "listerOwnerSaleFull": "Listed by the Owner",
     "listerAgentFull": "Listed by an Agent",
     "listerAgencyFull": "Listed by an Agency",
     "postedOnFull": "Posted on {date}"

@@ -5,10 +5,16 @@ import { Link } from "@/i18n/navigation";
 import ContactListingButton from "@/components/ContactListingButton";
 
 const LISTER_ROLE_LABEL_KEYS: Record<string, string> = {
-  OWNER: "listerOwnerFull",
   AGENT: "listerAgentFull",
   AGENCY: "listerAgencyFull",
 };
+
+function listerRoleLabelKey(role: string, listingType: string): string {
+  if (role === "OWNER") {
+    return listingType === "SALE" ? "listerOwnerSaleFull" : "listerOwnerFull";
+  }
+  return LISTER_ROLE_LABEL_KEYS[role] || "listerOwnerFull";
+}
 
 /**
  * Listing detail — Page 3 of Prompt 17. Server-rendered with
@@ -82,7 +88,7 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
         <div className={`rounded-lg p-4 mb-6 flex items-center justify-between ${listing.lister_role === "OWNER" ? "bg-green-50" : "bg-[#C9A227]/10"}`}>
           <div>
             <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${listing.lister_role === "OWNER" ? "bg-green-100 text-green-800" : "bg-[#C9A227]/30 text-[#8A6D14]"}`}>
-              {t(LISTER_ROLE_LABEL_KEYS[listing.lister_role] || "listerOwnerFull")}
+              {t(listerRoleLabelKey(listing.lister_role, listing.listing_type))}
             </span>
             <p className="font-semibold text-[#1B2A4A] mt-1">
               {listing.lister_role === "AGENT" || listing.lister_role === "AGENCY" ? (

@@ -113,3 +113,32 @@ def test_property_description_is_the_short_text_shown_to_viewers(quarter):
     client = APIClient()
     response = client.get("/api/listings/")
     assert response.data["results"][0]["property_asset"]["description"] == "Cozy 3-bedroom family home, quiet street, 5 min from the market."
+
+
+@pytest.mark.django_db
+def test_contact_uses_landlord_context_for_rent_but_seller_context_for_sale(quarter):
+    """The terminology fix: a direct owner renting property out is
+    correctly addressed as a landlord; the SAME kind of direct owner
+    selling outright is correctly addressed as a seller, not a
+    landlord — two different real-world relationships, two different
+    contexts, not one blanket term."""
+    from engagement.models import ActionLog, WhatsAppContext
+
+    rent_owner = User.objects.create(username="terminology_rent_owner", phone="+237699444011")
+    sale_owner = User.objects.create(username="terminology_sale_owner", phone="+237699444012")
+    interested_user = User.objects.create(username="terminology_interested", phone="+237699444013")
+
+    house_a = House.objects.create(owner=rent_owner, quarter=quarter, type="HOUSE")
+    rent_listing = Listing.objects.create(property_asset=house_a, listed_by=rent_owner, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("80000"))
+
+    house_b = House.objects.create(owner=sale_owner, quarter=quarter, type="HOUSE")
+    sale_listing = Listing.objects.create(property_asset=house_b, listed_by=sale_owner, listing_type=ListingType.SALE, status=ListingStatus.PUBLISHED, price_xaf=Decimal("20000000"))
+
+    client = _auth_client(interested_user)
+    client.post(f"/api/listings/{rent_listing.id}/contact/")
+    client.post(f"/api/listings/{sale_listing.id}/contact/")
+
+    assert ActionLog.objects.filter(target_id=rent_listing.id, context=WhatsAppContext.CONTACT_LANDLORD).exists()
+    assert ActionLog.objects.filter(target_id=sale_listing.id, context=WhatsAppContext.CONTACT_SELLER).exists()
+    # And never the wrong way around.
+    assert ActionLog.objects.filter(target_id=sale_listing.id, context=WhatsAppContext.CONTACT_LANDLORD).exists() is False

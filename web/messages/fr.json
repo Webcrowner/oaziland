@@ -29,6 +29,7 @@
     "finishModern": "Moderne",
     "finishStandard": "Standard",
     "listerOwner": "Propriétaire",
+    "listerOwnerSale": "Propriétaire",
     "listerAgent": "Agent",
     "listerAgency": "Agence",
     "postedOn": "Publié le {date}"
@@ -72,6 +73,7 @@
     "contacting": "Ouverture de WhatsApp...",
     "contactFailed": "Impossible de démarrer la conversation. Veuillez réessayer.",
     "listerOwnerFull": "Publié par le Propriétaire",
+    "listerOwnerSaleFull": "Publié par le Propriétaire",
     "listerAgentFull": "Publié par un Agent",
     "listerAgencyFull": "Publié par une Agence",
     "postedOnFull": "Publié le {date}"

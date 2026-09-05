@@ -3,10 +3,20 @@ import { Link } from "@/i18n/navigation";
 import type { Listing } from "@/lib/api";
 
 const LISTER_ROLE_LABEL_KEYS: Record<string, string> = {
-  OWNER: "listerOwner",
   AGENT: "listerAgent",
   AGENCY: "listerAgency",
 };
+
+/** A direct owner renting property out is a landlord; a direct owner
+ * selling it outright is an owner — the same person, a different real
+ * word depending on the listing type. Agent/Agency labels don't
+ * depend on listing type at all. */
+function listerRoleLabelKey(role: string, listingType: string): string {
+  if (role === "OWNER") {
+    return listingType === "SALE" ? "listerOwnerSale" : "listerOwner";
+  }
+  return LISTER_ROLE_LABEL_KEYS[role] || "listerOwner";
+}
 
 /**
  * PropertyCard — search result card. WHY the lister-role badge and
@@ -53,7 +63,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
               listing.lister_role === "OWNER" ? "bg-green-100 text-green-800" : "bg-[#C9A227]/20 text-[#8A6D14]"
             }`}
           >
-            {t(LISTER_ROLE_LABEL_KEYS[listing.lister_role] || "listerOwner")}
+            {t(listerRoleLabelKey(listing.lister_role, listing.listing_type))}
           </span>
         </div>
         <p className="text-lg font-bold text-[#1B2A4A]">{price} XAF</p>

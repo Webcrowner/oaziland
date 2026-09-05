@@ -16,8 +16,18 @@ class WhatsAppContext(models.TextChoices):
     """Every place a WhatsApp button can appear — one enum value per
     CONTEXT, not per button instance, since the wording (via
     WhatsAppMessageTemplate) is what varies, not the underlying
-    mechanism."""
+    mechanism.
+
+    WHY CONTACT_LANDLORD and CONTACT_SELLER are separate, not one
+    generic 'contact the owner' context: a landlord RENTS property
+    out; an owner SELLING it outright is more naturally addressed as
+    an owner or seller, not a landlord — the same person, a different
+    real-world relationship depending on whether the listing is a
+    rental or a sale. Conflating them meant a house seller could
+    receive a WhatsApp message opening with 'landlord,' which is
+    simply the wrong word for what they're doing."""
     CONTACT_LANDLORD = "CONTACT_LANDLORD", "Contact Landlord"
+    CONTACT_SELLER = "CONTACT_SELLER", "Contact Seller"
     CONTACT_AGENT = "CONTACT_AGENT", "Contact Agent"
     INQUIRE_LISTING = "INQUIRE_LISTING", "Inquire About Listing"
     CONFIRM_BOOKING = "CONFIRM_BOOKING", "Confirm Booking"
