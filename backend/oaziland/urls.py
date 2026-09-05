@@ -18,14 +18,15 @@ from geo.views import QuarterViewSet
 from property.views import ListingViewSet, HouseViewSet, ShopViewSet
 from land.views import LandViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
-from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView
+from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView, MyFavoriteListingsView, ToggleFavoriteListingView
 from trust_safety.views import AdminConsoleSummaryView, AdminVerificationRequestViewSet, AdminContentReportViewSet, AdminDisputeCaseViewSet
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 from hotels.views import HotelViewSet, ReservationViewSet
 from events.views import VenueViewSet, EventBookingViewSet
 from student_hostels.views import StudentHostelViewSet, MyRoomAllocationViewSet
 from guest_houses.views import GuestHouseLodgeViewSet
-from discovery.views import WantedListingViewSet
+from discovery.views import WantedListingViewSet, SavedSearchViewSet, MyComparisonView
+from notifications.views import MyNotificationViewSet
 from catalogue.views import PartnerServiceCategoryViewSet
 from engagement.views import ContactMessageView
 from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet
@@ -57,6 +58,8 @@ router.register(r"wanted-listings", WantedListingViewSet, basename="wanted-listi
 router.register(r"service-categories", PartnerServiceCategoryViewSet, basename="service-category")
 router.register(r"trainings", TrainingProgramViewSet, basename="training")
 router.register(r"my-enrollments", MyEnrollmentViewSet, basename="my-enrollment")
+router.register(r"saved-searches", SavedSearchViewSet, basename="saved-search")
+router.register(r"my-notifications", MyNotificationViewSet, basename="my-notification")
 
 from django.http import JsonResponse
 
@@ -90,6 +93,9 @@ urlpatterns = [
     path('api/auth/my-referral-code/', MyReferralCodeView.as_view(), name='my-referral-code'),
     path('api/my-presence-settings/', MyPresenceSettingsView.as_view(), name='my-presence-settings'),
     path('api/admin/console-summary/', AdminConsoleSummaryView.as_view(), name='admin-console-summary'),
+    path('api/my-favorites/', MyFavoriteListingsView.as_view(), name='my-favorites'),
+    path('api/listings/<uuid:listing_id>/toggle-favorite/', ToggleFavoriteListingView.as_view(), name='toggle-favorite'),
+    path('api/my-comparison/', MyComparisonView.as_view(), name='my-comparison'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.

@@ -193,3 +193,28 @@ class MyPresenceSettingsView(APIView):
             "show_online_status": presence.show_online_status,
             "show_typing_indicator": presence.show_typing_indicator,
         })
+
+
+class MyFavoriteListingsView(APIView):
+    """A real gap this closes: the Favorite model existed and was even
+    USED internally (feeding get_recommended_feed's interest-tag
+    matching), but nothing ever let a user actually save a listing —
+    no create function existed at the service layer at all."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .services import list_my_favorite_listing_ids
+        return Response({"listing_ids": [str(lid) for lid in list_my_favorite_listing_ids(request.user)]})
+
+
+class ToggleFavoriteListingView(APIView):
+    """The real 'one tap save' behavior — a single button whose action
+    depends on current state, matching toggle_follow()'s established pattern."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=None, responses={200: dict})
+    def post(self, request, listing_id):
+        from .services import toggle_favorite_listing
+        is_now_favorited = toggle_favorite_listing(user=request.user, listing_id=listing_id)
+        return Response({"is_favorited": is_now_favorited})

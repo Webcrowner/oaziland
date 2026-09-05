@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import WantedListing, WantedListingResponse
+from .models import WantedListing, WantedListingResponse, SavedSearch, PropertyComparison
 
 
 class WantedListingResponseSerializer(serializers.ModelSerializer):
@@ -17,3 +17,17 @@ class WantedListingSerializer(serializers.ModelSerializer):
         model = WantedListing
         fields = ["id", "category", "quarter", "quarter_name", "min_size_sqm", "max_budget_xaf", "notes", "status", "created_at", "responses"]
         read_only_fields = ["status", "created_at"]
+
+
+class SavedSearchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SavedSearch
+        fields = ["id", "name", "filters", "last_notified_at"]
+        read_only_fields = ["last_notified_at"]
+
+
+class PropertyComparisonSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyComparison
+        fields = ["id", "listing_ids", "created_at"]
+        read_only_fields = ["created_at"]

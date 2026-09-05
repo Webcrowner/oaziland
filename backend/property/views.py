@@ -103,9 +103,17 @@ class ListingViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         """Admin-only, per the RBAC matrix's explicit rule: 'only Admin
-        can approve a listing.'"""
+        can approve a listing.'
+
+        WHY publish_listing_and_notify(), not a bare listing.publish():
+        this endpoint previously called publish() directly, which
+        SKIPPED check_saved_searches_for_new_listing() entirely —
+        meaning saved-search alerts had never actually fired for any
+        real, admin-approved listing through the real API, despite
+        the notification-triggering function existing and being tested."""
+        from discovery.services import publish_listing_and_notify
         listing = self.get_object()
-        listing.publish()
+        publish_listing_and_notify(listing)
         return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])

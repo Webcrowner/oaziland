@@ -56,6 +56,26 @@ def search_listings_with_filters(filters: dict, queryset=None):
     return [listing for listing in queryset if listing_matches_filters(listing, filters)]
 
 
+def create_saved_search(*, user, filters: dict, name: str = ""):
+    """A real gap this closes: check_saved_searches_for_new_listing()
+    matches new listings against saved searches, and now-fixed
+    publish_listing_and_notify() actually triggers that check — but
+    nothing ever let a user CREATE a saved search in the first place.
+    The alerting mechanism existed with nothing to alert on."""
+    from .models import SavedSearch
+    return SavedSearch.objects.create(user=user, filters=filters, name=name)
+
+
+def list_my_saved_searches(user):
+    from .models import SavedSearch
+    return SavedSearch.objects.filter(user=user).order_by("-id")
+
+
+def delete_saved_search(*, user, saved_search_id):
+    from .models import SavedSearch
+    SavedSearch.objects.filter(user=user, id=saved_search_id).delete()
+
+
 def check_saved_searches_for_new_listing(listing):
     """Called when a listing publishes — checks EVERY saved search
     against it and fires a real notification for each match. This is

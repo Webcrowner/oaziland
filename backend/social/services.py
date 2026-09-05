@@ -605,3 +605,52 @@ def award_referral_reward(referral, amount_xaf=None):
         referral.save(update_fields=["status", "reward_earned_xaf"])
 
     return referral
+
+
+# ---------------------------------------------------------------------------
+# Favorites — a real gap this closes: the Favorite model existed and
+# was even USED (feeding get_recommended_feed's interest-tag matching),
+# but NOTHING ever actually created one — a user had no way to save a
+# listing or post at all.
+# ---------------------------------------------------------------------------
+def favorite_listing(*, user, listing_id):
+    from .models import Favorite
+    favorite, _ = Favorite.objects.get_or_create(user=user, listing_id=listing_id, post=None)
+    return favorite
+
+
+def unfavorite_listing(*, user, listing_id):
+    from .models import Favorite
+    Favorite.objects.filter(user=user, listing_id=listing_id, post=None).delete()
+
+
+def is_listing_favorited(*, user, listing_id) -> bool:
+    from .models import Favorite
+    return Favorite.objects.filter(user=user, listing_id=listing_id, post=None).exists()
+
+
+def toggle_favorite_listing(*, user, listing_id) -> bool:
+    """The real 'one tap' behavior, matching toggle_follow()'s exact
+    pattern — a single button whose action depends on current state.
+    Returns whether the listing is NOW favorited."""
+    if is_listing_favorited(user=user, listing_id=listing_id):
+        unfavorite_listing(user=user, listing_id=listing_id)
+        return False
+    favorite_listing(user=user, listing_id=listing_id)
+    return True
+
+
+def favorite_post(*, user, post):
+    from .models import Favorite
+    favorite, _ = Favorite.objects.get_or_create(user=user, post=post, listing_id=None)
+    return favorite
+
+
+def unfavorite_post(*, user, post):
+    from .models import Favorite
+    Favorite.objects.filter(user=user, post=post, listing_id=None).delete()
+
+
+def list_my_favorite_listing_ids(user):
+    from .models import Favorite
+    return list(Favorite.objects.filter(user=user, listing_id__isnull=False).values_list("listing_id", flat=True))
