@@ -7,6 +7,7 @@ import ListingDetailScreen from "../screens/ListingDetailScreen";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import ListPropertyScreen from "../screens/ListPropertyScreen";
+import MfaSetupScreen from "../screens/MfaSetupScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -15,6 +16,7 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   ListProperty: undefined;
+  MfaSetup: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -42,6 +44,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Login" component={LoginScreen} options={{ title: "Sign In" }} />
         <Stack.Screen name="Register" component={RegisterScreen} options={{ title: "Create Account" }} />
         <Stack.Screen name="ListProperty" component={ListPropertyScreen} options={{ title: "List a Property" }} />
+        <Stack.Screen name="MfaSetup" component={MfaSetupScreen} options={{ title: "Verify Your Account" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

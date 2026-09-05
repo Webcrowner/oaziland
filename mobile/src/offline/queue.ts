@@ -15,7 +15,7 @@
  */
 import * as SQLite from "expo-sqlite";
 
-export type QueuedActionType = "CREATE_LISTING" | "SEND_MESSAGE";
+export type QueuedActionType = "CREATE_HOUSE_AND_LISTING" | "SEND_MESSAGE";
 
 export type QueueItemStatus = "PENDING" | "SYNCED" | "FAILED";
 

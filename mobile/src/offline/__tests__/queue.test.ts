@@ -13,8 +13,8 @@ beforeEach(async () => {
 });
 
 test("enqueueing an action generates a unique idempotency key", async () => {
-  const key1 = await enqueueAction("CREATE_LISTING", { price_xaf: "100000" });
-  const key2 = await enqueueAction("CREATE_LISTING", { price_xaf: "200000" });
+  const key1 = await enqueueAction("CREATE_HOUSE_AND_LISTING", { price_xaf: "100000" });
+  const key2 = await enqueueAction("CREATE_HOUSE_AND_LISTING", { price_xaf: "200000" });
 
   expect(key1).not.toEqual(key2);
 
@@ -23,7 +23,7 @@ test("enqueueing an action generates a unique idempotency key", async () => {
 });
 
 test("syncQueue calls the sender for every pending item and marks success", async () => {
-  await enqueueAction("CREATE_LISTING", { price_xaf: "100000" });
+  await enqueueAction("CREATE_HOUSE_AND_LISTING", { price_xaf: "100000" });
   await enqueueAction("SEND_MESSAGE", { text: "Hello" });
 
   const sentItems: QueueItem[] = [];
@@ -41,7 +41,7 @@ test("syncQueue calls the sender for every pending item and marks success", asyn
 });
 
 test("a failed sync attempt keeps the item pending for a future retry", async () => {
-  await enqueueAction("CREATE_LISTING", { price_xaf: "150000" });
+  await enqueueAction("CREATE_HOUSE_AND_LISTING", { price_xaf: "150000" });
 
   const firstAttempt = await syncQueue(async () => false); // simulate a failed send
   expect(firstAttempt.failed).toBe(1);
@@ -78,7 +78,7 @@ test("retrying with the SAME idempotency key never creates a duplicate queue ent
    * a second entry — proving the offline-safe guarantee is real, not
    * just a comment saying it should be.
    */
-  const idempotencyKey = await enqueueAction("CREATE_LISTING", { price_xaf: "300000" });
+  const idempotencyKey = await enqueueAction("CREATE_HOUSE_AND_LISTING", { price_xaf: "300000" });
 
   // Simulate an app crash/retry attempting to insert the exact same
   // idempotency key again, exactly as a naive retry-after-dropped-response
@@ -89,7 +89,7 @@ test("retrying with the SAME idempotency key never creates a duplicate queue ent
   await expect(
     db.runAsync(
       "INSERT INTO offline_queue (action_type, payload, idempotency_key) VALUES (?, ?, ?)",
-      ["CREATE_LISTING", JSON.stringify({ price_xaf: "300000" }), idempotencyKey]
+      ["CREATE_HOUSE_AND_LISTING", JSON.stringify({ price_xaf: "300000" }), idempotencyKey]
     )
   ).rejects.toThrow(/UNIQUE constraint/);
 
