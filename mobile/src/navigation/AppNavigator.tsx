@@ -17,6 +17,8 @@ import FavoritesScreen from "../screens/FavoritesScreen";
 import NotificationsScreen from "../screens/NotificationsScreen";
 import SavedSearchesScreen from "../screens/SavedSearchesScreen";
 import ComparisonScreen from "../screens/ComparisonScreen";
+import MessagesScreen from "../screens/MessagesScreen";
+import ConversationScreen from "../screens/ConversationScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -35,6 +37,8 @@ export type RootStackParamList = {
   Notifications: undefined;
   SavedSearches: undefined;
   Comparison: undefined;
+  Messages: undefined;
+  Conversation: { conversationId: string; participantNames: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -72,6 +76,8 @@ export default function AppNavigator() {
         <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
         <Stack.Screen name="SavedSearches" component={SavedSearchesScreen} options={{ title: "Saved Searches" }} />
         <Stack.Screen name="Comparison" component={ComparisonScreen} options={{ title: "Compare Properties" }} />
+        <Stack.Screen name="Messages" component={MessagesScreen} options={{ title: "Messages" }} />
+        <Stack.Screen name="Conversation" component={ConversationScreen} options={({ route }) => ({ title: route.params.participantNames })} />
       </Stack.Navigator>
     </NavigationContainer>
   );

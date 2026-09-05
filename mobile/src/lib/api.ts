@@ -400,3 +400,74 @@ export async function setMyComparison(listingIds: string[]) {
   if (!res.ok) throw new Error((await res.json()).detail || "Could not update comparison");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Messaging inbox and typing indicators — mirrors the web app's real
+// messaging API exactly.
+// ---------------------------------------------------------------------------
+export interface TickStatus {
+  delivered: boolean;
+  seen: boolean;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversation: string;
+  sender: string;
+  sender_name: string;
+  text: string;
+  folder: string;
+  sent_at: string | null;
+  created_at: string;
+  tick_status: TickStatus;
+}
+
+export interface ConversationSummary {
+  id: string;
+  participant_usernames: string[];
+  last_message: ConversationMessage | null;
+  unread_count: number;
+  created_at: string;
+}
+
+export async function listConversations(): Promise<PaginatedResponse<ConversationSummary>> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch conversations");
+  return res.json();
+}
+
+export async function getConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch messages");
+  return res.json();
+}
+
+export async function sendConversationMessage(conversationId: string, text: string): Promise<ConversationMessage> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/send/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ text, client_message_id: `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}` }),
+  });
+  if (!res.ok) throw new Error("Could not send message");
+  return res.json();
+}
+
+export async function markConversationSeen(conversationId: string) {
+  return fetch(`${API_BASE_URL}/api/conversations/${conversationId}/mark_seen/`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+}
+
+export async function sendTypingHeartbeat(conversationId: string) {
+  return fetch(`${API_BASE_URL}/api/conversations/${conversationId}/typing/`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+}
+
+export async function getTypingStatus(conversationId: string): Promise<{ typing_usernames: string[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/typing-status/`, { headers: await authHeaders() });
+  if (!res.ok) return { typing_usernames: [] };
+  return res.json();
+}
