@@ -373,5 +373,31 @@
     "typingIndicatorDescription": "Other people can see \"...is typing\" while you compose a reply to them.",
     "saved": "Saved",
     "signInRequired": "Sign in to manage your privacy settings"
+  },
+  "AdminConsolePage": {
+    "title": "Admin Console",
+    "tabSummary": "Overview",
+    "tabVerifications": "Verification Requests",
+    "tabReports": "Content Reports",
+    "tabDisputes": "Disputes",
+    "pendingVerifications": "Pending Verification Requests",
+    "openReports": "Open Content Reports",
+    "openDisputes": "Open Disputes",
+    "reportsTrend": "Report Volume Trend",
+    "noItems": "Nothing here right now.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "rejectReasonPlaceholder": "Reason (optional)",
+    "resolve": "Resolve",
+    "dismiss": "Dismiss",
+    "actionTakenPlaceholder": "What action did you take?",
+    "issueStrike": "Also issue a strike to this user",
+    "respond": "Mark as Responded To",
+    "resolveRelease": "Resolve: Release Payment",
+    "resolveRefund": "Resolve: Refund Guest",
+    "resolutionNotesPlaceholder": "Resolution notes",
+    "notAdmin": "This account does not have admin access.",
+    "signInRequired": "Sign in to access the admin console",
+    "submit": "Submit"
   }
 }

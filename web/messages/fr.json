@@ -373,5 +373,31 @@
     "typingIndicatorDescription": "Les autres peuvent voir « ...est en train d'écrire » pendant que vous rédigez une réponse.",
     "saved": "Enregistré",
     "signInRequired": "Connectez-vous pour gérer vos paramètres de confidentialité"
+  },
+  "AdminConsolePage": {
+    "title": "Console d'Administration",
+    "tabSummary": "Aperçu",
+    "tabVerifications": "Demandes de Vérification",
+    "tabReports": "Signalements",
+    "tabDisputes": "Litiges",
+    "pendingVerifications": "Demandes de Vérification en Attente",
+    "openReports": "Signalements Ouverts",
+    "openDisputes": "Litiges Ouverts",
+    "reportsTrend": "Tendance du Volume de Signalements",
+    "noItems": "Rien ici pour le moment.",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "rejectReasonPlaceholder": "Raison (facultatif)",
+    "resolve": "Résoudre",
+    "dismiss": "Rejeter",
+    "actionTakenPlaceholder": "Quelle action avez-vous prise ?",
+    "issueStrike": "Émettre également un avertissement à cet utilisateur",
+    "respond": "Marquer comme Traité",
+    "resolveRelease": "Résoudre : Libérer le Paiement",
+    "resolveRefund": "Résoudre : Rembourser le Client",
+    "resolutionNotesPlaceholder": "Notes de résolution",
+    "notAdmin": "Ce compte n'a pas d'accès administrateur.",
+    "signInRequired": "Connectez-vous pour accéder à la console d'administration",
+    "submit": "Soumettre"
   }
 }

@@ -478,6 +478,106 @@ export async function updateMyPresenceSettings(settings: Partial<PresenceSetting
   return res.json();
 }
 
+export interface AdminConsoleSummary {
+  pending_verification_requests: number;
+  open_content_reports: number;
+  open_dispute_cases: number;
+  reports_trend: { current_period_value: number; previous_period_value: number; percent_change: number | null };
+}
+
+export interface AdminVerificationRequest {
+  id: string;
+  requester: string;
+  requester_name: string;
+  request_type: string;
+  subject_content_type: string;
+  subject_id: string;
+  status: string;
+  supporting_document_url: string;
+  submitted_at: string;
+}
+
+export interface AdminContentReport {
+  id: string;
+  reported_by: string;
+  reported_by_name: string;
+  reason: string;
+  status: string;
+  target_post: string | null;
+  target_listing_id: string | null;
+  target_comment: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface AdminDisputeCase {
+  id: string;
+  escrow: string;
+  raised_by: string;
+  raised_by_name: string;
+  status: string;
+  reason: string;
+  created_at: string;
+  response_due_at: string;
+  resolution_due_at: string;
+}
+
+function adminHeaders(accessToken: string) {
+  return { Authorization: `Bearer ${accessToken}` };
+}
+
+export async function getAdminConsoleSummary(accessToken: string): Promise<AdminConsoleSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/console-summary/`, { headers: adminHeaders(accessToken) });
+  if (!res.ok) throw new Error(`Admin summary fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function listAdminVerificationRequests(accessToken: string): Promise<{ count: number; results: AdminVerificationRequest[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/verification-requests/`, { headers: adminHeaders(accessToken) });
+  if (!res.ok) throw new Error(`Verification requests fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function approveVerificationRequest(id: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/verification-requests/${id}/approve/`, { method: "POST", headers: adminHeaders(accessToken) });
+}
+
+export async function rejectVerificationRequest(id: string, reason: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/verification-requests/${id}/reject/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ reason }),
+  });
+}
+
+export async function listAdminContentReports(accessToken: string): Promise<{ count: number; results: AdminContentReport[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/content-reports/`, { headers: adminHeaders(accessToken) });
+  if (!res.ok) throw new Error(`Content reports fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function resolveContentReport(id: string, actionTaken: string, issueStrike: boolean, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/content-reports/${id}/resolve/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) },
+    body: JSON.stringify({ action_taken: actionTaken, issue_strike: issueStrike }),
+  });
+}
+
+export async function listAdminDisputeCases(accessToken: string): Promise<{ count: number; results: AdminDisputeCase[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/dispute-cases/`, { headers: adminHeaders(accessToken) });
+  if (!res.ok) throw new Error(`Dispute cases fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function respondToDispute(id: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/dispute-cases/${id}/respond/`, { method: "POST", headers: adminHeaders(accessToken) });
+}
+
+export async function resolveDispute(id: string, outcome: "RELEASE" | "REFUND", notes: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/dispute-cases/${id}/resolve/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) },
+    body: JSON.stringify({ outcome, notes }),
+  });
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;
