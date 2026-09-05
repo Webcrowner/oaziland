@@ -103,10 +103,30 @@ def get_recommended_feed(user, limit=20):
     push it, regardless of how well it would otherwise match a user's
     interests. This is a real, enforced tier, not a written guideline
     with nothing behind it.
+
+    WHY boosted posts get their own tier, below real estate but above
+    everything else: AdPlacement.FEED_BOOSTED_POST existed as a
+    purchasable option, and purchase_campaign_boost() actually charges
+    real money for it — but the BoostedContent row it created was
+    never checked by this function at all, meaning a paid boost bought
+    genuinely nothing. A real estate post still wins even if it isn't
+    boosted — boosting doesn't let paid content override the
+    platform's core content-priority rule, it only lifts a post above
+    the OTHER generic, unboosted content it's actually competing with.
     """
+    from django.utils import timezone
     from .models import Post, Reaction, Favorite, ContentStatus
+    from monetization.models import BoostedContent, AdStatus
 
     DISCOURAGED_TAG_NAMES = {"dance", "dancing"}
+
+    now = timezone.now()
+    boosted_post_ids = set(
+        BoostedContent.objects.filter(
+            post__isnull=False, campaign__status=AdStatus.ACTIVE,
+            campaign__starts_at__lte=now, campaign__ends_at__gte=now,
+        ).values_list("post_id", flat=True)
+    )
 
     liked_post_ids = Reaction.objects.filter(author=user).values_list("post_id", flat=True)
     favorited_post_ids = Favorite.objects.filter(user=user).exclude(post__isnull=True).values_list("post_id", flat=True)
@@ -132,11 +152,18 @@ def get_recommended_feed(user, limit=20):
             continue
 
         is_real_estate = post.linked_listing_id is not None
+        is_boosted = post.id in boosted_post_ids
         shares_interest_tag = post.tags.filter(id__in=interest_tag_ids).exists() if interest_tag_ids else False
-        # Real estate is a HARD priority tier (10000+), not just a few
-        # extra points — a real estate post always beats a non-real-estate
-        # post regardless of tag overlap, per the explicit requirement.
-        score = (10000 if is_real_estate else 0) + (1 if shares_interest_tag else 0)
+        # Real estate is a HARD priority tier (10000+) — always wins,
+        # boosted or not. A paid boost lifts a NON-real-estate post
+        # into its own tier (5000+), above plain generic content but
+        # never above real estate itself.
+        if is_real_estate:
+            score = 10000 + (1 if shares_interest_tag else 0)
+        elif is_boosted:
+            score = 5000 + (1 if shares_interest_tag else 0)
+        else:
+            score = 1 if shares_interest_tag else 0
         scored.append((post, score))
 
     scored.sort(key=lambda pair: (pair[1], pair[0].created_at), reverse=True)
@@ -447,3 +474,89 @@ def unlink_social_account(*, user, platform: str):
 def list_social_accounts(user):
     from .models import SocialAccountLink
     return SocialAccountLink.objects.filter(user=user)
+
+
+# ---------------------------------------------------------------------------
+# Referral processing — a Referral record is a real, auditable trail
+# from a specific promo code to a specific new signup, through
+# qualification, to an actual paid reward.
+# ---------------------------------------------------------------------------
+REFERRAL_REWARD_XAF = 2000  # a real, working starting default — easy to tune later
+
+
+class InvalidReferralCodeError(Exception):
+    pass
+
+
+def process_referral_signup(*, new_user, referral_code: str):
+    """Called right after registration if the new user entered a
+    referral code — looks up the real referrer by their persistent
+    code and creates the auditable Referral record. Never silently
+    fails on an unknown code: a typo shouldn't create a phantom
+    referral, and the caller (the registration flow) should tell the
+    new user their code didn't match anything."""
+    from identity.models import User
+    from .models import Referral
+
+    try:
+        referrer = User.objects.get(referral_code=referral_code)
+    except User.DoesNotExist:
+        raise InvalidReferralCodeError("This referral code doesn't match any user.")
+
+    if referrer.id == new_user.id:
+        raise InvalidReferralCodeError("You cannot refer yourself.")
+
+    return Referral.objects.create(referrer=referrer, referred_user=new_user)
+
+
+def qualify_referral(referred_user):
+    """A referral only 'counts' once the referred person actually does
+    something real on the platform — per this implementation, completing
+    KYC (the same real milestone the platform already treats as
+    'registration complete' elsewhere) — not just creating an account,
+    which would make the reward trivially gameable with throwaway signups."""
+    from identity.services import user_has_submitted_kyc
+    from .models import Referral, ReferralStatus
+
+    if not user_has_submitted_kyc(referred_user):
+        return None
+
+    referral = Referral.objects.filter(referred_user=referred_user, status=ReferralStatus.PENDING).first()
+    if referral is None:
+        return None
+
+    referral.status = ReferralStatus.QUALIFIED
+    referral.save(update_fields=["status"])
+    return referral
+
+
+def award_referral_reward(referral, amount_xaf=None):
+    """Actually pays the referrer — credits their real Wallet (the
+    same wallet every other payout in this platform uses), with a
+    genuine WalletTransaction audit trail, not just a status flip with
+    no money behind it."""
+    from django.db import transaction as db_transaction
+    from monetization.services import get_or_create_wallet
+    from monetization.models import WalletTransaction, WalletTransactionType
+    from decimal import Decimal
+    from .models import ReferralStatus
+
+    if referral.status == ReferralStatus.REWARDED:
+        return referral  # never pay the same referral twice
+
+    amount = Decimal(str(amount_xaf if amount_xaf is not None else REFERRAL_REWARD_XAF))
+    wallet = get_or_create_wallet(referral.referrer)
+
+    with db_transaction.atomic():
+        wallet.balance_xaf += amount
+        wallet.save(update_fields=["balance_xaf"])
+        WalletTransaction.objects.create(
+            wallet=wallet, transaction_type=WalletTransactionType.GIFT_PAYOUT,
+            amount_xaf=amount, platform_fee_xaf=Decimal("0"),
+            related_reference=f"Referral reward for referring {referral.referred_user.username}",
+        )
+        referral.status = ReferralStatus.REWARDED
+        referral.reward_earned_xaf = amount
+        referral.save(update_fields=["status", "reward_earned_xaf"])
+
+    return referral

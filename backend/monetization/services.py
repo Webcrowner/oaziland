@@ -151,6 +151,7 @@ def get_boost_price(*, placement: str, duration_unit: str, duration_quantity: in
 def purchase_campaign_boost(
     *, owner, placement: str, duration_unit: str, duration_quantity: int,
     payment_gateway, phone_number: str, target_quarter=None, target_property_type: str = "",
+    target_post=None, target_listing_id=None,
 ):
     """Charges the advertiser for a boost (hourly/daily/monthly/yearly,
     Facebook-style) through the SAME PaymentGateway interface as every
@@ -159,9 +160,16 @@ def purchase_campaign_boost(
     literal 'same underlying calculation' the acceptance criteria asks
     for. The campaign's usable budget is the price paid MINUS the
     platform's fee, mirroring how a booking's payee_amount is gross
-    minus fee."""
+    minus fee.
+
+    WHY target_post/target_listing_id matter, and were a real gap
+    before this fix: AdPlacement.FEED_BOOSTED_POST existed as a choice,
+    but nothing ever actually connected a purchased campaign to a
+    SPECIFIC post or listing — a BoostedContent row (the thing the
+    feed/search algorithms actually check) was never created here.
+    A campaign existed, paid for, active — boosting nothing."""
     from django.utils import timezone
-    from .models import AdCampaign, AdStatus
+    from .models import AdCampaign, AdStatus, BoostedContent
 
     total_price = get_boost_price(placement=placement, duration_unit=duration_unit, duration_quantity=duration_quantity)
 
@@ -185,4 +193,8 @@ def purchase_campaign_boost(
         starts_at=starts_at, ends_at=starts_at + (duration_delta * duration_quantity),
     )
     campaign.launch()
+
+    if target_post is not None or target_listing_id is not None:
+        BoostedContent.objects.create(campaign=campaign, post=target_post, listing_id=target_listing_id)
+
     return campaign, platform_fee

@@ -41,6 +41,14 @@ class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     phone = models.CharField(max_length=20, unique=True)
     email = models.EmailField(blank=True, null=True, unique=True)
+    # WHY this lives directly on User, not a separate one-to-one model:
+    # every user has exactly one, and the registration flow needs to
+    # look up ANY user's code by it — a direct, indexed field is the
+    # simplest correct design for something this central. Generated
+    # lazily (see identity.services.get_or_create_referral_code) so
+    # existing users created before this feature still get one on
+    # first use, rather than needing a backfill migration.
+    referral_code = models.CharField(max_length=12, unique=True, null=True, blank=True)
     verification_status = models.CharField(
         max_length=20, choices=VerificationStatus.choices,
         default=VerificationStatus.UNVERIFIED,

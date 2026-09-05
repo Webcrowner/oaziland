@@ -101,3 +101,15 @@ class MyMfaStatusView(APIView):
     @extend_schema(responses={200: dict})
     def get(self, request):
         return Response({"mfa_enabled": user_has_verified_mfa(request.user)})
+
+
+class MyReferralCodeView(APIView):
+    """A user's own, real, persistent referral code — generated on
+    first request if they don't have one yet, per get_or_create_
+    referral_code()'s own lazy-generation design."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .services import get_or_create_referral_code
+        return Response({"referral_code": get_or_create_referral_code(request.user)})

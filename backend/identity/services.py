@@ -153,3 +153,29 @@ def confirm_password_reset(*, token_value: str, new_password: str):
     reset_token.consumed_at = timezone.now()
     reset_token.save(update_fields=["consumed_at"])
     return user
+
+
+# ---------------------------------------------------------------------------
+# Referral codes — a real, persistent, shareable code per user, not
+# just an implicit referrer/referred_user pairing with nothing a
+# person can actually hand out.
+# ---------------------------------------------------------------------------
+def get_or_create_referral_code(user) -> str:
+    """Generates a real, unique, human-shareable code the FIRST time
+    it's needed, and returns the SAME code every time after — a user's
+    referral code must be stable, or a link they already shared would
+    silently stop working."""
+    if user.referral_code:
+        return user.referral_code
+
+    import random
+    import string
+    from .models import User
+
+    while True:
+        candidate = (user.username[:4].upper().ljust(4, "X") if user.username else "USER") + \
+            "".join(random.choices(string.digits, k=4))
+        if not User.objects.filter(referral_code=candidate).exists():
+            user.referral_code = candidate
+            user.save(update_fields=["referral_code"])
+            return candidate

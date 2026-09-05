@@ -263,3 +263,64 @@ def test_dance_tag_matching_is_case_insensitive(landlord, viewer):
         matching_posts = [p for p in feed if any(t.name == tag_name for t in p.tags.all())]
         assert len(matching_posts) == 1
         assert feed_ids.index(matching_posts[0].id) > plain_index
+
+
+@pytest.mark.django_db
+def test_boosted_post_actually_ranks_above_generic_content(landlord, viewer):
+    """The real gap this closes: AdPlacement.FEED_BOOSTED_POST existed
+    as a purchasable option and real money was charged for it, but the
+    feed algorithm never checked for it at all — a paid boost bought
+    nothing. Confirms it now genuinely lifts a post's ranking, while
+    real estate priority still wins over it."""
+    from monetization.models import AdCampaign, AdPlacement, AdStatus, BoostedContent
+
+    boosted_post = Post.objects.create(author=landlord, caption="Boosted generic update")
+    boosted_post.publish()
+
+    unboosted_post = Post.objects.create(author=landlord, caption="A more recent, unboosted update")
+    unboosted_post.publish()
+
+    real_estate_post = Post.objects.create(author=landlord, caption="Real listing", linked_listing_id=__import__("uuid").uuid4())
+    real_estate_post.publish()
+
+    campaign = AdCampaign.objects.create(
+        owner=landlord, placement=AdPlacement.FEED_BOOSTED_POST, duration_unit="DAILY", duration_quantity=3,
+        budget_xaf=Decimal("5000"), starts_at=timezone.now() - timedelta(hours=1), ends_at=timezone.now() + timedelta(days=2),
+        status=AdStatus.ACTIVE,
+    )
+    BoostedContent.objects.create(campaign=campaign, post=boosted_post)
+
+    feed = get_recommended_feed(viewer)
+    feed_ids = [p.id for p in feed]
+
+    # Real estate still wins over everything, boosted or not.
+    assert feed_ids.index(real_estate_post.id) < feed_ids.index(boosted_post.id)
+    # The boosted post genuinely outranks the unboosted one, despite
+    # being posted earlier (so recency alone wouldn't explain this).
+    assert feed_ids.index(boosted_post.id) < feed_ids.index(unboosted_post.id)
+
+
+@pytest.mark.django_db
+def test_an_expired_boost_no_longer_promotes_the_post(landlord, viewer):
+    """A boost that's already ended must not keep lifting a post —
+    otherwise a one-time payment would promote content forever."""
+    from monetization.models import AdCampaign, AdPlacement, AdStatus, BoostedContent
+
+    expired_boosted_post = Post.objects.create(author=landlord, caption="Old boosted post")
+    expired_boosted_post.publish()
+    plain_post = Post.objects.create(author=landlord, caption="Plain post")
+    plain_post.publish()
+
+    expired_campaign = AdCampaign.objects.create(
+        owner=landlord, placement=AdPlacement.FEED_BOOSTED_POST, duration_unit="DAILY", duration_quantity=1,
+        budget_xaf=Decimal("2000"), starts_at=timezone.now() - timedelta(days=5), ends_at=timezone.now() - timedelta(days=4),
+        status=AdStatus.ACTIVE,
+    )
+    BoostedContent.objects.create(campaign=expired_campaign, post=expired_boosted_post)
+
+    feed = get_recommended_feed(viewer)
+    feed_ids = [p.id for p in feed]
+
+    # No longer boosted — ties on the plain baseline tier, so the more
+    # recently created post (plain_post) wins the tiebreak.
+    assert feed_ids.index(plain_post.id) < feed_ids.index(expired_boosted_post.id)

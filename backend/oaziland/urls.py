@@ -13,7 +13,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from identity.views import RegisterView, MyProfileView, MfaSetupView, MfaVerifyView, MyMfaStatusView
+from identity.views import RegisterView, MyProfileView, MfaSetupView, MfaVerifyView, MyMfaStatusView, MyReferralCodeView
 from geo.views import QuarterViewSet
 from property.views import ListingViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
@@ -75,6 +75,7 @@ urlpatterns = [
     path('api/auth/mfa/setup/', MfaSetupView.as_view(), name='mfa-setup'),
     path('api/auth/mfa/verify/', MfaVerifyView.as_view(), name='mfa-verify'),
     path('api/auth/mfa/status/', MyMfaStatusView.as_view(), name='mfa-status'),
+    path('api/auth/my-referral-code/', MyReferralCodeView.as_view(), name='my-referral-code'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
