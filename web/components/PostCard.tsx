@@ -1,13 +1,14 @@
 "use client";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { reactToPost, getPostComments, addPostComment, type SocialPost, type PostComment } from "@/lib/api";
 
 const EMOJIS: Record<string, string> = { LIKE: "👍", LOVE: "❤️", LAUGH: "😂", WOW: "😮", SAD: "😢" };
 
 export default function PostCard({ post }: { post: SocialPost }) {
   const t = useTranslations("FeedPage");
+  const router = useRouter();
   const [reactionCounts, setReactionCounts] = useState(post.reaction_counts);
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<PostComment[]>([]);
@@ -18,7 +19,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
   async function handleReact(emoji: string) {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      window.location.href = "/login";
+      router.push("/login");
       return;
     }
     setError("");
@@ -47,7 +48,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
     e.preventDefault();
     const token = localStorage.getItem("access_token");
     if (!token) {
-      window.location.href = "/login";
+      router.push("/login");
       return;
     }
     if (!commentDraft.trim()) return;

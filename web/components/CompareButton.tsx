@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
+import { useRouter } from "@/i18n/navigation";
 import { setMyComparison } from "@/lib/api";
 
 const STAGING_KEY = "oaziland_comparison_staging";
@@ -16,6 +17,7 @@ const STAGING_KEY = "oaziland_comparison_staging";
  */
 export default function CompareButton({ listingId }: { listingId: string }) {
   const t = useTranslations("ListingDetailPage");
+  const router = useRouter();
   const [staged, setStaged] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -30,7 +32,7 @@ export default function CompareButton({ listingId }: { listingId: string }) {
   async function handleToggle() {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      window.location.href = "/login";
+      router.push("/login");
       return;
     }
 

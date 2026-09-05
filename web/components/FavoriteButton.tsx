@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
+import { useRouter } from "@/i18n/navigation";
 import { getMyFavorites, toggleFavoriteListing } from "@/lib/api";
 
 /**
@@ -11,6 +12,7 @@ import { getMyFavorites, toggleFavoriteListing } from "@/lib/api";
  */
 export default function FavoriteButton({ listingId, variant = "card" }: { listingId: string; variant?: "card" | "detail" }) {
   const t = useTranslations(variant === "card" ? "PropertyCard" : "ListingDetailPage");
+  const router = useRouter();
   const [isFavorited, setIsFavorited] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -28,7 +30,7 @@ export default function FavoriteButton({ listingId, variant = "card" }: { listin
     e.stopPropagation();
     const token = localStorage.getItem("access_token");
     if (!token) {
-      window.location.href = "/login";
+      router.push("/login");
       return;
     }
     setLoading(true);
