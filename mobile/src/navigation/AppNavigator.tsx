@@ -21,6 +21,8 @@ import MessagesScreen from "../screens/MessagesScreen";
 import ConversationScreen from "../screens/ConversationScreen";
 import FeedScreen from "../screens/FeedScreen";
 import CreatePostScreen from "../screens/CreatePostScreen";
+import AdminConsoleScreen from "../screens/AdminConsoleScreen";
+import AgentDashboardScreen from "../screens/AgentDashboardScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -43,6 +45,8 @@ export type RootStackParamList = {
   Conversation: { conversationId: string; participantNames: string };
   Feed: undefined;
   CreatePost: { linkedListingId?: string } | undefined;
+  AdminConsole: undefined;
+  AgentDashboard: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -84,6 +88,8 @@ export default function AppNavigator() {
         <Stack.Screen name="Conversation" component={ConversationScreen} options={({ route }) => ({ title: route.params.participantNames })} />
         <Stack.Screen name="Feed" component={FeedScreen} options={{ title: "Feed" }} />
         <Stack.Screen name="CreatePost" component={CreatePostScreen} options={{ title: "Create a Post" }} />
+        <Stack.Screen name="AdminConsole" component={AdminConsoleScreen} options={{ title: "Admin Console" }} />
+        <Stack.Screen name="AgentDashboard" component={AgentDashboardScreen} options={{ title: "My Dashboard" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

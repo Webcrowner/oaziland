@@ -96,6 +96,8 @@ export default function HomeScreen({ navigation }: Props) {
           { label: "Compare Properties", screen: "Comparison" as const },
           { label: "Messages", screen: "Messages" as const },
           { label: "Social Feed", screen: "Feed" as const },
+          { label: "My Dashboard", screen: "AgentDashboard" as const },
+          { label: "Admin Console", screen: "AdminConsole" as const },
         ]).map((category) => (
           <TouchableOpacity key={category.screen} style={styles.exploreCard} onPress={() => navigation.navigate(category.screen)}>
             <Text style={styles.exploreCardText}>{category.label}</Text>

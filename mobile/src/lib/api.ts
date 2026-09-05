@@ -557,3 +557,113 @@ export async function addPostComment(postId: string, text: string) {
   if (!res.ok) throw new Error("Could not add comment");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Admin console — mirrors the web app's real admin API exactly.
+// ---------------------------------------------------------------------------
+export interface AdminConsoleSummary {
+  pending_verification_requests: number;
+  open_content_reports: number;
+  open_dispute_cases: number;
+  reports_trend: { current_period_value: number; previous_period_value: number; percent_change: number | null };
+}
+
+export interface AdminVerificationRequest {
+  id: string;
+  requester: string;
+  requester_name: string;
+  request_type: string;
+  status: string;
+  supporting_document_url: string;
+  submitted_at: string;
+}
+
+export interface AdminContentReport {
+  id: string;
+  reported_by: string;
+  reported_by_name: string;
+  reason: string;
+  status: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface AdminDisputeCase {
+  id: string;
+  escrow: string;
+  raised_by: string;
+  raised_by_name: string;
+  status: string;
+  reason: string;
+  created_at: string;
+}
+
+export async function getAdminConsoleSummary(): Promise<AdminConsoleSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/console-summary/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`Admin summary fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function listAdminVerificationRequests(): Promise<PaginatedResponse<AdminVerificationRequest>> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/verification-requests/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`Verification requests fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function approveVerificationRequest(id: string) {
+  return fetch(`${API_BASE_URL}/api/admin/verification-requests/${id}/approve/`, { method: "POST", headers: await authHeaders() });
+}
+
+export async function rejectVerificationRequest(id: string, reason: string) {
+  return fetch(`${API_BASE_URL}/api/admin/verification-requests/${id}/reject/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ reason }),
+  });
+}
+
+export async function listAdminContentReports(): Promise<PaginatedResponse<AdminContentReport>> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/content-reports/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`Content reports fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function resolveContentReport(id: string, actionTaken: string, issueStrike: boolean) {
+  return fetch(`${API_BASE_URL}/api/admin/content-reports/${id}/resolve/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ action_taken: actionTaken, issue_strike: issueStrike }),
+  });
+}
+
+export async function listAdminDisputeCases(): Promise<PaginatedResponse<AdminDisputeCase>> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/dispute-cases/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`Dispute cases fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function respondToDispute(id: string) {
+  return fetch(`${API_BASE_URL}/api/admin/dispute-cases/${id}/respond/`, { method: "POST", headers: await authHeaders() });
+}
+
+export async function resolveDispute(id: string, outcome: "RELEASE" | "REFUND", notes: string) {
+  return fetch(`${API_BASE_URL}/api/admin/dispute-cases/${id}/resolve/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ outcome, notes }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Agent/Agency dashboard — mirrors the web app's real dashboard API.
+// ---------------------------------------------------------------------------
+export interface AgentDashboard {
+  performance_score: number;
+  open_enquiries: number;
+  commission_trend_xaf: { current_period_value: string; previous_period_value: string; percent_change: number | null };
+  is_agency_owner: boolean;
+  agency_roster?: { user__username: string }[];
+  agency_aggregated_commission_xaf?: string;
+}
+
+export async function getMyAgentDashboard(): Promise<AgentDashboard> {
+  const res = await fetch(`${API_BASE_URL}/api/my-agent-dashboard/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`Dashboard fetch failed: ${res.status}`);
+  return res.json();
+}
