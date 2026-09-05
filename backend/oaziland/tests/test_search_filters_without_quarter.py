@@ -6,6 +6,7 @@ regardless of what was actually asked for.
 """
 import pytest
 from decimal import Decimal
+from django.core.cache import cache
 from rest_framework.test import APIClient
 
 from identity.models import User
@@ -35,15 +36,23 @@ def test_listing_type_filter_works_without_a_quarter_specified(quarter):
 
     client = APIClient()
 
+    # WHY cache.clear() before each call here specifically: this test
+    # is about FILTER correctness, not the search throttle's own rate
+    # limiting (which has its own dedicated coverage elsewhere) — three
+    # back-to-back anonymous requests within one test function
+    # shouldn't have to fight shared throttle-cache state to prove
+    # the filters themselves work.
+    cache.clear()
     rent_only = client.get("/api/listings/?listing_type=RENT")
     assert rent_only.data["count"] == 1
     assert rent_only.data["results"][0]["listing_type"] == "RENT"
 
+    cache.clear()
     sale_only = client.get("/api/listings/?listing_type=SALE")
     assert sale_only.data["count"] == 1
     assert sale_only.data["results"][0]["listing_type"] == "SALE"
 
-    # No filter at all — both correctly returned.
+    cache.clear()
     everything = client.get("/api/listings/")
     assert everything.data["count"] == 2
 
@@ -59,6 +68,7 @@ def test_property_type_filter_works_without_a_quarter_specified(quarter):
     Listing.objects.create(property_asset=land, listed_by=landlord, listing_type=ListingType.SALE, status=ListingStatus.PUBLISHED, price_xaf=Decimal("15000000"))
 
     client = APIClient()
+    cache.clear()
     houses_only = client.get("/api/listings/?property_type=HOUSE")
     assert houses_only.data["count"] == 1
     assert houses_only.data["results"][0]["property_asset"]["type"] == "HOUSE"
