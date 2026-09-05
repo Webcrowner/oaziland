@@ -29,9 +29,33 @@ def share_job_posting_via_whatsapp(*, job_posting, shared_by, recipient_phone: s
     )
 
 
+# ---------------------------------------------------------------------------
+# Training/course enrollment.
+# ---------------------------------------------------------------------------
+class AlreadyEnrolledError(Exception):
+    pass
+
+
 def enroll_in_training(*, program, student):
+    """unique_together on (program, student) already prevents a
+    duplicate row at the database level — this turns that into a
+    clear, catchable error instead of a raw IntegrityError reaching
+    an API caller. (This upgrades the original version of this
+    function, which let that IntegrityError propagate raw.)"""
+    from django.db import IntegrityError
     from .models import TrainingEnrollment
-    return TrainingEnrollment.objects.create(program=program, student=student)
+
+    try:
+        return TrainingEnrollment.objects.create(program=program, student=student)
+    except IntegrityError:
+        raise AlreadyEnrolledError("This student is already enrolled in this program.")
+
+
+def mark_training_in_progress(enrollment):
+    from .models import TrainingEnrollmentStatus
+    enrollment.status = TrainingEnrollmentStatus.IN_PROGRESS
+    enrollment.save(update_fields=["status"])
+    return enrollment
 
 
 def mark_training_completed(enrollment):
@@ -48,3 +72,23 @@ def mark_training_completed(enrollment):
         enrollment.certificate_issued_at = timezone.now()
     enrollment.save(update_fields=["status", "completed_at", "certificate_issued_at"])
     return enrollment
+
+
+def drop_training(enrollment):
+    from .models import TrainingEnrollmentStatus
+    enrollment.status = TrainingEnrollmentStatus.DROPPED
+    enrollment.save(update_fields=["status"])
+    return enrollment
+
+
+def list_available_trainings(category: str = None):
+    from .models import TrainingProgram
+    queryset = TrainingProgram.objects.all().order_by("title")
+    if category:
+        queryset = queryset.filter(category=category)
+    return queryset
+
+
+def get_my_enrollments(student):
+    from .models import TrainingEnrollment
+    return TrainingEnrollment.objects.filter(student=student).select_related("program").order_by("-enrolled_at")
