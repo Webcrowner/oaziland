@@ -19,6 +19,8 @@ import SavedSearchesScreen from "../screens/SavedSearchesScreen";
 import ComparisonScreen from "../screens/ComparisonScreen";
 import MessagesScreen from "../screens/MessagesScreen";
 import ConversationScreen from "../screens/ConversationScreen";
+import FeedScreen from "../screens/FeedScreen";
+import CreatePostScreen from "../screens/CreatePostScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -39,6 +41,8 @@ export type RootStackParamList = {
   Comparison: undefined;
   Messages: undefined;
   Conversation: { conversationId: string; participantNames: string };
+  Feed: undefined;
+  CreatePost: { linkedListingId?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -78,6 +82,8 @@ export default function AppNavigator() {
         <Stack.Screen name="Comparison" component={ComparisonScreen} options={{ title: "Compare Properties" }} />
         <Stack.Screen name="Messages" component={MessagesScreen} options={{ title: "Messages" }} />
         <Stack.Screen name="Conversation" component={ConversationScreen} options={({ route }) => ({ title: route.params.participantNames })} />
+        <Stack.Screen name="Feed" component={FeedScreen} options={{ title: "Feed" }} />
+        <Stack.Screen name="CreatePost" component={CreatePostScreen} options={{ title: "Create a Post" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

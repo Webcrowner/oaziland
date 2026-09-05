@@ -471,3 +471,89 @@ export async function getTypingStatus(conversationId: string): Promise<{ typing_
   if (!res.ok) return { typing_usernames: [] };
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Social feed — mirrors the web app's real feed API exactly.
+// ---------------------------------------------------------------------------
+export interface SocialPost {
+  id: string;
+  author: string;
+  author_name: string;
+  is_verified_creator: boolean;
+  poster_role: string;
+  post_type: string;
+  caption: string;
+  tag_names: string[];
+  media: { id: string; media_type: string; file_url: string }[];
+  linked_listing_id: string | null;
+  status: string;
+  published_at: string | null;
+  created_at: string;
+  reaction_counts: Record<string, number>;
+  comment_count: number;
+  is_sponsored: boolean;
+}
+
+export async function listFeedPosts(): Promise<PaginatedResponse<SocialPost>> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch feed");
+  return res.json();
+}
+
+export async function listFollowingFeed(): Promise<PaginatedResponse<SocialPost>> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/following/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch following feed");
+  return res.json();
+}
+
+export async function searchPosts(query: string): Promise<PaginatedResponse<SocialPost>> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/search/?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error("Could not search posts");
+  return res.json();
+}
+
+export async function createPost(payload: { caption: string; tags?: string[]; linked_listing_id?: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/posts/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not create post");
+  return data;
+}
+
+export async function reactToPost(postId: string, emoji: string) {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/react/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ emoji }),
+  });
+  if (!res.ok) throw new Error("Could not react to post");
+  return res.json();
+}
+
+export interface PostComment {
+  id: string;
+  post: string;
+  author: string;
+  author_name: string;
+  text: string;
+  created_at: string;
+}
+
+export async function getPostComments(postId: string): Promise<PostComment[]> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/comments/`);
+  if (!res.ok) throw new Error("Could not fetch comments");
+  return res.json();
+}
+
+export async function addPostComment(postId: string, text: string) {
+  const res = await fetch(`${API_BASE_URL}/api/comments/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ post: postId, text }),
+  });
+  if (!res.ok) throw new Error("Could not add comment");
+  return res.json();
+}
