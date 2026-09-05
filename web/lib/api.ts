@@ -23,6 +23,7 @@ export interface PropertyAssetSummary {
   quarter_name: string;
   latitude: string | null;
   longitude: string | null;
+  description: string;
 }
 
 export interface Listing {
@@ -33,6 +34,19 @@ export interface Listing {
   price_xaf: string;
   published_at: string | null;
   created_at: string;
+  lister_role: "OWNER" | "AGENT" | "AGENCY";
+  lister_display_name: string;
+  lister_agency_name: string | null;
+  lister_id: string;
+}
+
+export async function contactListing(listingId: string, accessToken: string): Promise<{ deep_link: string; message: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/listings/${listingId}/contact/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Contact request failed: ${res.status}`);
+  return res.json();
 }
 
 export interface PaginatedResponse<T> {

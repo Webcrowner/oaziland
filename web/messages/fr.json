@@ -27,7 +27,11 @@
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
     "finishModern": "Moderne",
-    "finishStandard": "Standard"
+    "finishStandard": "Standard",
+    "listerOwner": "Propriétaire",
+    "listerAgent": "Agent",
+    "listerAgency": "Agence",
+    "postedOn": "Publié le {date}"
   },
   "HomePage": {
     "heroTitle": "Trouvez votre prochain logement au Cameroun",
@@ -64,7 +68,13 @@
     "finishStandard": "Standard (non moderne)",
     "size": "Superficie",
     "listingType": "Type d'annonce",
-    "contactOnWhatsApp": "Contacter sur WhatsApp"
+    "contactOnWhatsApp": "Contacter sur WhatsApp",
+    "contacting": "Ouverture de WhatsApp...",
+    "contactFailed": "Impossible de démarrer la conversation. Veuillez réessayer.",
+    "listerOwnerFull": "Publié par le Propriétaire",
+    "listerAgentFull": "Publié par un Agent",
+    "listerAgencyFull": "Publié par une Agence",
+    "postedOnFull": "Publié le {date}"
   },
   "LoginPage": {
     "title": "Se connecter",

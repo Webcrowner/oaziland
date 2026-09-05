@@ -27,7 +27,11 @@
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
     "finishModern": "Modern",
-    "finishStandard": "Standard"
+    "finishStandard": "Standard",
+    "listerOwner": "Owner",
+    "listerAgent": "Agent",
+    "listerAgency": "Agency",
+    "postedOn": "Posted {date}"
   },
   "HomePage": {
     "heroTitle": "Find your next home in Cameroon",
@@ -64,7 +68,13 @@
     "finishStandard": "Standard (Not Modern)",
     "size": "Size",
     "listingType": "Listing Type",
-    "contactOnWhatsApp": "Contact on WhatsApp"
+    "contactOnWhatsApp": "Contact on WhatsApp",
+    "contacting": "Opening WhatsApp...",
+    "contactFailed": "Could not start the conversation. Please try again.",
+    "listerOwnerFull": "Listed by the Property Owner",
+    "listerAgentFull": "Listed by an Agent",
+    "listerAgencyFull": "Listed by an Agency",
+    "postedOnFull": "Posted on {date}"
   },
   "LoginPage": {
     "title": "Sign in",
