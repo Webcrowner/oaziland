@@ -123,3 +123,73 @@ class ConversationViewSet(viewsets.ModelViewSet):
         for message in unseen_messages:
             mark_message_seen(message=message, recipient=request.user)
         return Response({"marked_seen": unseen_messages.count()})
+
+    @action(detail=True, methods=["post"], url_path="typing")
+    def send_typing_heartbeat_action(self, request, pk=None):
+        """Called repeatedly by the client (every few seconds) while
+        the user is actively composing a reply."""
+        from .services import send_typing_heartbeat
+        conversation = self.get_object()
+        send_typing_heartbeat(conversation=conversation, user=request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["get"], url_path="typing-status")
+    def typing_status(self, request, pk=None):
+        """Polled by the other participant(s) — returns who's
+        currently typing, correctly excluding anyone who has turned
+        show_typing_indicator off."""
+        from .services import get_typing_users
+        conversation = self.get_object()
+        typing_users = get_typing_users(conversation=conversation, viewer=request.user)
+        return Response({"typing_usernames": [u.full_name or u.username for u in typing_users]})
+
+
+class MyPresenceSettingsView(APIView):
+    """A real gap this closes: show_online_status has existed since
+    the founder's own online-status-privacy addition, but NOTHING ever
+    exposed it (or the new show_typing_indicator) over the API — a
+    user had no way to actually change either preference. GET returns
+    current settings; PATCH updates either or both together, since
+    they're the same kind of choice (what presence signals other
+    people see about you) and belong in one place."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_or_create_presence(self, user):
+        from .models import UserPresence
+        presence, _ = UserPresence.objects.get_or_create(user=user)
+        return presence
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        presence = self._get_or_create_presence(request.user)
+        return Response({
+            "show_online_status": presence.show_online_status,
+            "show_typing_indicator": presence.show_typing_indicator,
+        })
+
+    @extend_schema(request=dict, responses={200: dict})
+    def patch(self, request):
+        from rest_framework.fields import BooleanField
+        # WHY BooleanField().to_internal_value(), not a naive bool():
+        # depending on how the client sends this request (form-encoded
+        # vs JSON), a False value can arrive as the STRING "False" —
+        # and Python's bool("False") is True, since any non-empty
+        # string is truthy. DRF's own boolean parser correctly handles
+        # "false"/"False"/"0"/False/0 as actually false, regardless of
+        # wire format. Found by this endpoint's own test failing on
+        # the very first run.
+        bool_field = BooleanField()
+        presence = self._get_or_create_presence(request.user)
+        update_fields = []
+        if "show_online_status" in request.data:
+            presence.show_online_status = bool_field.to_internal_value(request.data["show_online_status"])
+            update_fields.append("show_online_status")
+        if "show_typing_indicator" in request.data:
+            presence.show_typing_indicator = bool_field.to_internal_value(request.data["show_typing_indicator"])
+            update_fields.append("show_typing_indicator")
+        if update_fields:
+            presence.save(update_fields=update_fields)
+        return Response({
+            "show_online_status": presence.show_online_status,
+            "show_typing_indicator": presence.show_typing_indicator,
+        })

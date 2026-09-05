@@ -330,6 +330,12 @@ class UserPresence(models.Model):
     status = models.CharField(max_length=10, choices=PresenceStatus.choices, default=PresenceStatus.OFFLINE)
     last_seen_at = models.DateTimeField(auto_now=True)
     show_online_status = models.BooleanField(default=True)
+    # Same reasoning, same default, as show_online_status directly
+    # above: a per-user privacy CHOICE about what OTHER people see,
+    # not a change to whether typing is actually detected. Defaults to
+    # True (visible) per the founder's explicit request — hiding it is
+    # an opt-out, not the default behavior.
+    show_typing_indicator = models.BooleanField(default=True)
 
     class Meta:
         db_table = "user_presence"
@@ -426,6 +432,33 @@ class MessageReceipt(models.Model):
     class Meta:
         db_table = "message_receipts"
         unique_together = [("message", "recipient")]
+
+
+class TypingIndicator(models.Model):
+    """A real 'X is typing...' signal — HEARTBEAT-based, the same
+    architecture as UserPresence.last_seen_at (this backend is REST,
+    not WebSocket, so there's no persistent connection to push through;
+    a client sends a heartbeat every few seconds while composing, and
+    other participants poll for it). WHY this is a genuinely separate
+    row per (conversation, user) rather than one field on UserPresence:
+    someone can be typing in ONE conversation while simply present
+    (not typing) everywhere else — this is conversation-scoped state,
+    presence is account-wide state.
+
+    A stale heartbeat means 'no longer typing' — there is no explicit
+    'stopped typing' signal a REST client reliably sends (a closed tab,
+    a lost connection, or someone just walking away all look the same
+    as silence), so is_someone_typing() below treats a heartbeat older
+    than TYPING_TIMEOUT_SECONDS as expired, the same way
+    is_currently_online() already treats a stale last_seen_at as
+    offline for the exact same reason."""
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="typing_indicators")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="typing_indicators")
+    last_heartbeat_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "typing_indicators"
+        unique_together = [("conversation", "user")]
 
 
 class Favorite(models.Model):

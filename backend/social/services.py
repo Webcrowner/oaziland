@@ -452,6 +452,51 @@ def get_message_tick_status(message) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Typing indicators — heartbeat-based (this backend is REST, not
+# WebSocket), with a per-user privacy toggle mirroring UserPresence.
+# show_online_status exactly: visible by default, hideable, and
+# hiding it never touches whether typing is actually being detected.
+# ---------------------------------------------------------------------------
+TYPING_TIMEOUT_SECONDS = 8  # a heartbeat older than this means "no longer typing"
+
+
+def send_typing_heartbeat(*, conversation, user):
+    """Called repeatedly by the client (every few seconds) while the
+    user is actively composing — upserts a single row per (conversation,
+    user), so this is safe to call as often as needed without creating
+    a growing pile of history nobody needs."""
+    from .models import TypingIndicator
+    indicator, _ = TypingIndicator.objects.update_or_create(conversation=conversation, user=user)
+    return indicator
+
+
+def get_typing_users(*, conversation, viewer):
+    """The actual answer a chat UI polls for: who (other than the
+    viewer themselves) is CURRENTLY typing in this conversation right
+    now. Two independent reasons a typing user is excluded: their
+    heartbeat has gone stale (TYPING_TIMEOUT_SECONDS), or they've
+    explicitly turned off show_typing_indicator — checked here, not
+    left to the caller to remember, so there's exactly one place this
+    privacy rule is enforced."""
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import TypingIndicator
+
+    cutoff = timezone.now() - timedelta(seconds=TYPING_TIMEOUT_SECONDS)
+    active = TypingIndicator.objects.filter(
+        conversation=conversation, last_heartbeat_at__gte=cutoff,
+    ).exclude(user=viewer).select_related("user", "user__presence")
+
+    visible_typists = []
+    for indicator in active:
+        presence = getattr(indicator.user, "presence", None)
+        if presence is not None and not presence.show_typing_indicator:
+            continue  # this user has explicitly hidden their typing status
+        visible_typists.append(indicator.user)
+    return visible_typists
+
+
+# ---------------------------------------------------------------------------
 # Connected social accounts — display links to a user's other social
 # presence (Facebook, TikTok, Instagram, etc.) on their Oaziland profile.
 # ---------------------------------------------------------------------------

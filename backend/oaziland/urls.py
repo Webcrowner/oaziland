@@ -18,7 +18,7 @@ from geo.views import QuarterViewSet
 from property.views import ListingViewSet, HouseViewSet, ShopViewSet
 from land.views import LandViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
-from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet
+from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 from hotels.views import HotelViewSet, ReservationViewSet
 from events.views import VenueViewSet, EventBookingViewSet
@@ -84,6 +84,7 @@ urlpatterns = [
     path('api/auth/mfa/verify/', MfaVerifyView.as_view(), name='mfa-verify'),
     path('api/auth/mfa/status/', MyMfaStatusView.as_view(), name='mfa-status'),
     path('api/auth/my-referral-code/', MyReferralCodeView.as_view(), name='my-referral-code'),
+    path('api/my-presence-settings/', MyPresenceSettingsView.as_view(), name='my-presence-settings'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
