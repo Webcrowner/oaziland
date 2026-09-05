@@ -57,14 +57,22 @@ export default function AdminConsolePage() {
 
   async function handleApprove(id: string) {
     if (!token) return;
-    await approveVerificationRequest(id, token);
+    const res = await approveVerificationRequest(id, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
     loadAll();
   }
 
   async function handleReject(id: string) {
     if (!token) return;
     const reason = prompt(t("rejectReasonPlaceholder")) || "";
-    await rejectVerificationRequest(id, reason, token);
+    const res = await rejectVerificationRequest(id, reason, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
     loadAll();
   }
 
@@ -73,20 +81,32 @@ export default function AdminConsolePage() {
     const actionTaken = prompt(t("actionTakenPlaceholder"));
     if (!actionTaken) return;
     const issueStrike = confirm(t("issueStrike"));
-    await resolveContentReport(id, actionTaken, issueStrike, token);
+    const res = await resolveContentReport(id, actionTaken, issueStrike, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
     loadAll();
   }
 
   async function handleRespondDispute(id: string) {
     if (!token) return;
-    await respondToDispute(id, token);
+    const res = await respondToDispute(id, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
     loadAll();
   }
 
   async function handleResolveDispute(id: string, outcome: "RELEASE" | "REFUND") {
     if (!token) return;
     const notes = prompt(t("resolutionNotesPlaceholder")) || "";
-    await resolveDispute(id, outcome, notes, token);
+    const res = await resolveDispute(id, outcome, notes, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
     loadAll();
   }
 

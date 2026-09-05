@@ -8,7 +8,16 @@ const LOCALES = ["en", "fr"];
 // noindex on its own page, since filter permutations create
 // duplicate-content risk) and login/register/list-property (pure
 // functional forms, also noindex on their own layouts).
-const STATIC_ROUTES = ["", "/hotels", "/events", "/guest-houses", "/student-hostels", "/wanted"];
+// WHY this list needed updating: several real, public pages (Services,
+// Agents, Agencies, Testimonials, Buy, Sell, About, Contact, Trainings,
+// How It Works) were built after this sitemap was first written, and
+// never got added — a real oversight, not a deliberate exclusion.
+// Every one of these is genuinely public and worth indexing.
+const STATIC_ROUTES = [
+  "", "/hotels", "/events", "/guest-houses", "/student-hostels", "/wanted",
+  "/services", "/agents", "/agencies", "/testimonials", "/buy", "/sell",
+  "/about", "/contact", "/trainings", "/how-it-works",
+];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticEntries: MetadataRoute.Sitemap = LOCALES.flatMap((locale) =>

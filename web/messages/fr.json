@@ -398,6 +398,7 @@
     "resolutionNotesPlaceholder": "Notes de résolution",
     "notAdmin": "Ce compte n'a pas d'accès administrateur.",
     "signInRequired": "Connectez-vous pour accéder à la console d'administration",
-    "submit": "Soumettre"
+    "submit": "Soumettre",
+    "actionFailed": "Cette action a échoué. Veuillez réessayer."
   }
 }

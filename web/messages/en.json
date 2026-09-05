@@ -398,6 +398,7 @@
     "resolutionNotesPlaceholder": "Resolution notes",
     "notAdmin": "This account does not have admin access.",
     "signInRequired": "Sign in to access the admin console",
-    "submit": "Submit"
+    "submit": "Submit",
+    "actionFailed": "That action failed. Please try again."
   }
 }
