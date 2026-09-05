@@ -334,5 +334,18 @@
     "yourLink": "Your Referral Link",
     "copyCode": "Copy Code",
     "copyLink": "Copy Link"
+  },
+  "AgentDashboardPage": {
+    "title": "My Dashboard",
+    "performanceScore": "Performance Score",
+    "openEnquiries": "Open Enquiries",
+    "commissionTrend": "Commission This Period",
+    "vsLastPeriod": "vs. last period",
+    "newNoHistory": "New — no history yet",
+    "agencySection": "Agency Overview",
+    "agencyRoster": "Team Members",
+    "agencyCommission": "Total Agency Commission",
+    "notAnAgent": "This account is not registered as an agent.",
+    "signInRequired": "Sign in to view your dashboard."
   }
 }

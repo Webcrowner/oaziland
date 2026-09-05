@@ -365,6 +365,23 @@ export async function getMyReferralCode(accessToken: string): Promise<{ referral
   return res.json();
 }
 
+export interface AgentDashboard {
+  performance_score: number;
+  open_enquiries: number;
+  commission_trend_xaf: { current_period_value: string; previous_period_value: string; percent_change: number | null };
+  is_agency_owner: boolean;
+  agency_roster?: { user__username: string }[];
+  agency_aggregated_commission_xaf?: string;
+}
+
+export async function getMyAgentDashboard(accessToken: string): Promise<AgentDashboard> {
+  const res = await fetch(`${API_BASE_URL}/api/my-agent-dashboard/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Dashboard fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export async function registerUser(payload: {
   username: string;
   phone: string;

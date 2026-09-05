@@ -2,7 +2,30 @@
 matching the acceptance criteria's explicit 'test the property search
 endpoint and confirm real results' requirement."""
 from rest_framework import serializers
-from .models import PropertyAsset, Listing
+from .models import PropertyAsset, Listing, House, Shop
+
+
+class HouseCreateSerializer(serializers.ModelSerializer):
+    """WHY owner is never a client-supplied field: same reasoning as
+    Listing.listed_by — it must always be the actual authenticated
+    requester, set in perform_create(), never trusted from the request body."""
+    class Meta:
+        model = House
+        fields = [
+            "id", "quarter", "size_sqm", "description", "finish_level", "latitude", "longitude",
+            "distance_to_tarmac_km", "bedrooms", "bathrooms", "pets_allowed", "has_garage", "house_style",
+        ]
+        read_only_fields = ["id"]
+
+
+class ShopCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Shop
+        fields = [
+            "id", "quarter", "size_sqm", "description", "finish_level", "latitude", "longitude",
+            "distance_to_tarmac_km", "frontage_meters",
+        ]
+        read_only_fields = ["id"]
 
 
 class PropertyAssetSummarySerializer(serializers.ModelSerializer):

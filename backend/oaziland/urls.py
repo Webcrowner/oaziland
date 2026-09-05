@@ -15,7 +15,8 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from identity.views import RegisterView, MyProfileView, MfaSetupView, MfaVerifyView, MyMfaStatusView, MyReferralCodeView
 from geo.views import QuarterViewSet
-from property.views import ListingViewSet
+from property.views import ListingViewSet, HouseViewSet, ShopViewSet
+from land.views import LandViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
 from social.views import SocialAccountLinkViewSet, TestimonialsView
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
@@ -32,6 +33,9 @@ from agency.views import AgentPublicProfileView, AgencyPublicProfileView, MyAgen
 router = DefaultRouter()
 router.register(r"quarters", QuarterViewSet, basename="quarter")
 router.register(r"listings", ListingViewSet, basename="listing")
+router.register(r"houses", HouseViewSet, basename="house")
+router.register(r"shops", ShopViewSet, basename="shop")
+router.register(r"lands", LandViewSet, basename="land")
 router.register(r"bookings", BookingViewSet, basename="booking")
 router.register(r"social-accounts", SocialAccountLinkViewSet, basename="social-account")
 router.register(r"consent", ConsentRecordViewSet, basename="consent")

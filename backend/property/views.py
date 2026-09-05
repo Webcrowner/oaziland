@@ -10,8 +10,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from .models import Listing, ListingStatus, ListingType
-from .serializers import ListingSerializer
+from .models import Listing, ListingStatus, ListingType, House, Shop
+from .serializers import ListingSerializer, HouseCreateSerializer, ShopCreateSerializer
 from oaziland.permissions import IsAdminRole, IsOwnerOrReadOnly, IsVerifiedAndMfaEnabled
 
 
@@ -143,3 +143,48 @@ class ListingViewSet(viewsets.ModelViewSet):
             template_vars={"listing_id": str(listing.id)},
         )
         return Response({"deep_link": action_result["deep_link"], "message": action_result["message"]})
+
+
+class HouseViewSet(viewsets.ModelViewSet):
+    """Real property-creation, closing a genuine gap: Listing.create()
+    could only ATTACH to an already-existing PropertyAsset — nothing
+    ever let a user create the House itself. list/retrieve are public
+    (browsing someone's property details isn't sensitive); create
+    requires the same MFA+KYC as listing creation itself, since a
+    property record un-attached to a listing yet is still real,
+    identity-linked data."""
+    serializer_class = HouseCreateSerializer
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [permissions.AllowAny()]
+        if self.action == "create":
+            return [IsVerifiedAndMfaEnabled()]
+        return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return House.objects.none()
+        return House.objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user, type="HOUSE")
+
+
+class ShopViewSet(viewsets.ModelViewSet):
+    serializer_class = ShopCreateSerializer
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [permissions.AllowAny()]
+        if self.action == "create":
+            return [IsVerifiedAndMfaEnabled()]
+        return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Shop.objects.none()
+        return Shop.objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user, type="SHOP")

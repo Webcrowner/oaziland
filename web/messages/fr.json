@@ -334,5 +334,18 @@
     "yourLink": "Votre Lien de Parrainage",
     "copyCode": "Copier le Code",
     "copyLink": "Copier le Lien"
+  },
+  "AgentDashboardPage": {
+    "title": "Mon Tableau de Bord",
+    "performanceScore": "Score de Performance",
+    "openEnquiries": "Demandes Ouvertes",
+    "commissionTrend": "Commission Cette Période",
+    "vsLastPeriod": "vs. période précédente",
+    "newNoHistory": "Nouveau — pas encore d'historique",
+    "agencySection": "Aperçu de l'Agence",
+    "agencyRoster": "Membres de l'Équipe",
+    "agencyCommission": "Commission Totale de l'Agence",
+    "notAnAgent": "Ce compte n'est pas enregistré en tant qu'agent.",
+    "signInRequired": "Connectez-vous pour voir votre tableau de bord."
   }
 }
