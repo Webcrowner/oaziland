@@ -150,3 +150,15 @@ def test_current_policy_document_is_marked_as_an_unreviewed_draft():
     assert privacy_policy is not None
     assert "DRAFT" in privacy_policy.body_text
     assert "NOT LEGALLY REVIEWED" in privacy_policy.body_text
+
+
+@pytest.mark.django_db
+def test_community_guidelines_document_reflects_the_real_dance_content_policy():
+    from django.core.management import call_command
+    call_command("seed_policy_documents")
+
+    guidelines = get_current_policy(PolicyDocumentType.COMMUNITY_GUIDELINES)
+    assert guidelines is not None
+    assert "not encouraged" in guidelines.body_text
+    assert "Dancing" in guidelines.body_text
+    assert "never be promoted" in guidelines.body_text

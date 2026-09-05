@@ -94,8 +94,19 @@ def get_recommended_feed(user, limit=20):
       2. Within each group, posts sharing a tag with something the user
          has already liked/favorited rank higher ('similar/related').
       3. Most recent first, as the final tiebreaker.
+
+    WHY dance-tagged content is explicitly excluded from ever
+    receiving a boost, and ranked below all other content: per the
+    founder's explicit content policy, the platform does not encourage
+    dancing/dance-entertainment content — it stays allowed to exist
+    (never auto-flagged or rejected), but the algorithm must never
+    push it, regardless of how well it would otherwise match a user's
+    interests. This is a real, enforced tier, not a written guideline
+    with nothing behind it.
     """
     from .models import Post, Reaction, Favorite, ContentStatus
+
+    DISCOURAGED_TAG_NAMES = {"dance", "dancing"}
 
     liked_post_ids = Reaction.objects.filter(author=user).values_list("post_id", flat=True)
     favorited_post_ids = Favorite.objects.filter(user=user).exclude(post__isnull=True).values_list("post_id", flat=True)
@@ -109,6 +120,17 @@ def get_recommended_feed(user, limit=20):
 
     scored = []
     for post in candidates:
+        # Case-insensitive: a real user might tag a post "Dance",
+        # "DANCING", or "dance" — the policy has to catch all of them,
+        # not just one exact casing.
+        is_discouraged = any(tag.name.lower() in DISCOURAGED_TAG_NAMES for tag in post.tags.all())
+        if is_discouraged:
+            # Below every other tier, including plain baseline generic
+            # posts — never boosted, never tied with anything else,
+            # regardless of tag overlap with the user's own interests.
+            scored.append((post, -1))
+            continue
+
         is_real_estate = post.linked_listing_id is not None
         shares_interest_tag = post.tags.filter(id__in=interest_tag_ids).exists() if interest_tag_ids else False
         # Real estate is a HARD priority tier (10000+), not just a few

@@ -208,3 +208,58 @@ def test_recommendation_feed_prioritizes_real_estate_posts(landlord, viewer):
     feed_ids = [p.id for p in feed]
 
     assert feed_ids.index(real_estate_post.id) < feed_ids.index(generic_post.id)
+
+
+@pytest.mark.django_db
+def test_dance_tagged_content_is_never_promoted_by_the_recommendation_feed(landlord, viewer):
+    """The founder's explicit content policy: the platform does not
+    encourage dancing/dance-entertainment content. It stays allowed to
+    exist (never auto-rejected), but the algorithm must never push
+    it — tested here ranking below even a plain, unremarkable generic
+    post, regardless of tag overlap with the viewer's own interests."""
+    dance_tag, _ = Tag.objects.get_or_create(name="Dance")
+    matching_tag, _ = Tag.objects.get_or_create(name="Yaoundé")
+
+    # The viewer has shown real interest in the "Yaoundé" tag by
+    # liking a past post carrying it.
+    interest_post = Post.objects.create(author=landlord, caption="Yaoundé meetup")
+    interest_post.tags.add(matching_tag)
+    interest_post.publish()
+    Reaction.objects.create(post=interest_post, author=viewer, emoji=EmojiType.LIKE)
+
+    dance_post = Post.objects.create(author=landlord, caption="Check out this dance move!")
+    dance_post.tags.add(dance_tag, matching_tag)  # even sharing the viewer's own interest tag
+    dance_post.publish()
+
+    plain_generic_post = Post.objects.create(author=landlord, caption="An unremarkable, untagged update")
+    plain_generic_post.publish()
+
+    feed = get_recommended_feed(viewer)
+    feed_ids = [p.id for p in feed]
+
+    # The dance post ranks BELOW a plain post with nothing going for
+    # it at all — sharing the viewer's own interest tag doesn't rescue it.
+    assert feed_ids.index(plain_generic_post.id) < feed_ids.index(dance_post.id)
+
+
+@pytest.mark.django_db
+def test_dance_tag_matching_is_case_insensitive(landlord, viewer):
+    """A real user might tag a post 'DANCING' or 'dance' — the policy
+    has to catch all of them, not just one exact casing."""
+    for tag_name in ("DANCING", "dance"):
+        tag, _ = Tag.objects.get_or_create(name=tag_name)
+        post = Post.objects.create(author=landlord, caption=f"Post tagged {tag_name}")
+        post.tags.add(tag)
+        post.publish()
+
+    plain_post = Post.objects.create(author=landlord, caption="Plain post")
+    plain_post.publish()
+
+    feed = get_recommended_feed(viewer)
+    feed_ids = [p.id for p in feed]
+
+    plain_index = feed_ids.index(plain_post.id)
+    for tag_name in ("DANCING", "dance"):
+        matching_posts = [p for p in feed if any(t.name == tag_name for t in p.tags.all())]
+        assert len(matching_posts) == 1
+        assert feed_ids.index(matching_posts[0].id) > plain_index

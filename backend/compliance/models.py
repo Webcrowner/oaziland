@@ -41,6 +41,7 @@ class ConsentRecord(models.Model):
 class PolicyDocumentType(models.TextChoices):
     TERMS_OF_SERVICE = "TERMS_OF_SERVICE", "Terms of Service"
     PRIVACY_POLICY = "PRIVACY_POLICY", "Privacy Policy"
+    COMMUNITY_GUIDELINES = "COMMUNITY_GUIDELINES", "Community Guidelines"
 
 
 class PolicyDocument(models.Model):
