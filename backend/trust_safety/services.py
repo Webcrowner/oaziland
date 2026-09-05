@@ -146,3 +146,38 @@ def get_admin_console_summary():
         "open_dispute_cases": DisputeCase.objects.filter(status__in=[DisputeStatus.OPEN, DisputeStatus.ADMIN_RESPONDED]).count(),
         "reports_trend": reports_trend,
     }
+
+
+# ---------------------------------------------------------------------------
+# Content report resolution — a real gap this closes: ContentReport
+# could be FILED, but nothing ever let an admin actually act on one,
+# despite REVIEWED/DISMISSED existing as real status values.
+# ---------------------------------------------------------------------------
+def resolve_content_report(*, report, resolved_by, action_taken: str, issue_strike: bool = False):
+    """action_taken is a plain audit note ('removed the post', 'no
+    violation found', etc.) — kept as free text rather than a rigid
+    enum, since the range of real admin decisions here is wide and a
+    fixed set of choices would either be too narrow or grow forever.
+
+    WHY issue_strike is a separate, explicit flag rather than always
+    striking the reported person: many reports are dismissed as not
+    actually violating anything — automatically striking on every
+    report would punish people for being reported, not for actually
+    doing something wrong."""
+    from django.utils import timezone
+    from .models import ReportStatus
+
+    report.status = ReportStatus.REVIEWED if issue_strike else ReportStatus.DISMISSED
+    report.notes = f"{report.notes}\n\n[Resolved by admin]: {action_taken}".strip()
+    report.save(update_fields=["status", "notes"])
+
+    if issue_strike:
+        subject = None
+        if report.target_post_id:
+            subject = report.target_post.author
+        elif report.target_comment_id:
+            subject = report.target_comment.author
+        if subject:
+            issue_strike_and_apply_consequences(subject=subject, reason=action_taken, issued_by=resolved_by)
+
+    return report

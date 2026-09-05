@@ -285,3 +285,45 @@ def submit_contact_message(*, name: str, email: str, message: str):
         )
 
     return contact_message
+
+
+# ---------------------------------------------------------------------------
+# Verification request review — a real gap this closes: VerificationRequest
+# could be CREATED, but nothing ever let an admin actually approve or
+# reject one, despite APPROVED/REJECTED existing as real status values.
+# ---------------------------------------------------------------------------
+def approve_verification_request(*, verification_request, reviewed_by):
+    from django.utils import timezone
+    from .models import VerificationRequestStatus
+    from notifications.services import notify
+
+    verification_request.status = VerificationRequestStatus.APPROVED
+    verification_request.reviewed_by = reviewed_by
+    verification_request.reviewed_at = timezone.now()
+    verification_request.save(update_fields=["status", "reviewed_by", "reviewed_at"])
+
+    notify(
+        recipient=verification_request.requester, notification_type="VERIFICATION_APPROVED", channel="WHATSAPP",
+        title="Verification Approved", message="Your verification request has been approved.",
+        related_reference=str(verification_request.id),
+    )
+    return verification_request
+
+
+def reject_verification_request(*, verification_request, reviewed_by, reason: str = ""):
+    from django.utils import timezone
+    from .models import VerificationRequestStatus
+    from notifications.services import notify
+
+    verification_request.status = VerificationRequestStatus.REJECTED
+    verification_request.reviewed_by = reviewed_by
+    verification_request.reviewed_at = timezone.now()
+    verification_request.save(update_fields=["status", "reviewed_by", "reviewed_at"])
+
+    notify(
+        recipient=verification_request.requester, notification_type="VERIFICATION_REJECTED", channel="WHATSAPP",
+        title="Verification Not Approved",
+        message=f"Your verification request was not approved.{' Reason: ' + reason if reason else ''}",
+        related_reference=str(verification_request.id),
+    )
+    return verification_request

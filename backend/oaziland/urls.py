@@ -19,6 +19,7 @@ from property.views import ListingViewSet, HouseViewSet, ShopViewSet
 from land.views import LandViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
 from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView
+from trust_safety.views import AdminConsoleSummaryView, AdminVerificationRequestViewSet, AdminContentReportViewSet, AdminDisputeCaseViewSet
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 from hotels.views import HotelViewSet, ReservationViewSet
 from events.views import VenueViewSet, EventBookingViewSet
@@ -37,6 +38,9 @@ router.register(r"houses", HouseViewSet, basename="house")
 router.register(r"shops", ShopViewSet, basename="shop")
 router.register(r"lands", LandViewSet, basename="land")
 router.register(r"conversations", ConversationViewSet, basename="conversation")
+router.register(r"admin/verification-requests", AdminVerificationRequestViewSet, basename="admin-verification-request")
+router.register(r"admin/content-reports", AdminContentReportViewSet, basename="admin-content-report")
+router.register(r"admin/dispute-cases", AdminDisputeCaseViewSet, basename="admin-dispute-case")
 router.register(r"bookings", BookingViewSet, basename="booking")
 router.register(r"social-accounts", SocialAccountLinkViewSet, basename="social-account")
 router.register(r"consent", ConsentRecordViewSet, basename="consent")
@@ -85,6 +89,7 @@ urlpatterns = [
     path('api/auth/mfa/status/', MyMfaStatusView.as_view(), name='mfa-status'),
     path('api/auth/my-referral-code/', MyReferralCodeView.as_view(), name='my-referral-code'),
     path('api/my-presence-settings/', MyPresenceSettingsView.as_view(), name='my-presence-settings'),
+    path('api/admin/console-summary/', AdminConsoleSummaryView.as_view(), name='admin-console-summary'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
