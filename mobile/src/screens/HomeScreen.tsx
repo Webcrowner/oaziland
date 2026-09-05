@@ -81,6 +81,21 @@ export default function HomeScreen({ navigation }: Props) {
           <Text style={styles.link}>List a Property</Text>
         </TouchableOpacity>
       </View>
+
+      <Text style={styles.exploreTitle}>Explore More on Oaziland</Text>
+      <View style={styles.exploreGrid}>
+        {([
+          { label: "Hotels", screen: "Hotels" as const },
+          { label: "Student Hostels", screen: "StudentHostels" as const },
+          { label: "Event Venues", screen: "Events" as const },
+          { label: "Guest Houses", screen: "GuestHouses" as const },
+          { label: "Looking For...", screen: "WantedBoard" as const },
+        ]).map((category) => (
+          <TouchableOpacity key={category.screen} style={styles.exploreCard} onPress={() => navigation.navigate(category.screen)}>
+            <Text style={styles.exploreCardText}>{category.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </ScrollView>
   );
 }
@@ -104,4 +119,8 @@ const styles = StyleSheet.create({
   searchButtonText: { color: "#1B2A4A", fontWeight: "bold", fontSize: 16 },
   linksRow: { flexDirection: "row", justifyContent: "space-around", marginTop: 24 },
   link: { color: "#1B2A4A", fontWeight: "600" },
+  exploreTitle: { fontSize: 15, fontWeight: "700", color: "#1B2A4A", marginTop: 32, marginBottom: 12 },
+  exploreGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  exploreCard: { width: "47%", borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, paddingVertical: 16, alignItems: "center" },
+  exploreCardText: { color: "#1B2A4A", fontWeight: "600", fontSize: 13 },
 });

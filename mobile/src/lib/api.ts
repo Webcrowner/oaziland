@@ -199,3 +199,114 @@ export async function contactListing(listingId: string): Promise<{ deep_link: st
   if (!res.ok) throw new Error("Could not start the conversation");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Hospitality categories — mirrors the web app's real API shapes exactly.
+// ---------------------------------------------------------------------------
+export interface RoomTypeSummary {
+  id: string;
+  category: string;
+  capacity: number;
+  base_rate_xaf: string;
+}
+
+export interface Hotel {
+  id: string;
+  star_rating: number | null;
+  verified: boolean;
+  quarter: string;
+  quarter_name: string;
+  total_rooms: number;
+  room_types: RoomTypeSummary[];
+}
+
+export async function searchHotels(): Promise<PaginatedResponse<Hotel>> {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/`);
+  if (!res.ok) throw new Error(`Hotel search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface VenueSpaceSummary {
+  id: string;
+  space_name: string;
+  capacity_theatre: number | null;
+  capacity_banquet: number | null;
+  base_price_per_hour_xaf: string;
+}
+
+export interface Venue {
+  id: string;
+  verified: boolean;
+  quarter: string;
+  quarter_name: string;
+  spaces: VenueSpaceSummary[];
+}
+
+export async function searchVenues(): Promise<PaginatedResponse<Venue>> {
+  const res = await fetch(`${API_BASE_URL}/api/venues/`);
+  if (!res.ok) throw new Error(`Venue search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface HostelUnitSummary {
+  id: string;
+  room_code: string;
+  unit_type: string;
+  occupancy_model: string;
+  amenity_tier: string;
+  bed_capacity: number | null;
+}
+
+export interface StudentHostel {
+  id: string;
+  property_type: string;
+  quarter: string;
+  quarter_name: string;
+  units: HostelUnitSummary[];
+}
+
+export async function searchStudentHostels(): Promise<PaginatedResponse<StudentHostel>> {
+  const res = await fetch(`${API_BASE_URL}/api/student-hostels/`);
+  if (!res.ok) throw new Error(`Student hostel search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface GuestHouse {
+  id: string;
+  is_coastal_leisure: boolean;
+  quarter: string;
+  quarter_name: string;
+  finish_level: string;
+}
+
+export async function searchGuestHouses(): Promise<PaginatedResponse<GuestHouse>> {
+  const res = await fetch(`${API_BASE_URL}/api/guest-houses/`);
+  if (!res.ok) throw new Error(`Guest house search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface WantedListingResponseItem {
+  id: string;
+  responder: string;
+  message: string;
+  created_at: string;
+}
+
+export interface WantedListing {
+  id: string;
+  category: string;
+  quarter: string | null;
+  quarter_name: string | null;
+  min_size_sqm: string | null;
+  max_budget_xaf: string | null;
+  notes: string;
+  status: string;
+  created_at: string;
+  responses: WantedListingResponseItem[];
+}
+
+export async function listWantedListings(): Promise<PaginatedResponse<WantedListing>> {
+  const res = await fetch(`${API_BASE_URL}/api/wanted-listings/`);
+  if (!res.ok) throw new Error(`Wanted-listing fetch failed: ${res.status}`);
+  return res.json();
+}

@@ -8,6 +8,11 @@ import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import ListPropertyScreen from "../screens/ListPropertyScreen";
 import MfaSetupScreen from "../screens/MfaSetupScreen";
+import HotelsScreen from "../screens/HotelsScreen";
+import EventsScreen from "../screens/EventsScreen";
+import GuestHousesScreen from "../screens/GuestHousesScreen";
+import StudentHostelsScreen from "../screens/StudentHostelsScreen";
+import WantedBoardScreen from "../screens/WantedBoardScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -17,6 +22,11 @@ export type RootStackParamList = {
   Register: undefined;
   ListProperty: undefined;
   MfaSetup: undefined;
+  Hotels: undefined;
+  Events: undefined;
+  GuestHouses: undefined;
+  StudentHostels: undefined;
+  WantedBoard: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -45,6 +55,11 @@ export default function AppNavigator() {
         <Stack.Screen name="Register" component={RegisterScreen} options={{ title: "Create Account" }} />
         <Stack.Screen name="ListProperty" component={ListPropertyScreen} options={{ title: "List a Property" }} />
         <Stack.Screen name="MfaSetup" component={MfaSetupScreen} options={{ title: "Verify Your Account" }} />
+        <Stack.Screen name="Hotels" component={HotelsScreen} options={{ title: "Hotels" }} />
+        <Stack.Screen name="Events" component={EventsScreen} options={{ title: "Event Venues" }} />
+        <Stack.Screen name="GuestHouses" component={GuestHousesScreen} options={{ title: "Guest Houses" }} />
+        <Stack.Screen name="StudentHostels" component={StudentHostelsScreen} options={{ title: "Student Hostels" }} />
+        <Stack.Screen name="WantedBoard" component={WantedBoardScreen} options={{ title: "Looking For..." }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
