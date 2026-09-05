@@ -46,6 +46,10 @@ class ListingViewSet(viewsets.ModelViewSet):
             return Listing.objects.select_related("property_asset", "property_asset__quarter")
 
         quarter_id = self.request.query_params.get("quarter")
+        property_type = self.request.query_params.get("property_type")
+        finish_level = self.request.query_params.get("finish_level")
+        listing_type = self.request.query_params.get("listing_type")
+
         if quarter_id:
             from geo.models import Quarter
             from .services import search_listings_by_quarter
@@ -54,9 +58,7 @@ class ListingViewSet(viewsets.ModelViewSet):
             except Quarter.DoesNotExist:
                 return Listing.objects.none()
             results = search_listings_by_quarter(
-                quarter,
-                property_type=self.request.query_params.get("property_type"),
-                finish_level=self.request.query_params.get("finish_level"),
+                quarter, property_type=property_type, finish_level=finish_level, listing_type=listing_type,
             )
             result_ids = [listing.id for listing in results]
             # Preserve the search's own ranking (boosted listings first)
@@ -64,7 +66,22 @@ class ListingViewSet(viewsets.ModelViewSet):
             preserved_order = {pk: i for i, pk in enumerate(result_ids)}
             queryset = Listing.objects.filter(id__in=result_ids).select_related("property_asset", "property_asset__quarter")
             return sorted(queryset, key=lambda listing: preserved_order[listing.id])
-        return self.queryset
+
+        # WHY this branch exists now, and didn't fully work before: with
+        # no quarter given, every other filter (property_type,
+        # finish_level, listing_type) was previously silently IGNORED —
+        # self.queryset was returned completely unfiltered. A search for
+        # 'houses for sale, any neighborhood' would have returned every
+        # published listing of every type. Fixed to actually apply the
+        # filters that were given, quarter or not.
+        queryset = self.queryset
+        if property_type:
+            queryset = queryset.filter(property_asset__type=property_type)
+        if finish_level:
+            queryset = queryset.filter(property_asset__finish_level=finish_level)
+        if listing_type:
+            queryset = queryset.filter(listing_type=listing_type)
+        return queryset
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
