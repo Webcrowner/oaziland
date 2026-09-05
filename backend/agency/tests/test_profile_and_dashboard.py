@@ -106,3 +106,30 @@ def test_public_profile_api_requires_no_authentication(quarter):
     client = APIClient()  # no auth
     response = client.get(f"/api/agents/{agent_user.id}/profile/")
     assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_agent_directory_lists_every_agent_with_real_aggregated_data(quarter):
+    from rest_framework.test import APIClient
+    agent_a = User.objects.create(username="directory_agent_a", phone="+237699888001", first_name="Directory Agent A")
+    agent_b = User.objects.create(username="directory_agent_b", phone="+237699888002", first_name="Directory Agent B")
+    AgentProfile.objects.create(user=agent_a, agent_commission_percent=Decimal("10"))
+    AgentProfile.objects.create(user=agent_b, agent_commission_percent=Decimal("10"))
+
+    response = APIClient().get("/api/agents/")
+    assert response.status_code == 200
+    assert response.data["count"] == 2
+    names = {r["full_name"] for r in response.data["results"]}
+    assert names == {"Directory Agent A", "Directory Agent B"}
+
+
+@pytest.mark.django_db
+def test_agency_directory_lists_every_agency(quarter):
+    from rest_framework.test import APIClient
+    agency_user = User.objects.create(username="directory_agency_user", phone="+237699888003", first_name="Directory Agency")
+    AgencyProfile.objects.create(user=agency_user, registration_number="RC-DIRECTORY-001", agency_commission_percent=Decimal("15"))
+
+    response = APIClient().get("/api/agencies/")
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert response.data["results"][0]["agency_name"] == "Directory Agency"

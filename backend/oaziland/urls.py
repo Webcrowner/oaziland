@@ -17,14 +17,14 @@ from identity.views import RegisterView, MyProfileView, MfaSetupView, MfaVerifyV
 from geo.views import QuarterViewSet
 from property.views import ListingViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
-from social.views import SocialAccountLinkViewSet
+from social.views import SocialAccountLinkViewSet, TestimonialsView
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 from hotels.views import HotelViewSet, ReservationViewSet
 from events.views import VenueViewSet, EventBookingViewSet
 from student_hostels.views import StudentHostelViewSet, MyRoomAllocationViewSet
 from guest_houses.views import GuestHouseLodgeViewSet
 from discovery.views import WantedListingViewSet
-from agency.views import AgentPublicProfileView, AgencyPublicProfileView, MyAgentDashboardView
+from agency.views import AgentPublicProfileView, AgencyPublicProfileView, MyAgentDashboardView, AgentDirectoryView, AgencyDirectoryView
 
 router = DefaultRouter()
 router.register(r"quarters", QuarterViewSet, basename="quarter")
@@ -83,7 +83,10 @@ urlpatterns = [
     # Agent/agency profiles — public (anyone) and the private dashboard.
     path('api/agents/<uuid:user_id>/profile/', AgentPublicProfileView.as_view(), name='agent-public-profile'),
     path('api/agencies/<uuid:agency_id>/profile/', AgencyPublicProfileView.as_view(), name='agency-public-profile'),
+    path('api/agents/', AgentDirectoryView.as_view(), name='agent-directory'),
+    path('api/agencies/', AgencyDirectoryView.as_view(), name='agency-directory'),
     path('api/my-agent-dashboard/', MyAgentDashboardView.as_view(), name='my-agent-dashboard'),
+    path('api/testimonials/', TestimonialsView.as_view(), name='testimonials'),
 
     # Interactive API documentation — the acceptance criteria's
     # explicit requirement: "open the Swagger documentation yourself."

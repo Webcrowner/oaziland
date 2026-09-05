@@ -9,6 +9,30 @@ from identity.models import User, AgencyProfile
 from .services import get_agent_public_profile, get_agency_public_profile, get_agent_private_dashboard
 
 
+class AgentDirectoryView(views.APIView):
+    """A real, browsable directory — every verified agent, with the
+    SAME aggregated data (real listing counts, real ratings) as their
+    individual profile page, reused rather than duplicated."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from identity.models import AgentProfile
+        agents = AgentProfile.objects.select_related("user").order_by("-user__date_joined")
+        results = [{"user_id": str(a.user.id), **get_agent_public_profile(a.user)} for a in agents]
+        return Response({"count": len(results), "results": results})
+
+
+class AgencyDirectoryView(views.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        agencies = AgencyProfile.objects.select_related("user").order_by("-user__date_joined")
+        results = [{"agency_id": str(a.id), **get_agency_public_profile(a)} for a in agencies]
+        return Response({"count": len(results), "results": results})
+
+
 class AgentPublicProfileView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
