@@ -1,0 +1,109 @@
+# Oaziland — full production stack for a self-managed VPS (e.g. Contabo).
+#
+# WHY this file exists: Docker Compose lets one command
+# (`docker compose up -d`) start every piece this platform needs —
+# the database, the cache, the backend, the web app, and the reverse
+# proxy — all correctly wired together, without hand-installing and
+# configuring five separate pieces of server software individually.
+#
+# HOW TO USE THIS: see DEPLOYMENT_VPS.md in this same folder for the
+# full, exact, copy-paste procedure. This file alone is not enough —
+# you also need a real .env file (never commit it) with your actual
+# secrets, and a real domain pointed at this server's IP address.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: oaziland
+      POSTGRES_USER: oaziland
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      # Named volume, not a bind mount — Docker manages this storage
+      # location itself, and it survives `docker compose down` (only
+      # `docker compose down -v` would delete it) so your real data
+      # is never lost by an ordinary restart or redeploy.
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oaziland"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # WHY these two are set here rather than left to .env alone:
+      # they must point at the OTHER CONTAINERS by their Compose
+      # service name ("postgres", "redis") — not localhost, and not
+      # whatever value a copy-pasted .env.example might have.
+      DATABASE_URL: postgres://oaziland:${POSTGRES_PASSWORD}@postgres:5432/oaziland
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      # A real, persistent home for uploaded media files (property
+      # photos, etc.) — without this volume, anything uploaded would
+      # be lost the next time the backend container is rebuilt.
+      - media_data:/app/media
+      - static_data:/app/staticfiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  web:
+    build:
+      context: ./web
+      args:
+        # Baked in at BUILD time, not runtime — see web/Dockerfile's
+        # own comment on why this differs from the backend's env vars.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+      - static_data:/app/staticfiles:ro
+      - media_data:/app/media:ro
+    depends_on:
+      - backend
+      - web
+
+  # WHY certbot is its OWN container rather than something installed
+  # inside nginx's container: it only needs to run periodically (to
+  # renew the SSL certificate before it expires), not continuously —
+  # keeping it separate means it can't interfere with nginx staying up.
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;"
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+  static_data:
+  certbot_certs:
+  certbot_www:
