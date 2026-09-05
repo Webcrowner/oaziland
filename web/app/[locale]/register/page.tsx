@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
+import { useSearchParams } from "next/navigation";
 import { registerUser } from "@/lib/api";
 
 /**
@@ -10,20 +11,39 @@ import { registerUser } from "@/lib/api";
  * but not yet wired to real credentials, consistent with how every
  * other "not yet connected" external integration in this project is
  * flagged rather than faked.
+ *
+ * WHY this reads ?ref= from the URL: a referral CODE that has to be
+ * manually typed in is a real friction point — a referral LINK that
+ * auto-applies the code on arrival is what actually gets used.
  */
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const t = useTranslations("RegisterPage");
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [form, setForm] = useState({ username: "", phone: "", password: "" });
+  const [referralCode, setReferralCode] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const ref = searchParams.get("ref");
+    if (ref) setReferralCode(ref.toUpperCase());
+  }, [searchParams]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await registerUser(form);
+      await registerUser({ ...form, ...(referralCode ? { referral_code: referralCode } : {}) });
       router.push("/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("registrationFailed"));
@@ -36,6 +56,12 @@ export default function RegisterPage() {
     <main>
       <div className="max-w-sm mx-auto px-4 py-12">
         <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">{t("title")}</h1>
+
+        {referralCode && (
+          <p className="text-sm bg-green-50 text-green-800 rounded px-3 py-2 mb-4">
+            {t("referralCodeApplied", { code: referralCode })}
+          </p>
+        )}
 
         {/* Social login — UI present, NOT yet connected to real Google/
             Facebook credentials (Prompt 2's flag: still needs real

@@ -369,6 +369,7 @@ export async function registerUser(payload: {
   username: string;
   phone: string;
   password: string;
+  referral_code?: string;
 }): Promise<{ id: string }> {
   const res = await fetch(`${API_BASE_URL}/api/auth/register/`, {
     method: "POST",

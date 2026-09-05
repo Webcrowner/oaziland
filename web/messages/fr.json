@@ -110,7 +110,8 @@
     "creatingAccount": "Création du compte...",
     "register": "S'inscrire",
     "registrationFailed": "Échec de l'inscription",
-    "mfaNotice": "L'authentification multifacteur et la vérification d'identité (KYC) seront configurées lors de votre prochaine connexion, conformément aux exigences de sécurité de la plateforme."
+    "mfaNotice": "L'authentification multifacteur et la vérification d'identité (KYC) seront configurées lors de votre prochaine connexion, conformément aux exigences de sécurité de la plateforme.",
+    "referralCodeApplied": "Code de parrainage {code} appliqué — vous gagnerez tous les deux une récompense une fois votre compte vérifié."
   },
   "HotelsPage": {
     "title": "Hôtels",
@@ -326,10 +327,12 @@
     "title": "Parrainez un Ami",
     "subtitle": "Partagez votre code — quand quelqu'un que vous parrainez s'inscrit et vérifie son compte, vous gagnez une vraie récompense.",
     "yourCode": "Votre Code de Parrainage",
-    "copy": "Copier",
     "copied": "Copié !",
     "shareText": "Inscrivez-vous sur Oaziland avec mon code de parrainage {code} et trouvez votre prochain logement, hôtel ou salle au Cameroun : ",
     "shareOnWhatsApp": "Partager sur WhatsApp",
-    "signInToSeeCode": "Connectez-vous pour obtenir votre code de parrainage"
+    "signInToSeeCode": "Connectez-vous pour obtenir votre code de parrainage",
+    "yourLink": "Votre Lien de Parrainage",
+    "copyCode": "Copier le Code",
+    "copyLink": "Copier le Lien"
   }
 }

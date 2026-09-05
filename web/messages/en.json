@@ -110,7 +110,8 @@
     "creatingAccount": "Creating account...",
     "register": "Register",
     "registrationFailed": "Registration failed",
-    "mfaNotice": "Multi-factor authentication and identity verification (KYC) will be set up on your next login, per the platform's security requirements."
+    "mfaNotice": "Multi-factor authentication and identity verification (KYC) will be set up on your next login, per the platform's security requirements.",
+    "referralCodeApplied": "Referral code {code} applied — you'll both earn a reward once your account is verified."
   },
   "HotelsPage": {
     "title": "Hotels",
@@ -326,10 +327,12 @@
     "title": "Refer a Friend",
     "subtitle": "Share your code — when someone you refer signs up and verifies their account, you earn a real reward.",
     "yourCode": "Your Referral Code",
-    "copy": "Copy",
     "copied": "Copied!",
     "shareText": "Sign up on Oaziland using my referral code {code} and find your next home, hotel, or venue in Cameroon: ",
     "shareOnWhatsApp": "Share on WhatsApp",
-    "signInToSeeCode": "Sign in to get your referral code"
+    "signInToSeeCode": "Sign in to get your referral code",
+    "yourLink": "Your Referral Link",
+    "copyCode": "Copy Code",
+    "copyLink": "Copy Link"
   }
 }
