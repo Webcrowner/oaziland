@@ -5,12 +5,13 @@ and creating one REPLACES any existing link for that platform rather
 than erroring on a duplicate — matches link_social_account()'s own
 update_or_create behavior exactly.
 """
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema
-from .models import SocialAccountLink
-from .serializers import SocialAccountLinkSerializer
+from .models import SocialAccountLink, Conversation
+from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer
 from .services import link_social_account
 
 
@@ -58,3 +59,67 @@ class TestimonialsView(APIView):
             for r in reviews
         ]
         return Response({"count": len(results), "results": results})
+
+
+class ConversationViewSet(viewsets.ModelViewSet):
+    """A real inbox — list/retrieve/create all scoped to conversations
+    the requester is actually a participant in. WHY create looks for
+    an EXISTING conversation with the same participant first: starting
+    a new, empty conversation every time someone messages the same
+    person again would fragment message history across many
+    conversations instead of keeping one real thread."""
+    serializer_class = ConversationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Conversation.objects.none()
+        return Conversation.objects.filter(participants=self.request.user).order_by("-created_at")
+
+    def get_serializer_context(self):
+        return {"request": self.request}
+
+    def create(self, request, *args, **kwargs):
+        participant_id = request.data.get("participant_id")
+        if not participant_id:
+            return Response({"detail": "participant_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = Conversation.objects.filter(participants=request.user).filter(participants=participant_id).first()
+        if existing:
+            return Response(ConversationSerializer(existing, context={"request": request}).data, status=status.HTTP_200_OK)
+
+        conversation = Conversation.objects.create()
+        conversation.participants.add(request.user, participant_id)
+        return Response(ConversationSerializer(conversation, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def messages(self, request, pk=None):
+        conversation = self.get_object()
+        messages = conversation.messages.filter(folder="SENT").order_by("sent_at")
+        return Response(MessageSerializer(messages, many=True, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"])
+    def send(self, request, pk=None):
+        """Reuses the EXISTING send_message_now() exactly, including
+        its client_message_id-based offline-safe retry handling — the
+        API layer never duplicates that logic."""
+        from .services import send_message_now
+        conversation = self.get_object()
+        text = request.data.get("text", "")
+        client_message_id = request.data.get("client_message_id")
+        message = send_message_now(conversation=conversation, sender=request.user, text=text, client_message_id=client_message_id)
+        return Response(MessageSerializer(message, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def mark_seen(self, request, pk=None):
+        """Marks every message in this conversation NOT sent by the
+        requester as seen — reuses the existing mark_message_seen()
+        per-message, rather than a bulk update that bypasses its logic."""
+        from .services import mark_message_seen
+        conversation = self.get_object()
+        unseen_messages = conversation.messages.filter(folder="SENT").exclude(sender=request.user).filter(
+            receipts__recipient=request.user, receipts__seen_at__isnull=True,
+        )
+        for message in unseen_messages:
+            mark_message_seen(message=message, recipient=request.user)
+        return Response({"marked_seen": unseen_messages.count()})
