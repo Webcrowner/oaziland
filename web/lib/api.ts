@@ -53,11 +53,13 @@ export async function searchListings(params: {
   quarter?: string;
   property_type?: string;
   finish_level?: string;
+  listing_type?: string;
 }): Promise<PaginatedResponse<Listing>> {
   const query = new URLSearchParams();
   if (params.quarter) query.set("quarter", params.quarter);
   if (params.property_type) query.set("property_type", params.property_type);
   if (params.finish_level) query.set("finish_level", params.finish_level);
+  if (params.listing_type) query.set("listing_type", params.listing_type);
 
   const res = await fetch(`${API_BASE_URL}/api/listings/?${query.toString()}`, {
     // Server-rendered listing pages should always show fresh data —
@@ -102,6 +104,106 @@ export interface Hotel {
 export async function searchHotels(): Promise<PaginatedResponse<Hotel>> {
   const res = await fetch(`${API_BASE_URL}/api/hotels/`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Hotel search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface VenueSpaceSummary {
+  id: string;
+  space_name: string;
+  capacity_theatre: number | null;
+  capacity_banquet: number | null;
+  base_price_per_hour_xaf: string;
+}
+
+export interface Venue {
+  id: string;
+  verified: boolean;
+  quarter: string;
+  quarter_name: string;
+  spaces: VenueSpaceSummary[];
+}
+
+export async function searchVenues(): Promise<PaginatedResponse<Venue>> {
+  const res = await fetch(`${API_BASE_URL}/api/venues/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Venue search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface HostelUnitSummary {
+  id: string;
+  room_code: string;
+  unit_type: string;
+  occupancy_model: string;
+  amenity_tier: string;
+  bed_capacity: number | null;
+}
+
+export interface StudentHostel {
+  id: string;
+  property_type: string;
+  quarter: string;
+  quarter_name: string;
+  units: HostelUnitSummary[];
+}
+
+export async function searchStudentHostels(): Promise<PaginatedResponse<StudentHostel>> {
+  const res = await fetch(`${API_BASE_URL}/api/student-hostels/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Student hostel search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface GuestHouse {
+  id: string;
+  is_coastal_leisure: boolean;
+  quarter: string;
+  quarter_name: string;
+  finish_level: string;
+}
+
+export async function searchGuestHouses(): Promise<PaginatedResponse<GuestHouse>> {
+  const res = await fetch(`${API_BASE_URL}/api/guest-houses/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Guest house search failed: ${res.status}`);
+  return res.json();
+}
+
+export interface WantedListingResponseItem {
+  id: string;
+  responder: string;
+  message: string;
+  created_at: string;
+}
+
+export interface WantedListing {
+  id: string;
+  category: string;
+  quarter: string | null;
+  quarter_name: string | null;
+  min_size_sqm: string | null;
+  max_budget_xaf: string | null;
+  notes: string;
+  status: string;
+  created_at: string;
+  responses: WantedListingResponseItem[];
+}
+
+export async function listWantedListings(): Promise<PaginatedResponse<WantedListing>> {
+  const res = await fetch(`${API_BASE_URL}/api/wanted-listings/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Wanted-listing fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AgentPublicProfile {
+  full_name: string;
+  is_kyc_verified: boolean;
+  average_rating: number | null;
+  rating_count: number;
+  active_listing_count: number;
+  agency_name: string | null;
+}
+
+export async function getAgentPublicProfile(userId: string): Promise<AgentPublicProfile> {
+  const res = await fetch(`${API_BASE_URL}/api/agents/${userId}/profile/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Agent profile fetch failed: ${res.status}`);
   return res.json();
 }
 

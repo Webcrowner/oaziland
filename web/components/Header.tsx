@@ -21,6 +21,11 @@ export default function Header() {
   const navLinks = [
     { href: "/search", label: t("exploreProperties") },
     { href: "/list-property", label: t("listAProperty") },
+    { href: "/hotels", label: t("hotels") },
+    { href: "/student-hostels", label: t("studentHostels") },
+    { href: "/events", label: t("events") },
+    { href: "/guest-houses", label: t("guestHouses") },
+    { href: "/wanted", label: t("wantedBoard") },
   ];
 
   const linkClass = (href: string) =>

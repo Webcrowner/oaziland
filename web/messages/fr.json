@@ -1,6 +1,11 @@
 {
   "Header": {
     "exploreProperties": "Explorer les propriétés",
+    "hotels": "Hôtels",
+    "studentHostels": "Résidences Étudiantes",
+    "events": "Salles d'Événements",
+    "guestHouses": "Maisons d'Hôtes",
+    "wantedBoard": "Je Recherche...",
     "listAProperty": "Publier une propriété",
     "verifiedListingsCount": "Plus de 10 000 annonces vérifiées",
     "signIn": "Se connecter",
@@ -36,6 +41,13 @@
     "modern": "Moderne",
     "standard": "Standard",
     "search": "Rechercher",
+    "forRent": "À Louer",
+    "forSale": "À Vendre",
+    "exploreMore": "Découvrez Plus sur Oaziland",
+    "categoryHotels": "Hôtels",
+    "categoryStudentHostels": "Résidences Étudiantes",
+    "categoryEventVenues": "Salles d'Événements",
+    "categoryGuestHouses": "Maisons d'Hôtes",
     "trustVerifiedListings": "✓ Annonces vérifiées",
     "trustSecurePayments": "✓ Paiements Mobile Money sécurisés",
     "trustLocalAgents": "✓ Agents locaux de confiance"
@@ -86,6 +98,55 @@
     "perNight": "/ nuit",
     "noHotelsYet": "Aucun hôtel vérifié n'est encore répertorié.",
     "capacity": "Pour {count} personne(s)"
+  },
+  "VenuesPage": {
+    "title": "Salles d'Événements",
+    "subtitle": "Des espaces événementiels vérifiés à travers le Cameroun — conférences, mariages et célébrations.",
+    "noVenuesYet": "Aucune salle vérifiée n'est encore répertoriée.",
+    "perHour": "/ heure",
+    "spacesAvailable": "{count} espace disponible",
+    "spacesAvailableOther": "{count} espaces disponibles",
+    "theatreCapacity": "Théâtre : {count}",
+    "banquetCapacity": "Banquet : {count}"
+  },
+  "GuestHousesPage": {
+    "title": "Maisons d'Hôtes",
+    "subtitle": "Des logements de courte durée à travers le Cameroun, y compris des sites balnéaires.",
+    "noGuestHousesYet": "Aucune maison d'hôtes n'est encore répertoriée.",
+    "coastalLeisure": "Loisirs Balnéaires"
+  },
+  "StudentHostelsPage": {
+    "title": "Résidences Étudiantes",
+    "subtitle": "Des hébergements étudiants vérifiés près de votre université.",
+    "noHostelsYet": "Aucune résidence étudiante n'est encore répertoriée.",
+    "unitsAvailable": "{count} unité disponible",
+    "unitsAvailableOther": "{count} unités disponibles"
+  },
+  "WantedBoardPage": {
+    "title": "Je Recherche...",
+    "subtitle": "De vraies demandes de personnes cherchant une chambre, une boutique, un entrepôt ou une entreprise — répondez si vous avez une correspondance.",
+    "postRequest": "Publier une Demande",
+    "categoryRoom": "Chambre à Louer",
+    "categoryStore": "Boutique",
+    "categoryWarehouse": "Entrepôt",
+    "categoryBusiness": "Entreprise (Fonds de Commerce)",
+    "categoryBusinessArea": "Espace Commercial",
+    "budgetUpTo": "Budget : jusqu'à {amount} XAF",
+    "sizeAtLeast": "Au moins {size} m²",
+    "noWantedListingsYet": "Aucune demande ouverte pour le moment.",
+    "signInToRespond": "Connectez-vous pour répondre",
+    "postedOn": "Publié le {date}"
+  },
+  "AgentProfilePage": {
+    "verifiedBadge": "KYC Vérifié",
+    "notYetVerified": "Pas Encore Vérifié",
+    "activeListings": "{count} annonce active",
+    "activeListingsOther": "{count} annonces actives",
+    "ratingCount": "({count} avis)",
+    "ratingCountOther": "({count} avis)",
+    "noRatingsYet": "Aucun avis pour le moment",
+    "agencyLabel": "Agence",
+    "viewListings": "Voir les Annonces Actives"
   },
   "ListPropertyPage": {
     "title": "Publier une propriété",

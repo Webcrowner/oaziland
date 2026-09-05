@@ -2,6 +2,10 @@
   "Header": {
     "exploreProperties": "Explore Properties",
     "hotels": "Hotels",
+    "studentHostels": "Student Hostels",
+    "events": "Event Venues",
+    "guestHouses": "Guest Houses",
+    "wantedBoard": "Looking For...",
     "listAProperty": "List a Property",
     "verifiedListingsCount": "10,000+ Verified Listings",
     "signIn": "Sign In",
@@ -37,6 +41,13 @@
     "modern": "Modern",
     "standard": "Standard",
     "search": "Search",
+    "forRent": "For Rent",
+    "forSale": "For Sale",
+    "exploreMore": "Explore More on Oaziland",
+    "categoryHotels": "Hotels",
+    "categoryStudentHostels": "Student Hostels",
+    "categoryEventVenues": "Event Venues",
+    "categoryGuestHouses": "Guest Houses",
     "trustVerifiedListings": "✓ Verified Listings",
     "trustSecurePayments": "✓ Secure Mobile Money Payments",
     "trustLocalAgents": "✓ Trusted Local Agents"
@@ -87,6 +98,55 @@
     "perNight": "/ night",
     "noHotelsYet": "No verified hotels are listed yet.",
     "capacity": "Sleeps {count}"
+  },
+  "VenuesPage": {
+    "title": "Event Venues",
+    "subtitle": "Verified event spaces across Cameroon — conferences, weddings, and celebrations.",
+    "noVenuesYet": "No verified venues are listed yet.",
+    "perHour": "/ hour",
+    "spacesAvailable": "{count} space available",
+    "spacesAvailableOther": "{count} spaces available",
+    "theatreCapacity": "Theatre: {count}",
+    "banquetCapacity": "Banquet: {count}"
+  },
+  "GuestHousesPage": {
+    "title": "Guest Houses",
+    "subtitle": "Short-stay lodges across Cameroon, including coastal leisure spots.",
+    "noGuestHousesYet": "No guest houses are listed yet.",
+    "coastalLeisure": "Coastal Leisure"
+  },
+  "StudentHostelsPage": {
+    "title": "Student Hostels",
+    "subtitle": "Verified student accommodation near your university.",
+    "noHostelsYet": "No student hostels are listed yet.",
+    "unitsAvailable": "{count} unit available",
+    "unitsAvailableOther": "{count} units available"
+  },
+  "WantedBoardPage": {
+    "title": "Looking For...",
+    "subtitle": "Real requests from people looking for a room, store, warehouse, or business — respond if you have a match.",
+    "postRequest": "Post a Request",
+    "categoryRoom": "Room for Rent",
+    "categoryStore": "Store",
+    "categoryWarehouse": "Warehouse",
+    "categoryBusiness": "Business (Going Concern)",
+    "categoryBusinessArea": "Business Area/Commercial Space",
+    "budgetUpTo": "Budget: up to {amount} XAF",
+    "sizeAtLeast": "At least {size} m²",
+    "noWantedListingsYet": "No open requests right now.",
+    "signInToRespond": "Sign in to respond",
+    "postedOn": "Posted {date}"
+  },
+  "AgentProfilePage": {
+    "verifiedBadge": "KYC Verified",
+    "notYetVerified": "Not Yet Verified",
+    "activeListings": "{count} active listing",
+    "activeListingsOther": "{count} active listings",
+    "ratingCount": "({count} review)",
+    "ratingCountOther": "({count} reviews)",
+    "noRatingsYet": "No ratings yet",
+    "agencyLabel": "Agency",
+    "viewListings": "View Active Listings"
   },
   "ListPropertyPage": {
     "title": "List a Property",

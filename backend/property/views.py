@@ -32,6 +32,16 @@ class ListingViewSet(viewsets.ModelViewSet):
             return [IsVerifiedAndMfaEnabled()]
         if self.action == "approve":
             return [IsAdminRole()]
+        if self.action == "contact":
+            # WHY just IsAuthenticated, not IsOwnerOrReadOnly: ANY
+            # logged-in user should be able to contact a lister about
+            # THEIR listing — IsOwnerOrReadOnly would backwards-restrict
+            # this to only the listing's own owner contacting themselves.
+            # build_whatsapp_action() writes a real ActionLog row, and
+            # ActionLog.triggered_by is a required field — there is no
+            # anonymous identity to attribute the action to, so this
+            # can't be AllowAny either.
+            return [permissions.IsAuthenticated()]
         return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
 
     def get_queryset(self):
@@ -99,3 +109,21 @@ class ListingViewSet(viewsets.ModelViewSet):
         listing = self.get_object()
         listing.renew()
         return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def contact(self, request, pk=None):
+        """Generates a real WhatsApp deep link to the listing's own
+        agent/landlord — reuses the EXISTING build_whatsapp_action()
+        (with its own audit-logged ActionLog) rather than exposing raw
+        phone numbers in the public search response."""
+        from engagement.services import build_whatsapp_action
+        from engagement.models import WhatsAppContext
+
+        listing = self.get_object()
+        context = WhatsAppContext.CONTACT_AGENT if listing.lister_role != "OWNER" else WhatsAppContext.CONTACT_LANDLORD
+        action_result = build_whatsapp_action(
+            context=context, triggered_by=request.user,
+            target_object=listing, recipient_phone=listing.listed_by.phone,
+            template_vars={"listing_id": str(listing.id)},
+        )
+        return Response({"deep_link": action_result["deep_link"], "message": action_result["message"]})

@@ -11,7 +11,7 @@ import { searchListings } from "@/lib/api";
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ quarter?: string; property_type?: string; finish_level?: string }>;
+  searchParams: Promise<{ quarter?: string; property_type?: string; finish_level?: string; listing_type?: string }>;
 }) {
   const t = await getTranslations("SearchPage");
   const params = await searchParams;

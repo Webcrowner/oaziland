@@ -372,6 +372,30 @@ class Listing(models.Model):
 
     LISTING_DURATION_DAYS = 90  # a sensible, configurable default lifespan for an active listing
 
+    @property
+    def lister_role(self) -> str:
+        """WHY this is computed, not a stored field: the underlying
+        facts (who owns the property, whether the lister has an
+        AgentProfile, whether that agent belongs to an agency) can all
+        change independently — a stored role would drift out of sync
+        the moment any of them did. Per the founder's explicit
+        requirement: some people specifically want to deal directly
+        with an owner, others prefer an agent or agency — this is what
+        makes that distinction real and visible, not guessed."""
+        if hasattr(self.listed_by, "agent_profile"):
+            return "AGENCY" if self.listed_by.agent_profile.agency else "AGENT"
+        return "OWNER"
+
+    @property
+    def lister_display_name(self) -> str:
+        return self.listed_by.full_name or self.listed_by.username
+
+    @property
+    def lister_agency_name(self):
+        if hasattr(self.listed_by, "agent_profile") and self.listed_by.agent_profile.agency:
+            return self.listed_by.agent_profile.agency.user.full_name or self.listed_by.agent_profile.agency.user.username
+        return None
+
     def publish(self):
         self.status = ListingStatus.PUBLISHED
         from django.utils import timezone
