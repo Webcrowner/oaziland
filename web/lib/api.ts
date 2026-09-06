@@ -908,3 +908,167 @@ export async function applyToJob(jobId: string, coverMessage: string, accessToke
   if (!res.ok) throw new Error(data.detail || "Could not submit application");
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Property Management — real maintenance, tenant screening, agent
+// safety check-ins, leases, and dispute-opening.
+// ---------------------------------------------------------------------------
+export interface MaintenanceCostEntry {
+  id: number;
+  amount_xaf: string;
+  note: string;
+  recorded_at: string;
+}
+
+export interface MaintenanceRequestItem {
+  id: string;
+  property_asset: string;
+  reported_by: string;
+  reported_by_name: string;
+  category: string;
+  description: string;
+  cost_estimate_xaf: string | null;
+  status: string;
+  reported_at: string;
+  resolved_at: string | null;
+  cost_entries: MaintenanceCostEntry[];
+}
+
+export async function listMaintenanceRequests(accessToken: string): Promise<{ count: number; results: MaintenanceRequestItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/maintenance-requests/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch maintenance requests");
+  return res.json();
+}
+
+export async function createMaintenanceRequest(
+  payload: { property_asset: string; category: string; description: string },
+  accessToken: string
+) {
+  const res = await fetch(`${API_BASE_URL}/api/maintenance-requests/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not create maintenance request");
+  return data;
+}
+
+export async function addMaintenanceCost(requestId: string, amountXaf: string, note: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/maintenance-requests/${requestId}/add-cost/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ amount_xaf: amountXaf, note }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not add cost");
+  return res.json();
+}
+
+export async function closeMaintenanceRequest(requestId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/maintenance-requests/${requestId}/close/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not close maintenance request");
+  return res.json();
+}
+
+export interface TenantScreeningItem {
+  id: string;
+  landlord: string;
+  landlord_name: string;
+  prospective_tenant: string;
+  prospective_tenant_name: string;
+  status: string;
+  report_summary: { completed_bookings: number; average_review_score: number | null; warning_count: number } | null;
+  requested_at: string;
+  consented_at: string | null;
+}
+
+export async function listTenantScreenings(accessToken: string): Promise<{ count: number; results: TenantScreeningItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/tenant-screenings/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch tenant screenings");
+  return res.json();
+}
+
+export async function requestTenantScreening(prospectiveTenantId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/tenant-screenings/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ prospective_tenant: prospectiveTenantId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not request screening");
+  return data;
+}
+
+export async function consentToScreening(screeningId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/tenant-screenings/${screeningId}/consent/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not grant consent");
+  return res.json();
+}
+
+export async function generateScreeningReport(screeningId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/tenant-screenings/${screeningId}/generate-report/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not generate report");
+  return res.json();
+}
+
+export interface SafetyCheckInItem {
+  id: string;
+  agent: string;
+  agent_name: string;
+  property_asset: string | null;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  started_at: string;
+  expected_checkout_at: string;
+  checked_out_at: string | null;
+  status: string;
+}
+
+export async function listSafetyCheckIns(accessToken: string): Promise<{ count: number; results: SafetyCheckInItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/safety-check-ins/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch safety check-ins");
+  return res.json();
+}
+
+export async function startSafetyCheckIn(
+  payload: { property_asset?: string; emergency_contact_name: string; emergency_contact_phone: string; expected_duration_minutes: number },
+  accessToken: string
+) {
+  const res = await fetch(`${API_BASE_URL}/api/safety-check-ins/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not start check-in");
+  return data;
+}
+
+export async function checkOutSafely(checkInId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/safety-check-ins/${checkInId}/check-out/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not check out");
+  return res.json();
+}
+
+export async function openBookingDispute(bookingId: string, reason: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/bookings/${bookingId}/open-dispute/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ reason }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not open dispute");
+  return data;
+}

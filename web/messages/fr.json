@@ -43,7 +43,8 @@
     "compare": "Comparer",
     "feed": "Fil Social",
     "premium": "Oaziland Premium",
-    "careers": "Carrières"
+    "careers": "Carrières",
+    "propertyManagement": "Gestion Immobilière"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -530,5 +531,24 @@
     "submitting": "Envoi en cours...",
     "applied": "Candidature envoyée !",
     "applyFailed": "Impossible d'envoyer votre candidature. Veuillez réessayer."
+  },
+  "PropertyManagementPage": {
+    "title": "Gestion Immobilière",
+    "subtitle": "Maintenance, vérification des locataires, et outils de sécurité pour agents.",
+    "signInRequired": "Connectez-vous pour accéder aux outils de gestion immobilière",
+    "tab_maintenance": "Maintenance",
+    "tab_screening": "Vérification des Locataires",
+    "tab_safety": "Contrôles de Sécurité",
+    "noMaintenanceYet": "Aucune demande de maintenance pour le moment.",
+    "noScreeningsYet": "Aucune demande de vérification de locataire pour le moment.",
+    "noCheckInsYet": "Aucun contrôle de sécurité pour le moment.",
+    "totalCost": "Coût total",
+    "markClosed": "Marquer comme Fermé",
+    "completedBookings": "Réservations terminées",
+    "warnings": "Avertissements",
+    "grantConsent": "Accorder le Consentement",
+    "generateReport": "Générer le Rapport",
+    "expectedBy": "Retour prévu avant",
+    "checkOutNow": "Se Signaler Maintenant"
   }
 }

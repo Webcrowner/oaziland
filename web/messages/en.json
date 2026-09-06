@@ -43,7 +43,8 @@
     "compare": "Compare",
     "feed": "Social Feed",
     "premium": "Oaziland Premium",
-    "careers": "Careers"
+    "careers": "Careers",
+    "propertyManagement": "Property Management"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -530,5 +531,24 @@
     "submitting": "Submitting...",
     "applied": "Application submitted!",
     "applyFailed": "Could not submit your application. Please try again."
+  },
+  "PropertyManagementPage": {
+    "title": "Property Management",
+    "subtitle": "Maintenance, tenant screening, and agent safety tools.",
+    "signInRequired": "Sign in to access property management tools",
+    "tab_maintenance": "Maintenance",
+    "tab_screening": "Tenant Screening",
+    "tab_safety": "Safety Check-Ins",
+    "noMaintenanceYet": "No maintenance requests yet.",
+    "noScreeningsYet": "No tenant screening requests yet.",
+    "noCheckInsYet": "No safety check-ins yet.",
+    "totalCost": "Total cost",
+    "markClosed": "Mark as Closed",
+    "completedBookings": "Completed bookings",
+    "warnings": "Warnings",
+    "grantConsent": "Grant Consent",
+    "generateReport": "Generate Report",
+    "expectedBy": "Expected check-out by",
+    "checkOutNow": "Check Out Now"
   }
 }
