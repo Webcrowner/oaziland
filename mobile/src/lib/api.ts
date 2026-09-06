@@ -512,7 +512,7 @@ export async function searchPosts(query: string): Promise<PaginatedResponse<Soci
   return res.json();
 }
 
-export async function createPost(payload: { caption: string; tags?: string[]; linked_listing_id?: string }) {
+export async function createPost(payload: { caption: string; tags?: string[]; linked_listing_id?: string; media_urls?: string[] }) {
   const res = await fetch(`${API_BASE_URL}/api/posts/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -665,5 +665,46 @@ export interface AgentDashboard {
 export async function getMyAgentDashboard(): Promise<AgentDashboard> {
   const res = await fetch(`${API_BASE_URL}/api/my-agent-dashboard/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error(`Dashboard fetch failed: ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Real media upload — closes the gap found while auditing: on mobile,
+// a photo taken in ListPropertyScreen was ONLY ever shown as a local
+// preview and never actually uploaded or attached to anything.
+// ---------------------------------------------------------------------------
+export interface MediaUploadResult {
+  url: string;
+  media_type: "PHOTO" | "VIDEO";
+}
+
+export async function uploadMediaFile(uri: string, mimeType: string, folder: string): Promise<MediaUploadResult> {
+  const filename = uri.split("/").pop() || "upload";
+  const formData = new FormData();
+  // React Native's fetch expects this exact {uri, name, type} shape
+  // for a file field — not a real Blob/File object like the browser.
+  formData.append("file", { uri, name: filename, type: mimeType } as unknown as Blob);
+  formData.append("folder", folder);
+
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE_URL}/api/media/upload/`, {
+    method: "POST",
+    headers, // Content-Type is deliberately omitted — fetch sets the
+             // correct multipart boundary itself when given FormData;
+             // setting it manually here would break the upload.
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Upload failed");
+  return data;
+}
+
+export async function addListingPhoto(listingId: string, url: string, mediaType: "PHOTO" | "VIDEO") {
+  const res = await fetch(`${API_BASE_URL}/api/listings/${listingId}/add-photo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach media");
   return res.json();
 }

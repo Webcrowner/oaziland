@@ -494,9 +494,22 @@ class ListingPhoto(models.Model):
     every listing card and detail page's 'No photo yet' placeholder
     across the whole platform was masking the fact that a lister
     could never actually attach a photo in the first place, not just
-    that no test data happened to include one."""
+    that no test data happened to include one.
+
+    WHY media_type exists despite the model's name: a real video
+    walkthrough of a property is a genuinely common, valuable thing a
+    lister would want to attach — kept as ListingPhoto rather than
+    renaming/splitting into a second model, since every existing
+    reference to listing.photos would otherwise need updating for a
+    distinction that changes nothing about how these rows are
+    queried, ordered, or displayed."""
+    class MediaType(models.TextChoices):
+        PHOTO = "PHOTO", "Photo"
+        VIDEO = "VIDEO", "Video"
+
     listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name="photos")
     url = models.URLField()
+    media_type = models.CharField(max_length=10, choices=MediaType.choices, default=MediaType.PHOTO)
     is_primary = models.BooleanField(default=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 

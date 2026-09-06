@@ -225,7 +225,15 @@
     "somethingWentWrong": "Something went wrong. Please try again.",
     "success": "Your listing was created as a draft — an admin will review it before it goes live.",
     "couldNotReachServer": "Could not reach the server.",
-    "completeMfaSetup": "Complete two-factor authentication"
+    "completeMfaSetup": "Complete two-factor authentication",
+    "neighborhoodLabel": "Neighborhood",
+    "chooseNeighborhood": "Choose a neighborhood",
+    "chooseNeighborhoodError": "Please choose a neighborhood.",
+    "bedroomsLabel": "Bedrooms",
+    "descriptionLabel": "Description",
+    "photosVideosLabel": "Photos & Videos",
+    "addPhotoOrVideo": "Add Photo or Video",
+    "mediaAttached": "{count} file(s) attached"
   },
   "ServicesPage": {
     "title": "Services",
@@ -474,7 +482,9 @@
     "posting": "Posting...",
     "posted": "Posted!",
     "blocked": "This post was blocked by content moderation. Please revise it and try again.",
-    "signInRequired": "Sign in to create a post"
+    "signInRequired": "Sign in to create a post",
+    "addPhotoOrVideo": "Add Photo or Video",
+    "mediaAttached": "{count} file(s) attached"
   },
   "PremiumPage": {
     "title": "Oaziland Premium",
@@ -504,5 +514,9 @@
     "student": "I'm a student",
     "studentDesc": "Find verified housing near your university",
     "skip": "Just looking around"
+  },
+  "MediaUploader": {
+    "uploading": "Uploading...",
+    "uploadFailed": "Upload failed. Please try again."
   }
 }

@@ -4,18 +4,24 @@ import * as ImagePicker from "expo-image-picker";
 import NetInfo from "@react-native-community/netinfo";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { createHouse, createListing, listQuarters, type Quarter } from "../lib/api";
+import { createHouse, createListing, listQuarters, uploadMediaFile, addListingPhoto, type Quarter, type MediaUploadResult } from "../lib/api";
 import { enqueueAction } from "../offline/queue";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ListProperty">;
 
+interface PendingMedia extends MediaUploadResult {
+  localUri: string;
+}
+
 /**
  * List a Property — the mobile equivalent of the web app's real
- * property-creation wizard (a genuine gap closed earlier this
- * session: creating a listing requires an EXISTING property, and
- * nothing previously let a mobile user create one). This screen now
- * does both real steps: create the House, then attach a Listing to
- * it — same two-step flow as web, same underlying API.
+ * property-creation wizard. This pass fixes a real, separate bug
+ * found while wiring in genuine media upload: a photo taken here was
+ * ONLY EVER shown as a local preview — handleSubmit never uploaded
+ * or attached it to anything. Now supports real photo AND video
+ * capture/selection (expo-image-picker's mediaTypes accepts both),
+ * genuinely uploaded via the real /api/media/upload/ endpoint and
+ * attached to the listing once it's created.
  */
 export default function ListPropertyScreen({ navigation }: Props) {
   const [quarters, setQuarters] = useState<Quarter[]>([]);
@@ -24,7 +30,8 @@ export default function ListPropertyScreen({ navigation }: Props) {
   const [description, setDescription] = useState("");
   const [listingType, setListingType] = useState<"RENT" | "SALE">("RENT");
   const [price, setPrice] = useState("");
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [media, setMedia] = useState<PendingMedia[]>([]);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [needsMfa, setNeedsMfa] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -38,15 +45,31 @@ export default function ListPropertyScreen({ navigation }: Props) {
       .catch(() => {});
   }, []);
 
+  async function uploadAndTrack(asset: ImagePicker.ImagePickerAsset) {
+    setUploadingMedia(true);
+    try {
+      const mimeType = asset.mimeType || (asset.type === "video" ? "video/mp4" : "image/jpeg");
+      const result = await uploadMediaFile(asset.uri, mimeType, "listings");
+      setMedia((prev) => [...prev, { ...result, localUri: asset.uri }]);
+    } catch {
+      setMessage({ type: "error", text: "Could not upload that file. Please try again." });
+    } finally {
+      setUploadingMedia(false);
+    }
+  }
+
   async function handleTakePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
       setMessage({ type: "error", text: "Camera permission is required to photograph the property." });
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+    // mediaTypes accepting both images and videos means the native
+    // camera UI itself offers a photo/video toggle — real video
+    // capture, not just photos.
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images", "videos"], quality: 0.7, videoMaxDuration: 60 });
     if (!result.canceled && result.assets?.[0]) {
-      setPhotoUri(result.assets[0].uri);
+      await uploadAndTrack(result.assets[0]);
     }
   }
 
@@ -56,9 +79,9 @@ export default function ListPropertyScreen({ navigation }: Props) {
       setMessage({ type: "error", text: "Photo library permission is required." });
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.7 });
     if (!result.canceled && result.assets?.[0]) {
-      setPhotoUri(result.assets[0].uri);
+      await uploadAndTrack(result.assets[0]);
     }
   }
 
@@ -106,6 +129,13 @@ export default function ListPropertyScreen({ navigation }: Props) {
         setMessage({ type: "error", text: "The property was saved, but the listing itself could not be created. Please try again." });
         return;
       }
+      const listing = await listingRes.json();
+
+      // Attach every real photo/video already uploaded before submit —
+      // the actual gap this whole rewrite closes: this used to just
+      // discard whatever was captured, attaching nothing at all.
+      await Promise.all(media.map((m) => addListingPhoto(listing.id, m.url, m.media_type)));
+
       setMessage({ type: "success", text: "Your listing was created — it goes live once an admin reviews it." });
     } catch {
       // A network error mid-request is functionally the same as being
@@ -123,18 +153,35 @@ export default function ListPropertyScreen({ navigation }: Props) {
       <Text style={styles.title}>List a Property</Text>
 
       <View style={styles.photoSection}>
-        {photoUri ? (
-          <Image source={{ uri: photoUri }} style={styles.photoPreview} />
-        ) : (
+        {media.length === 0 && !uploadingMedia ? (
           <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoPlaceholderText}>No photo yet</Text>
+            <Text style={styles.photoPlaceholderText}>No photos or videos yet</Text>
           </View>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaPreviewRow}>
+            {media.map((m, i) => (
+              <View key={i} style={styles.mediaPreviewItem}>
+                {m.media_type === "VIDEO" ? (
+                  <View style={styles.videoPreviewBadge}>
+                    <Text style={styles.videoPreviewBadgeText}>▶ Video</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: m.localUri }} style={styles.photoPreview} />
+                )}
+              </View>
+            ))}
+            {uploadingMedia && (
+              <View style={[styles.photoPreview, styles.uploadingBox]}>
+                <ActivityIndicator color="#1B2A4A" />
+              </View>
+            )}
+          </ScrollView>
         )}
         <View style={styles.photoButtonRow}>
-          <TouchableOpacity style={styles.photoButton} onPress={handleTakePhoto}>
-            <Text style={styles.photoButtonText}>Take Photo</Text>
+          <TouchableOpacity style={styles.photoButton} onPress={handleTakePhoto} disabled={uploadingMedia}>
+            <Text style={styles.photoButtonText}>Take Photo/Video</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.photoButton} onPress={handlePickFromLibrary}>
+          <TouchableOpacity style={styles.photoButton} onPress={handlePickFromLibrary} disabled={uploadingMedia}>
             <Text style={styles.photoButtonText}>Choose from Library</Text>
           </TouchableOpacity>
         </View>
@@ -202,8 +249,13 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: "#fff", padding: 20 },
   title: { fontSize: 22, fontWeight: "bold", color: "#1B2A4A", marginBottom: 16 },
   photoSection: { marginBottom: 20 },
-  photoPreview: { width: "100%", height: 180, borderRadius: 8 },
-  photoPlaceholder: { width: "100%", height: 180, backgroundColor: "#E5E7EB", borderRadius: 8, justifyContent: "center", alignItems: "center" },
+  mediaPreviewRow: { marginBottom: 10 },
+  mediaPreviewItem: { marginRight: 10 },
+  photoPreview: { width: 120, height: 120, borderRadius: 8 },
+  uploadingBox: { backgroundColor: "#E5E7EB", justifyContent: "center", alignItems: "center" },
+  videoPreviewBadge: { width: 120, height: 120, borderRadius: 8, backgroundColor: "#1B2A4A", justifyContent: "center", alignItems: "center" },
+  videoPreviewBadgeText: { color: "#fff", fontWeight: "700" },
+  photoPlaceholder: { width: "100%", height: 120, backgroundColor: "#E5E7EB", borderRadius: 8, justifyContent: "center", alignItems: "center" },
   photoPlaceholderText: { color: "#4B5563" },
   photoButtonRow: { flexDirection: "row", gap: 10, marginTop: 10 },
   photoButton: { flex: 1, borderWidth: 1, borderColor: "#1B2A4A", borderRadius: 8, paddingVertical: 10, alignItems: "center" },

@@ -3,7 +3,8 @@ import { useState, Suspense } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
-import { createPost } from "@/lib/api";
+import { createPost, type MediaUploadResult } from "@/lib/api";
+import MediaUploader from "@/components/MediaUploader";
 
 /**
  * Real post creation — wraps in Suspense for useSearchParams, the
@@ -28,7 +29,12 @@ function CreatePostForm() {
 
   const [caption, setCaption] = useState("");
   const [tagsInput, setTagsInput] = useState("");
+  const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [status, setStatus] = useState<"idle" | "posting" | "posted" | "blocked" | "signedOut">("idle");
+
+  function handleMediaUploaded(result: MediaUploadResult) {
+    setMedia((prev) => [...prev, result]);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +49,7 @@ function CreatePostForm() {
         caption,
         tags: tagsInput.split(",").map((tag) => tag.trim()).filter(Boolean),
         linked_listing_id: linkedListingId,
+        media_urls: media.map((m) => m.url),
       }, token);
       setStatus("posted");
       setTimeout(() => router.push("/feed"), 1200);
@@ -73,6 +80,9 @@ function CreatePostForm() {
           type="text" placeholder={t("tagsPlaceholder")} value={tagsInput}
           onChange={(e) => setTagsInput(e.target.value)} className="border rounded px-3 py-2"
         />
+
+        <MediaUploader folder="posts" onUploaded={handleMediaUploaded} label={t("addPhotoOrVideo")} />
+        {media.length > 0 && <p className="text-xs text-gray-500">{t("mediaAttached", { count: media.length })}</p>}
 
         {status === "blocked" && <p className="text-red-600 text-sm">{t("blocked")}</p>}
         {status === "posted" && <p className="text-green-700 text-sm">{t("posted")}</p>}

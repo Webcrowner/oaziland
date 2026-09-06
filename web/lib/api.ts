@@ -40,6 +40,62 @@ export interface Listing {
   lister_id: string;
 }
 
+export interface MediaUploadResult {
+  url: string;
+  media_type: "PHOTO" | "VIDEO";
+}
+
+export async function uploadMediaFile(file: File, folder: string, accessToken: string): Promise<MediaUploadResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("folder", folder);
+  const res = await fetch(`${API_BASE_URL}/api/media/upload/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Upload failed");
+  return data;
+}
+
+export async function addListingPhoto(listingId: string, url: string, mediaType: "PHOTO" | "VIDEO", accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/listings/${listingId}/add-photo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach media");
+  return res.json();
+}
+
+export interface HouseCreatePayload {
+  quarter: string;
+  size_sqm?: string;
+  description?: string;
+  finish_level?: string;
+  bedrooms?: number;
+  bathrooms?: number;
+}
+
+export async function createHouse(payload: HouseCreatePayload, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/houses/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  return res;
+}
+
+export async function createListing(payload: { property_asset_id: string; listing_type: string; price_xaf: string }, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/listings/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  return res;
+}
+
 export async function contactListing(listingId: string, accessToken: string): Promise<{ deep_link: string; message: string }> {
   const res = await fetch(`${API_BASE_URL}/api/listings/${listingId}/contact/`, {
     method: "POST",
@@ -720,7 +776,7 @@ export async function searchPosts(query: string): Promise<{ count: number; resul
 }
 
 export async function createPost(
-  payload: { caption: string; tags?: string[]; linked_listing_id?: string },
+  payload: { caption: string; tags?: string[]; linked_listing_id?: string; media_urls?: string[] },
   accessToken: string
 ): Promise<{ id: string } & Record<string, unknown>> {
   const res = await fetch(`${API_BASE_URL}/api/posts/`, {

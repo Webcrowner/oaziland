@@ -178,9 +178,10 @@ class ListingViewSet(viewsets.ModelViewSet):
         url = request.data.get("url")
         if not url:
             return Response({"detail": "url is required — upload the file to /api/media/upload/ first."}, status=status.HTTP_400_BAD_REQUEST)
+        media_type = request.data.get("media_type", "PHOTO")
         is_first_photo = not listing.photos.exists()
-        photo = ListingPhoto.objects.create(listing=listing, url=url, is_primary=is_first_photo)
-        return Response({"id": photo.id, "url": photo.url, "is_primary": photo.is_primary}, status=status.HTTP_201_CREATED)
+        photo = ListingPhoto.objects.create(listing=listing, url=url, media_type=media_type, is_primary=is_first_photo)
+        return Response({"id": photo.id, "url": photo.url, "media_type": photo.media_type, "is_primary": photo.is_primary}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="remove-photo")
     def remove_photo(self, request, pk=None):

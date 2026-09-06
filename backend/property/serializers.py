@@ -66,7 +66,7 @@ class ListingSerializer(serializers.ModelSerializer):
     photos = serializers.SerializerMethodField()
 
     def get_photos(self, listing) -> list[dict]:
-        return [{"id": p.id, "url": p.url, "is_primary": p.is_primary} for p in listing.photos.all()]
+        return [{"id": p.id, "url": p.url, "media_type": p.media_type, "is_primary": p.is_primary} for p in listing.photos.all()]
 
     class Meta:
         model = Listing

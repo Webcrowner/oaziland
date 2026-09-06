@@ -1,27 +1,50 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { API_BASE_URL } from "@/lib/api";
+import { listQuarters, createHouse, createListing, addListingPhoto, type Quarter, type MediaUploadResult } from "@/lib/api";
+import MediaUploader from "@/components/MediaUploader";
 
 /**
- * List a Property — Page 5 of Prompt 17. Posts directly to the
- * /api/listings/ endpoint (Prompt 16), which enforces MFA+KYC at the
- * permission layer — a landlord who hasn't completed those steps gets
- * a real 403 here, matching the platform-wide enforcement rule exactly
- * rather than a separate, looser check in the frontend.
+ * List a Property — REWRITTEN to fix a real, genuine bug found while
+ * wiring in photo/video upload: this page was still posting only
+ * {listing_type, price_xaf} straight to /api/listings/, missing
+ * property_asset_id entirely — the exact bug already found and fixed
+ * on mobile earlier this session, apparently never actually applied
+ * here. Every real submission through this page would have failed
+ * with a 400. Now does the real two-step flow: create the House,
+ * then the Listing referencing it, then real photo/video upload.
  */
 export default function ListPropertyPage() {
   const t = useTranslations("ListPropertyPage");
+  const [quarters, setQuarters] = useState<Quarter[]>([]);
+  const [quarterId, setQuarterId] = useState("");
+  const [bedrooms, setBedrooms] = useState("");
+  const [description, setDescription] = useState("");
   const [listingType, setListingType] = useState("RENT");
   const [price, setPrice] = useState("");
+  const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [needsMfa, setNeedsMfa] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    listQuarters()
+      .then((data) => {
+        setQuarters(data);
+        if (data.length > 0) setQuarterId(data[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  function handleMediaUploaded(result: MediaUploadResult) {
+    setMedia((prev) => [...prev, result]);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
+    setNeedsMfa(false);
     setLoading(true);
 
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
@@ -30,22 +53,39 @@ export default function ListPropertyPage() {
       setLoading(false);
       return;
     }
+    if (!quarterId) {
+      setMessage({ type: "error", text: t("chooseNeighborhoodError") });
+      setLoading(false);
+      return;
+    }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/listings/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ listing_type: listingType, price_xaf: price }),
-      });
-
-      if (res.status === 403) {
+      const houseRes = await createHouse(
+        { quarter: quarterId, bedrooms: bedrooms ? Number(bedrooms) : undefined, description: description || undefined },
+        token
+      );
+      if (houseRes.status === 403) {
         setMessage({ type: "error", text: t("mfaRequired") });
         setNeedsMfa(true);
-      } else if (!res.ok) {
-        setMessage({ type: "error", text: t("somethingWentWrong") });
-      } else {
-        setMessage({ type: "success", text: t("success") });
+        return;
       }
+      if (!houseRes.ok) {
+        setMessage({ type: "error", text: t("somethingWentWrong") });
+        return;
+      }
+      const house = await houseRes.json();
+
+      const listingRes = await createListing({ property_asset_id: house.id, listing_type: listingType, price_xaf: price }, token);
+      if (!listingRes.ok) {
+        setMessage({ type: "error", text: t("somethingWentWrong") });
+        return;
+      }
+      const listing = await listingRes.json();
+
+      // Attach every real photo/video already uploaded before submit.
+      await Promise.all(media.map((m) => addListingPhoto(listing.id, m.url, m.media_type, token)));
+
+      setMessage({ type: "success", text: t("success") });
     } catch {
       setMessage({ type: "error", text: t("couldNotReachServer") });
     } finally {
@@ -60,6 +100,20 @@ export default function ListPropertyPage() {
         <p className="text-gray-600 mb-6 text-sm">{t("description")}</p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <label className="text-sm font-semibold text-gray-700">{t("neighborhoodLabel")}</label>
+          <select value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded px-3 py-2" required>
+            <option value="" disabled>{t("chooseNeighborhood")}</option>
+            {quarters.map((q) => (
+              <option key={q.id} value={q.id}>{q.name} ({q.village_name})</option>
+            ))}
+          </select>
+
+          <label className="text-sm font-semibold text-gray-700">{t("bedroomsLabel")}</label>
+          <input type="number" min={0} className="border rounded px-3 py-2" value={bedrooms} onChange={(e) => setBedrooms(e.target.value)} />
+
+          <label className="text-sm font-semibold text-gray-700">{t("descriptionLabel")}</label>
+          <textarea rows={3} className="border rounded px-3 py-2" value={description} onChange={(e) => setDescription(e.target.value)} />
+
           <label className="text-sm font-semibold text-gray-700">{t("listingTypeLabel")}</label>
           <select value={listingType} onChange={(e) => setListingType(e.target.value)} className="border rounded px-3 py-2">
             <option value="RENT">{t("forRent")}</option>
@@ -71,6 +125,12 @@ export default function ListPropertyPage() {
             type="number" required min={0} className="border rounded px-3 py-2"
             value={price} onChange={(e) => setPrice(e.target.value)}
           />
+
+          <label className="text-sm font-semibold text-gray-700">{t("photosVideosLabel")}</label>
+          <MediaUploader folder="listings" onUploaded={handleMediaUploaded} label={t("addPhotoOrVideo")} />
+          {media.length > 0 && (
+            <p className="text-xs text-gray-500">{t("mediaAttached", { count: media.length })}</p>
+          )}
 
           {message && (
             <p className={message.type === "success" ? "text-green-700 text-sm" : "text-red-600 text-sm"}>

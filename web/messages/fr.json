@@ -225,7 +225,15 @@
     "somethingWentWrong": "Une erreur s'est produite. Veuillez réessayer.",
     "success": "Votre annonce a été créée en tant que brouillon — un administrateur l'examinera avant sa publication.",
     "couldNotReachServer": "Impossible de joindre le serveur.",
-    "completeMfaSetup": "Terminer l'authentification à deux facteurs"
+    "completeMfaSetup": "Terminer l'authentification à deux facteurs",
+    "neighborhoodLabel": "Quartier",
+    "chooseNeighborhood": "Choisissez un quartier",
+    "chooseNeighborhoodError": "Veuillez choisir un quartier.",
+    "bedroomsLabel": "Chambres",
+    "descriptionLabel": "Description",
+    "photosVideosLabel": "Photos et Vidéos",
+    "addPhotoOrVideo": "Ajouter une Photo ou Vidéo",
+    "mediaAttached": "{count} fichier(s) joint(s)"
   },
   "ServicesPage": {
     "title": "Services",
@@ -474,7 +482,9 @@
     "posting": "Publication en cours...",
     "posted": "Publié !",
     "blocked": "Cette publication a été bloquée par la modération. Veuillez la modifier et réessayer.",
-    "signInRequired": "Connectez-vous pour créer une publication"
+    "signInRequired": "Connectez-vous pour créer une publication",
+    "addPhotoOrVideo": "Ajouter une Photo ou Vidéo",
+    "mediaAttached": "{count} fichier(s) joint(s)"
   },
   "PremiumPage": {
     "title": "Oaziland Premium",
@@ -504,5 +514,9 @@
     "student": "Je suis étudiant",
     "studentDesc": "Trouvez un logement vérifié près de votre université",
     "skip": "Je regarde simplement"
+  },
+  "MediaUploader": {
+    "uploading": "Téléversement...",
+    "uploadFailed": "Échec du téléversement. Veuillez réessayer."
   }
 }
