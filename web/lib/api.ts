@@ -136,6 +136,18 @@ export async function setNearbyFacilities(propertyType: string, propertyId: stri
   return res.json();
 }
 
+export interface ListingConditionItem {
+  id: string;
+  structured_conditions: Record<string, unknown>;
+  free_text_clause: string;
+}
+
+export async function getListingConditions(targetContentType: string, targetId: string): Promise<ListingConditionItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/listing-conditions/?target_content_type=${targetContentType}&target_id=${targetId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
 export async function attachListingCondition(
   payload: { target_content_type: string; target_id: string; structured_conditions: Record<string, unknown>; free_text_clause: string },
   accessToken: string
