@@ -3,12 +3,34 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #16223d;
+  /* The existing brand anchors, kept exactly as-is. */
+  --navy: #1b2a4a;
+  --gold: #c9a227;
+  /* New: a deep laterite-clay red, grounding the palette in
+     Cameroonian earth rather than a generic accent color — used
+     sparingly, as the ONE bold structural element (see the hero). */
+  --clay: #a8502e;
+  /* A warm, distinct paper tone — deliberately NOT the near-universal
+     AI-cliché cream (#F4F1EA): cooler and greyer, so it reads as a
+     considered neutral rather than a template default. */
+  --paper: #f4f2ec;
+  /* WHY real system font stacks, not next/font/google: fetching a
+     font from Google's servers at BUILD time is a genuine point of
+     failure (it can hard-fail the whole build behind a restrictive
+     network) — these stacks need no network access at all, ever,
+     while still being a deliberate choice: a real serif with warmth
+     and character for display headlines, distinct from the clean
+     system UI font carrying everyday body/UI text. */
+  --font-display: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
 }
 
 /* WHY there's no @media (prefers-color-scheme: dark) block here: the
@@ -24,15 +46,37 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), Arial, Helvetica, sans-serif;
 }
 
-/* A single, reusable fade-in — used sparingly (the hero section only),
-   per "animations where necessary," not applied everywhere by default. */
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
+/* ---------------------------------------------------------------------
+   Motion — deliberately ONE orchestrated entrance sequence for the
+   hero (headline, then subhead, then the search form, staggered),
+   not scattered fade-ins applied to every section/card by default.
+   Hover transitions elsewhere use Tailwind's own transition utilities
+   directly in markup, not a blanket animation class.
+   --------------------------------------------------------------------- */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-in {
-  animation: fade-in 0.5s ease-out;
+.animate-rise-in {
+  animation: rise-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* A slow, ambient drift for the hero's background motif — deliberately
+   subtle and continuous rather than a one-shot effect, evoking a
+   distant skyline rather than drawing attention to itself. */
+@keyframes drift {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-10px) scale(1.015); }
+}
+.animate-drift {
+  animation: drift 10s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise-in, .animate-drift {
+    animation: none;
+  }
 }

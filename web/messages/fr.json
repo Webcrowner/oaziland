@@ -491,5 +491,18 @@
     "signInRequired": "Connectez-vous pour vous abonner",
     "cancelConfirmed": "Votre abonnement a été annulé. Les avantages restent actifs jusqu'à la fin de cette période.",
     "cancelFailed": "Impossible d'annuler votre abonnement. Veuillez réessayer."
+  },
+  "OnboardingModal": {
+    "title": "Bienvenue sur Oaziland",
+    "subtitle": "Qu'est-ce qui vous amène aujourd'hui ?",
+    "renter": "Je loue ou j'achète",
+    "renterDesc": "Recherchez des propriétés vérifiées à travers le Cameroun",
+    "landlord": "Je publie une propriété",
+    "landlordDesc": "Atteignez des milliers d'acheteurs et locataires vérifiés",
+    "agent": "Je suis agent ou agence",
+    "agentDesc": "Gérez vos annonces et développez votre activité",
+    "student": "Je suis étudiant",
+    "studentDesc": "Trouvez un logement vérifié près de votre université",
+    "skip": "Je regarde simplement"
   }
 }

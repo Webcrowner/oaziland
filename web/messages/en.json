@@ -491,5 +491,18 @@
     "signInRequired": "Sign in to subscribe",
     "cancelConfirmed": "Your subscription has been cancelled. Perks remain active until the end of this period.",
     "cancelFailed": "Could not cancel your subscription. Please try again."
+  },
+  "OnboardingModal": {
+    "title": "Welcome to Oaziland",
+    "subtitle": "What brings you here today?",
+    "renter": "I'm renting or buying",
+    "renterDesc": "Search verified properties across Cameroon",
+    "landlord": "I'm listing a property",
+    "landlordDesc": "Reach thousands of verified buyers and renters",
+    "agent": "I'm an agent or agency",
+    "agentDesc": "Manage your listings and grow your business",
+    "student": "I'm a student",
+    "studentDesc": "Find verified housing near your university",
+    "skip": "Just looking around"
   }
 }

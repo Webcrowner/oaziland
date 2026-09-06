@@ -5,6 +5,7 @@ import { routing } from "@/i18n/routing";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import OnboardingModal from "@/components/OnboardingModal";
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));
@@ -35,6 +36,7 @@ export default async function LocaleLayout({
       <div className="flex-1">{children}</div>
       <Footer />
       <ServiceWorkerRegister />
+      <OnboardingModal />
     </NextIntlClientProvider>
   );
 }
