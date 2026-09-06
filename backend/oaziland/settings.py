@@ -88,6 +88,7 @@ INSTALLED_APPS = [
     'notifications',
     'monetization',
     'trust_safety',
+    'uploads',
 ]
 
 AUTH_USER_MODEL = 'identity.User'
@@ -223,6 +224,13 @@ if not DEBUG:
 # the code that calls it" pattern used for payments/moderation/notifications.
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# WHY "LOCAL" is the default, not "CLOUDINARY": local filesystem
+# storage genuinely works with zero external account, correct for
+# development per this file's comment above. Set to "CLOUDINARY" (and
+# the three CLOUDINARY_* env vars below) once real production
+# credentials exist — see uploads.providers.get_active_provider().
+MEDIA_STORAGE_PROVIDER = env('MEDIA_STORAGE_PROVIDER', default='LOCAL')
 
 # ---------------------------------------------------------------------------
 # Django REST Framework — Prompt 16.

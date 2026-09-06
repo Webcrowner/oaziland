@@ -28,6 +28,7 @@ from guest_houses.views import GuestHouseLodgeViewSet
 from discovery.views import WantedListingViewSet, SavedSearchViewSet, MyComparisonView
 from notifications.views import MyNotificationViewSet
 from monetization.views import MyCreatorPremiumView
+from uploads.views import MediaUploadView
 from catalogue.views import PartnerServiceCategoryViewSet
 from engagement.views import ContactMessageView
 from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet
@@ -100,6 +101,7 @@ urlpatterns = [
     path('api/listings/<uuid:listing_id>/toggle-favorite/', ToggleFavoriteListingView.as_view(), name='toggle-favorite'),
     path('api/my-comparison/', MyComparisonView.as_view(), name='my-comparison'),
     path('api/my-creator-premium/', MyCreatorPremiumView.as_view(), name='my-creator-premium'),
+    path('api/media/upload/', MediaUploadView.as_view(), name='media-upload'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.

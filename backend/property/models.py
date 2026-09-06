@@ -487,3 +487,19 @@ class SecurityFeatures(models.Model):
 
     class Meta:
         db_table = "security_features"
+
+
+class ListingPhoto(models.Model):
+    """A real gap this closes: Listing had NO photo field at all —
+    every listing card and detail page's 'No photo yet' placeholder
+    across the whole platform was masking the fact that a lister
+    could never actually attach a photo in the first place, not just
+    that no test data happened to include one."""
+    listing = models.ForeignKey(Listing, on_delete=models.CASCADE, related_name="photos")
+    url = models.URLField()
+    is_primary = models.BooleanField(default=False)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "listing_photos"
+        ordering = ["-is_primary", "uploaded_at"]

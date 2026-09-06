@@ -163,6 +163,36 @@ class ListingViewSet(viewsets.ModelViewSet):
         )
         return Response({"deep_link": action_result["deep_link"], "message": action_result["message"]})
 
+    @action(detail=True, methods=["post"], url_path="add-photo")
+    def add_photo(self, request, pk=None):
+        """The real gap this closes: Listing had no photo field at
+        all. Takes a URL already produced by /api/media/upload/ —
+        two separate steps (upload the file, then attach the
+        resulting URL) rather than one combined endpoint, so the same
+        upload endpoint serves listings, posts, and anything else
+        that needs a real file uploaded, without this view needing to
+        know anything about file handling itself."""
+        from .models import ListingPhoto
+
+        listing = self.get_object()
+        url = request.data.get("url")
+        if not url:
+            return Response({"detail": "url is required — upload the file to /api/media/upload/ first."}, status=status.HTTP_400_BAD_REQUEST)
+        is_first_photo = not listing.photos.exists()
+        photo = ListingPhoto.objects.create(listing=listing, url=url, is_primary=is_first_photo)
+        return Response({"id": photo.id, "url": photo.url, "is_primary": photo.is_primary}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="remove-photo")
+    def remove_photo(self, request, pk=None):
+        from .models import ListingPhoto
+
+        listing = self.get_object()
+        photo_id = request.data.get("photo_id")
+        deleted_count, _ = ListingPhoto.objects.filter(listing=listing, id=photo_id).delete()
+        if deleted_count == 0:
+            return Response({"detail": "Photo not found on this listing."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class HouseViewSet(viewsets.ModelViewSet):
     """Real property-creation, closing a genuine gap: Listing.create()
