@@ -29,6 +29,8 @@ from discovery.views import WantedListingViewSet, SavedSearchViewSet, MyComparis
 from notifications.views import MyNotificationViewSet
 from monetization.views import MyCreatorPremiumView
 from uploads.views import MediaUploadView
+from finance.views import PropertyValuationView, AffordabilityEstimateView
+from flyers.views import FlyerViewSet
 from catalogue.views import PartnerServiceCategoryViewSet
 from engagement.views import ContactMessageView
 from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet
@@ -42,6 +44,7 @@ router.register(r"shops", ShopViewSet, basename="shop")
 router.register(r"lands", LandViewSet, basename="land")
 router.register(r"conversations", ConversationViewSet, basename="conversation")
 router.register(r"posts", PostViewSet, basename="post")
+router.register(r"flyers", FlyerViewSet, basename="flyer")
 router.register(r"comments", CommentViewSet, basename="comment")
 router.register(r"admin/verification-requests", AdminVerificationRequestViewSet, basename="admin-verification-request")
 router.register(r"admin/content-reports", AdminContentReportViewSet, basename="admin-content-report")
@@ -102,6 +105,8 @@ urlpatterns = [
     path('api/my-comparison/', MyComparisonView.as_view(), name='my-comparison'),
     path('api/my-creator-premium/', MyCreatorPremiumView.as_view(), name='my-creator-premium'),
     path('api/media/upload/', MediaUploadView.as_view(), name='media-upload'),
+    path('api/valuations/', PropertyValuationView.as_view(), name='property-valuation'),
+    path('api/affordability/', AffordabilityEstimateView.as_view(), name='affordability-estimate'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
