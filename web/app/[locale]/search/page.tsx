@@ -1,5 +1,5 @@
 import { getTranslations } from "next-intl/server";
-import PropertyCard from "@/components/PropertyCard";
+import SearchResultsView from "@/components/SearchResultsView";
 import SaveSearchButton from "@/components/SaveSearchButton";
 import { searchListings } from "@/lib/api";
 import type { Metadata } from "next";
@@ -21,10 +21,15 @@ export const metadata: Metadata = {
 };
 
 /**
- * Search results — Page 2 of Prompt 17. Server-rendered (a real
- * Server Component, no client-side fetch) so search engines receive
- * fully-rendered HTML with real listing data — the actual SEO
- * requirement from the Technology Stack document, not just a claim.
+ * Search results — redesigned around the real map+list split every
+ * major real estate platform's search page uses. WHY the page itself
+ * stays a real, unchanged Server Component fetching data server-side:
+ * search engines still receive fully-rendered listing HTML — the
+ * actual SEO requirement this page has always had — with the new
+ * interactive map layered on top for real visitors via
+ * SearchResultsView, a client component that receives these
+ * server-fetched results as a prop rather than re-fetching them
+ * client-side.
  */
 export default async function SearchPage({
   searchParams,
@@ -37,9 +42,9 @@ export default async function SearchPage({
 
   return (
     <main>
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <p className="text-gray-600">
             {data.count === 1 ? t("countFoundOne", { count: data.count }) : t("countFoundOther", { count: data.count })}
           </p>
@@ -48,15 +53,7 @@ export default async function SearchPage({
           )}
         </div>
 
-        {data.results.length === 0 ? (
-          <p className="text-gray-500">{t("noResults")}</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {data.results.map((listing) => (
-              <PropertyCard key={listing.id} listing={listing} />
-            ))}
-          </div>
-        )}
+        <SearchResultsView listings={data.results} />
       </div>
     </main>
   );

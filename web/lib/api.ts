@@ -27,6 +27,15 @@ export interface PropertyAssetSummary {
   amenities: string[];
   house_rules: string[];
   nearby_facility_names: string[];
+  bedrooms: number | null;
+  bathrooms: number | null;
+}
+
+export interface ListingPhotoItem {
+  id: number;
+  url: string;
+  media_type: "PHOTO" | "VIDEO";
+  is_primary: boolean;
 }
 
 export interface Listing {
@@ -41,6 +50,7 @@ export interface Listing {
   lister_display_name: string;
   lister_agency_name: string | null;
   lister_id: string;
+  photos: ListingPhotoItem[];
 }
 
 export interface MediaUploadResult {

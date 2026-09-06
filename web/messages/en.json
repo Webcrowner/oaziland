@@ -87,7 +87,12 @@
     "title": "Search Results",
     "countFoundOne": "{count} property found",
     "countFoundOther": "{count} properties found",
-    "noResults": "No listings match your search yet. Try a different neighborhood or filter."
+    "noResults": "No listings match your search yet. Try a different neighborhood or filter.",
+    "chipAnyType": "Any",
+    "chipForRent": "For Rent",
+    "chipForSale": "For Sale",
+    "showMap": "Show Map",
+    "hideMap": "Hide Map"
   },
   "ListingDetailPage": {
     "noPhotoYet": "No photo yet",

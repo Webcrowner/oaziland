@@ -87,7 +87,12 @@
     "title": "Résultats de recherche",
     "countFoundOne": "{count} propriété trouvée",
     "countFoundOther": "{count} propriétés trouvées",
-    "noResults": "Aucune annonce ne correspond encore à votre recherche. Essayez un autre quartier ou filtre."
+    "noResults": "Aucune annonce ne correspond encore à votre recherche. Essayez un autre quartier ou filtre.",
+    "chipAnyType": "Tous",
+    "chipForRent": "À Louer",
+    "chipForSale": "À Vendre",
+    "showMap": "Afficher la Carte",
+    "hideMap": "Masquer la Carte"
   },
   "ListingDetailPage": {
     "noPhotoYet": "Pas encore de photo",

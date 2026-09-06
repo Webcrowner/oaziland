@@ -35,15 +35,26 @@ class PropertyAssetSummarySerializer(serializers.ModelSerializer):
     acceptance criteria actually asks for."""
     quarter_name = serializers.CharField(source="quarter.name", read_only=True)
     nearby_facility_names = serializers.SerializerMethodField()
+    bedrooms = serializers.SerializerMethodField()
+    bathrooms = serializers.SerializerMethodField()
 
     def get_nearby_facility_names(self, property_asset) -> list[str]:
         return [f"{poi.name} ({poi.get_poi_type_display()})" for poi in property_asset.nearby_facilities.all()]
+
+    def get_bedrooms(self, property_asset) -> int | None:
+        # WHY getattr, not a real field on the base model: bedrooms
+        # only exists on House, not Land or Shop — this serializer is
+        # deliberately shared across all three, per its own docstring.
+        return getattr(property_asset, "bedrooms", None)
+
+    def get_bathrooms(self, property_asset) -> int | None:
+        return getattr(property_asset, "bathrooms", None)
 
     class Meta:
         model = PropertyAsset
         fields = [
             "id", "type", "size_sqm", "finish_level", "quarter", "quarter_name", "latitude", "longitude", "description",
-            "amenities", "house_rules", "nearby_facilities", "nearby_facility_names",
+            "amenities", "house_rules", "nearby_facilities", "nearby_facility_names", "bedrooms", "bathrooms",
         ]
         # WHY these three are read-only here: writes go through
         # dedicated actions (set-amenities/set-house-rules/set-nearby-
