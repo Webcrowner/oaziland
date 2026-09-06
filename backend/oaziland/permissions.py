@@ -21,7 +21,7 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
     belongs to' (listed_by on Listing, owner on PropertyAsset, requester
     on Booking) — this avoids writing near-identical permission classes
     per model."""
-    owner_fields = ("listed_by", "owner", "requester", "created_by", "reported_by")
+    owner_fields = ("listed_by", "owner", "requester", "created_by", "reported_by", "posted_by")
 
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:

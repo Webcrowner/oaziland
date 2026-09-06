@@ -871,3 +871,40 @@ export async function loginUser(username: string, password: string): Promise<{ a
   if (!res.ok) throw new Error("Invalid username or password");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Job postings — mirrors the real backend API exactly.
+// ---------------------------------------------------------------------------
+export interface JobPosting {
+  id: string;
+  posted_by: string;
+  posted_by_name: string;
+  title: string;
+  role_category: string;
+  description: string;
+  quarter: string | null;
+  quarter_name: string | null;
+  salary_min_xaf: string | null;
+  salary_max_xaf: string | null;
+  status: string;
+  posted_at: string;
+  closes_at: string | null;
+  application_count: number;
+}
+
+export async function listJobPostings(): Promise<{ count: number; results: JobPosting[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/`);
+  if (!res.ok) throw new Error(`Job postings fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function applyToJob(jobId: string, coverMessage: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/apply/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ cover_message: coverMessage }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit application");
+  return data;
+}

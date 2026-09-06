@@ -33,7 +33,7 @@ from finance.views import PropertyValuationView, AffordabilityEstimateView
 from flyers.views import FlyerViewSet
 from catalogue.views import PartnerServiceCategoryViewSet
 from engagement.views import ContactMessageView
-from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet
+from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet, JobPostingViewSet, MyJobApplicationViewSet
 from agency.views import AgentPublicProfileView, AgencyPublicProfileView, MyAgentDashboardView, AgentDirectoryView, AgencyDirectoryView
 
 router = DefaultRouter()
@@ -65,6 +65,8 @@ router.register(r"wanted-listings", WantedListingViewSet, basename="wanted-listi
 router.register(r"service-categories", PartnerServiceCategoryViewSet, basename="service-category")
 router.register(r"trainings", TrainingProgramViewSet, basename="training")
 router.register(r"my-enrollments", MyEnrollmentViewSet, basename="my-enrollment")
+router.register(r"jobs", JobPostingViewSet, basename="job")
+router.register(r"my-job-applications", MyJobApplicationViewSet, basename="my-job-application")
 router.register(r"saved-searches", SavedSearchViewSet, basename="saved-search")
 router.register(r"my-notifications", MyNotificationViewSet, basename="my-notification")
 

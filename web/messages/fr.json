@@ -42,7 +42,8 @@
     "savedSearches": "Recherches Enregistrées",
     "compare": "Comparer",
     "feed": "Fil Social",
-    "premium": "Oaziland Premium"
+    "premium": "Oaziland Premium",
+    "careers": "Carrières"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -518,5 +519,16 @@
   "MediaUploader": {
     "uploading": "Téléversement...",
     "uploadFailed": "Échec du téléversement. Veuillez réessayer."
+  },
+  "CareersPage": {
+    "title": "Carrières",
+    "subtitle": "Offres d'emploi réelles dans l'immobilier et l'hôtellerie au Cameroun.",
+    "noJobsYet": "Aucun poste ouvert pour le moment.",
+    "apply": "Postuler",
+    "coverMessagePlaceholder": "Un court message expliquant pourquoi vous êtes qualifié...",
+    "submitApplication": "Envoyer la Candidature",
+    "submitting": "Envoi en cours...",
+    "applied": "Candidature envoyée !",
+    "applyFailed": "Impossible d'envoyer votre candidature. Veuillez réessayer."
   }
 }

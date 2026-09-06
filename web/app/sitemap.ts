@@ -16,7 +16,7 @@ const LOCALES = ["en", "fr"];
 const STATIC_ROUTES = [
   "", "/hotels", "/events", "/guest-houses", "/student-hostels", "/wanted",
   "/services", "/agents", "/agencies", "/testimonials", "/buy", "/sell",
-  "/about", "/contact", "/trainings", "/how-it-works",
+  "/about", "/contact", "/trainings", "/how-it-works", "/careers",
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

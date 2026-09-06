@@ -5,8 +5,21 @@ sharing rather than a separate share mechanism.
 """
 
 
+class AlreadyAppliedError(Exception):
+    pass
+
+
 def apply_to_job(*, job_posting, applicant, cover_message: str = ""):
+    """WHY this checks first rather than letting the real
+    unique_together constraint raise a raw IntegrityError: the same
+    class of bug already found and fixed for training enrollment
+    (AlreadyEnrolledError) — a real person re-applying to a job they
+    already applied to should see a clean, specific message, not an
+    uncaught 500."""
     from .models import JobApplication
+
+    if JobApplication.objects.filter(job_posting=job_posting, applicant=applicant).exists():
+        raise AlreadyAppliedError("You have already applied to this job posting.")
     return JobApplication.objects.create(job_posting=job_posting, applicant=applicant, cover_message=cover_message)
 
 

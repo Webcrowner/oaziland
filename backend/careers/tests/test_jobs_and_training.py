@@ -11,7 +11,7 @@ from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict
 from careers.models import JobRoleCategory, JobApplicationStatus, TrainingCategory, TrainingEnrollmentStatus
 from careers.services import (
     apply_to_job, update_application_status, share_job_posting_via_whatsapp,
-    enroll_in_training, mark_training_completed,
+    enroll_in_training, mark_training_completed, AlreadyAppliedError,
 )
 from engagement.models import ActionLog
 
@@ -43,13 +43,12 @@ def test_property_manager_job_posting_receives_an_application(quarter):
     assert application.status == JobApplicationStatus.SUBMITTED
     assert posting.applications.count() == 1
 
-    # A duplicate application from the same person must be rejected.
-    # Isolated in its own atomic block: a DB constraint violation marks
-    # the outer test transaction unusable for further queries otherwise.
-    from django.db import transaction, IntegrityError
-    with pytest.raises(IntegrityError):
-        with transaction.atomic():
-            apply_to_job(job_posting=posting, applicant=applicant, cover_message="Applying again")
+    # A duplicate application from the same person must be rejected —
+    # with a clean, specific error now (AlreadyAppliedError), not a
+    # raw database IntegrityError, matching the same fix already
+    # applied to training enrollment's AlreadyEnrolledError.
+    with pytest.raises(AlreadyAppliedError):
+        apply_to_job(job_posting=posting, applicant=applicant, cover_message="Applying again")
 
     update_application_status(application=application, new_status=JobApplicationStatus.SHORTLISTED)
     application.refresh_from_db()

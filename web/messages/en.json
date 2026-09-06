@@ -42,7 +42,8 @@
     "savedSearches": "Saved Searches",
     "compare": "Compare",
     "feed": "Social Feed",
-    "premium": "Oaziland Premium"
+    "premium": "Oaziland Premium",
+    "careers": "Careers"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -518,5 +519,16 @@
   "MediaUploader": {
     "uploading": "Uploading...",
     "uploadFailed": "Upload failed. Please try again."
+  },
+  "CareersPage": {
+    "title": "Careers",
+    "subtitle": "Real job openings in real estate and hospitality across Cameroon.",
+    "noJobsYet": "No open positions right now.",
+    "apply": "Apply",
+    "coverMessagePlaceholder": "A short message about why you're a good fit...",
+    "submitApplication": "Submit Application",
+    "submitting": "Submitting...",
+    "applied": "Application submitted!",
+    "applyFailed": "Could not submit your application. Please try again."
   }
 }
