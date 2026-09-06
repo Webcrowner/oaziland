@@ -1072,3 +1072,198 @@ export async function openBookingDispute(bookingId: string, reason: string, acce
   if (!res.ok) throw new Error(data.detail || "Could not open dispute");
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Marketplace — warehouses, stores, businesses, cars, and real
+// ride-hailing. Mirrors the real backend API exactly.
+// ---------------------------------------------------------------------------
+export interface MarketplaceMediaItem {
+  id: number;
+  media_type: "PHOTO" | "VIDEO";
+  file_url: string;
+  order: number;
+}
+
+interface BaseMarketplaceListing {
+  id: string;
+  lister_user: string;
+  lister_name: string;
+  lister_role: string;
+  title: string;
+  description: string;
+  price_basis: string;
+  price_xaf: string;
+  quarter: string | null;
+  quarter_name: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  availability_status: string;
+  created_at: string;
+  media: MarketplaceMediaItem[];
+}
+
+export interface WarehouseListing extends BaseMarketplaceListing {
+  size_sqm: string;
+}
+export interface StoreListing extends BaseMarketplaceListing {
+  size_sqm: string;
+  frontage_meters: string | null;
+}
+export interface BusinessListing extends BaseMarketplaceListing {
+  size_sqm: string | null;
+  seating_capacity: number | null;
+  includes_goodwill: boolean;
+  includes_inventory: boolean;
+  annual_revenue_xaf: string | null;
+}
+export interface VehicleSpec {
+  make: string;
+  model: string;
+  year: number;
+  mileage_km: number | null;
+  engine_size_cc: number | null;
+}
+export interface CarListing extends BaseMarketplaceListing {
+  vehicle_spec: VehicleSpec;
+}
+
+const MARKETPLACE_ENDPOINTS = { warehouses: "warehouses", stores: "stores", businesses: "businesses", cars: "cars" } as const;
+export type MarketplaceCategory = keyof typeof MARKETPLACE_ENDPOINTS;
+
+export async function listMarketplaceListings<T>(category: MarketplaceCategory, filters?: Record<string, string>): Promise<{ count: number; results: T[] }> {
+  const query = filters ? `?${new URLSearchParams(filters).toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${query}`);
+  if (!res.ok) throw new Error(`${category} fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createMarketplaceListing(category: MarketplaceCategory, payload: Record<string, unknown>, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export interface RideBookingItem {
+  id: string;
+  rider: string;
+  rider_name: string;
+  driver: string | null;
+  driver_name: string | null;
+  pickup_description: string;
+  dropoff_description: string;
+  fare_estimate_xaf: string;
+  status: string;
+  requested_at: string;
+  completed_at: string | null;
+}
+
+export async function listMyRides(accessToken: string): Promise<{ count: number; results: RideBookingItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch rides");
+  return res.json();
+}
+
+export async function requestRide(payload: { pickup_description: string; dropoff_description: string; distance_km: string }, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not request ride");
+  return data;
+}
+
+export async function acceptRide(rideId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/accept/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not accept ride");
+  return res.json();
+}
+
+export async function startRide(rideId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/start/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not start ride");
+  return res.json();
+}
+
+export async function completeRide(rideId: string, phoneNumber: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/complete/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ phone_number: phoneNumber }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not complete ride");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Taskln Service — real on-demand technician dispatch (branded
+// "Taskln Service" in the UI; the backend app is called "services").
+// ---------------------------------------------------------------------------
+export interface ServiceRequestItem {
+  id: string;
+  requester: string;
+  requester_name: string;
+  technician: string | null;
+  technician_name: string | null;
+  category: string;
+  priority: string;
+  status: string;
+  description: string;
+  quarter: string | null;
+  quarter_name: string | null;
+  requested_at: string;
+  accepted_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export async function listMyServiceRequests(accessToken: string): Promise<{ count: number; results: ServiceRequestItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch service requests");
+  return res.json();
+}
+
+export async function createServiceRequest(payload: { category: string; description: string; quarter?: string; priority?: string }, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not create service request");
+  return data;
+}
+
+export async function acceptServiceRequest(id: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/accept/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not accept request");
+  return res.json();
+}
+
+export async function startServiceRequest(id: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/start/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not start request");
+  return res.json();
+}
+
+export async function completeServiceRequest(id: string, amountXaf: string, phoneNumber: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/complete/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ amount_xaf: amountXaf, phone_number: phoneNumber }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not complete request");
+  return res.json();
+}
+
+export async function getMyTechnicianDashboard(accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/my-technician-dashboard/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch dashboard");
+  return res.json();
+}

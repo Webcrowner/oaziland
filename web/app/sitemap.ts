@@ -15,6 +15,7 @@ const LOCALES = ["en", "fr"];
 // Every one of these is genuinely public and worth indexing.
 const STATIC_ROUTES = [
   "", "/hotels", "/events", "/guest-houses", "/student-hostels", "/wanted",
+  "/marketplace", "/marketplace/warehouses", "/marketplace/stores", "/marketplace/businesses", "/marketplace/cars",
   "/services", "/agents", "/agencies", "/testimonials", "/buy", "/sell",
   "/about", "/contact", "/trainings", "/how-it-works", "/careers",
 ];

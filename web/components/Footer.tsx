@@ -30,6 +30,8 @@ export default function Footer() {
             <li><Link href="/services" className="hover:text-[#8A6D14] transition-colors">{t("services")}</Link></li>
             <li><Link href="/trainings" className="hover:text-[#8A6D14] transition-colors">{t("trainings")}</Link></li>
             <li><Link href="/careers" className="hover:text-[#8A6D14] transition-colors">{t("careers")}</Link></li>
+            <li><Link href="/marketplace" className="hover:text-[#8A6D14] transition-colors">{t("marketplace")}</Link></li>
+            <li><Link href="/taskln-service" className="hover:text-[#8A6D14] transition-colors">{t("tasklnService")}</Link></li>
             <li><Link href="/how-it-works" className="hover:text-[#8A6D14] transition-colors">{t("howItWorks")}</Link></li>
             <li><Link href="/feed" className="hover:text-[#8A6D14] transition-colors">{t("feed")}</Link></li>
             <li><Link href="/premium" className="hover:text-[#8A6D14] transition-colors">{t("premium")}</Link></li>
