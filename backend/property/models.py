@@ -232,9 +232,25 @@ class ApartmentUnit(Unit):
 
 
 class HouseStyle(models.TextChoices):
-    STANDARD = "STANDARD", "Standard"
+    """A real gap this closes: the original three options (Standard/
+    Duplex/Detached Villa) didn't cover how residential units are
+    actually described and searched for in Cameroon — a single room
+    in a shared compound, a self-contained one-room unit with its own
+    bathroom, and a multi-room apartment within a building are all
+    genuinely different things a renter searches for differently, not
+    variations of "a house." OTHER exists specifically so a lister is
+    never blocked by an incomplete list — House.custom_house_style
+    captures their own description when they pick it."""
+    ROOM = "ROOM", "Room (in a shared compound)"
+    STUDIO = "STUDIO", "Studio"
+    SELF_CONTAIN = "SELF_CONTAIN", "Self-Contain"
+    APARTMENT = "APARTMENT", "Apartment / Flat"
+    STANDARD = "STANDARD", "Standalone House"
     DUPLEX = "DUPLEX", "Duplex"
+    BUNGALOW = "BUNGALOW", "Bungalow"
     DETACHED_VILLA = "DETACHED_VILLA", "Detached Villa"
+    CHALET = "CHALET", "Chalet"
+    OTHER = "OTHER", "Other (please specify)"
 
 
 class House(PropertyAsset):
@@ -243,6 +259,10 @@ class House(PropertyAsset):
     pets_allowed = models.BooleanField(default=False)
     has_garage = models.BooleanField(default=False)
     house_style = models.CharField(max_length=20, choices=HouseStyle.choices, default=HouseStyle.STANDARD)
+    custom_house_style = models.CharField(
+        max_length=100, blank=True,
+        help_text="Only used when house_style is OTHER — the lister's own description of the unit type.",
+    )
     is_furnished_short_let = models.BooleanField(default=False)
     short_let_daily_rate_xaf = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 

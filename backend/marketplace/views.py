@@ -7,15 +7,17 @@ already existed and is reused here exactly as written, not
 reimplemented at the API layer.
 """
 from rest_framework import viewsets, permissions, status
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus
+from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition
 from .serializers import (
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer,
     RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer,
+    ListingConditionSerializer, AttachConditionSerializer,
 )
-from .services import search_marketplace_listings, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment
+from .services import search_marketplace_listings, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition
 
 
 def _get_or_create_owner_profile(user):
@@ -185,3 +187,72 @@ class RideViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(RideBookingSerializer(ride).data)
+
+
+class ListingConditionView(APIView):
+    """The real gap this closes: attach_condition()/get_conditions_for()
+    were fully built — structured conditions (min_lease_months,
+    deposit_required, pet_policy, etc.) plus a free-text clause,
+    attachable to property.Listing OR any marketplace listing via the
+    same generic pattern Booking already uses — but nothing ever
+    exposed either one over HTTP. Real listers had no way to actually
+    set a lease term, a pet policy, or any other condition on their
+    own listing, despite the feature existing since Prompt 10.
+    """
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def _resolve_target(self, content_type_str: str, target_id):
+        """Resolves the SAME plain 'app_label.ModelName' string format
+        Booking.target_content_type already uses elsewhere in this
+        codebase — no new convention introduced, matching what's
+        already established rather than reaching for Django's
+        ContentType framework, which isn't used for this purpose
+        anywhere else in this project."""
+        from django.apps import apps
+        from django.core.exceptions import ObjectDoesNotExist
+        try:
+            app_label, model_name = content_type_str.split(".")
+            model_class = apps.get_model(app_label, model_name)
+            return model_class.objects.get(id=target_id)
+        except (ValueError, LookupError, ObjectDoesNotExist):
+            # ValueError: content_type_str wasn't "app_label.Model".
+            # LookupError: apps.get_model() found no such model.
+            # ObjectDoesNotExist: a real model, but no row with that id.
+            return None
+
+    @extend_schema(responses={200: ListingConditionSerializer(many=True)})
+    def get(self, request):
+        """Public — viewing the real rules on a listing you're
+        browsing shouldn't require an account, matching every other
+        real-estate detail page on the platform."""
+        content_type = request.query_params.get("target_content_type")
+        target_id = request.query_params.get("target_id")
+        if not content_type or not target_id:
+            return Response({"detail": "target_content_type and target_id are required."}, status=status.HTTP_400_BAD_REQUEST)
+        conditions = ListingCondition.objects.filter(target_content_type=content_type, target_id=target_id)
+        return Response(ListingConditionSerializer(conditions, many=True).data)
+
+    @extend_schema(request=AttachConditionSerializer, responses={201: ListingConditionSerializer, 403: dict, 404: dict})
+    def post(self, request):
+        """Only the target listing's own lister can attach a
+        condition to it — resolved dynamically since the target could
+        be property.Listing (field: listed_by) or any marketplace
+        listing (field: lister_user), matching IsOwnerOrReadOnly's own
+        multi-field-name approach rather than a single hardcoded name."""
+        input_serializer = AttachConditionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        data = input_serializer.validated_data
+
+        target = self._resolve_target(data["target_content_type"], data["target_id"])
+        if target is None:
+            return Response({"detail": "That listing was not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        owner_id = getattr(target, "listed_by_id", None) or getattr(target, "lister_user_id", None)
+        if owner_id != request.user.id:
+            return Response({"detail": "Only the listing's own lister can set its conditions."}, status=status.HTTP_403_FORBIDDEN)
+
+        condition = attach_condition(
+            listing=target, created_by=request.user,
+            structured_conditions=data["structured_conditions"], free_text_clause=data["free_text_clause"],
+        )
+        return Response(ListingConditionSerializer(condition).data, status=status.HTTP_201_CREATED)

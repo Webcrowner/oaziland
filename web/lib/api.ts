@@ -24,6 +24,9 @@ export interface PropertyAssetSummary {
   latitude: string | null;
   longitude: string | null;
   description: string;
+  amenities: string[];
+  house_rules: string[];
+  nearby_facility_names: string[];
 }
 
 export interface Listing {
@@ -69,6 +72,73 @@ export async function addListingPhoto(listingId: string, url: string, mediaType:
   return res.json();
 }
 
+const PROPERTY_TYPE_ENDPOINTS: Record<string, string> = { HOUSE: "houses", SHOP: "shops", LAND: "lands" };
+
+export async function setPropertyAmenities(propertyType: string, propertyId: string, amenities: string[], accessToken: string) {
+  const endpoint = PROPERTY_TYPE_ENDPOINTS[propertyType] || "houses";
+  const res = await fetch(`${API_BASE_URL}/api/${endpoint}/${propertyId}/set-amenities/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ amenities }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set amenities");
+  return res.json();
+}
+
+export async function setPropertyHouseRules(propertyType: string, propertyId: string, houseRules: string[], accessToken: string) {
+  const endpoint = PROPERTY_TYPE_ENDPOINTS[propertyType] || "houses";
+  const res = await fetch(`${API_BASE_URL}/api/${endpoint}/${propertyId}/set-house-rules/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ house_rules: houseRules }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set house rules");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Points of interest (real nearby facilities) and listing conditions —
+// both had real backend logic with zero API reaching them until now.
+// ---------------------------------------------------------------------------
+export interface PointOfInterest {
+  id: string;
+  name: string;
+  poi_type: string;
+  poi_type_display: string;
+  quarter: string;
+}
+
+export async function listPointsOfInterest(quarterId: string): Promise<PointOfInterest[]> {
+  const res = await fetch(`${API_BASE_URL}/api/points-of-interest/?quarter=${quarterId}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.results || data;
+}
+
+export async function setNearbyFacilities(propertyType: string, propertyId: string, pointOfInterestIds: string[], accessToken: string) {
+  const endpoint = PROPERTY_TYPE_ENDPOINTS[propertyType] || "houses";
+  const res = await fetch(`${API_BASE_URL}/api/${endpoint}/${propertyId}/set-nearby-facilities/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ point_of_interest_ids: pointOfInterestIds }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set nearby facilities");
+  return res.json();
+}
+
+export async function attachListingCondition(
+  payload: { target_content_type: string; target_id: string; structured_conditions: Record<string, unknown>; free_text_clause: string },
+  accessToken: string
+) {
+  const res = await fetch(`${API_BASE_URL}/api/listing-conditions/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set listing conditions");
+  return res.json();
+}
+
 export interface HouseCreatePayload {
   quarter: string;
   size_sqm?: string;
@@ -76,6 +146,8 @@ export interface HouseCreatePayload {
   finish_level?: string;
   bedrooms?: number;
   bathrooms?: number;
+  house_style?: string;
+  custom_house_style?: string;
 }
 
 export async function createHouse(payload: HouseCreatePayload, accessToken: string) {

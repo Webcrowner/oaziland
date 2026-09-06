@@ -192,3 +192,95 @@ def test_only_the_rider_can_complete_and_pay_for_their_own_ride():
     response = _auth_client(stranger).post(f"/api/rides/{ride_id}/complete/", {"phone_number": stranger.phone})
 
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------
+# ListingCondition — a real gap this closes: attach_condition() and
+# get_conditions_for() were fully built (structured conditions +
+# free-text clause, generic to ANY listing type) but had zero API
+# exposure at all.
+# ---------------------------------------------------------------------
+@pytest.mark.django_db
+def test_attaching_a_real_condition_to_a_property_listing(quarter):
+    from property.models import House, Listing, ListingType, ListingStatus
+    landlord = User.objects.create(username="mp_cond_landlord", phone="+237699999901")
+    house = House.objects.create(owner=landlord, quarter=quarter, type="HOUSE")
+    listing = Listing.objects.create(property_asset=house, listed_by=landlord, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("80000"))
+    client = _auth_client(landlord)
+
+    response = client.post("/api/listing-conditions/", {
+        "target_content_type": "property.Listing", "target_id": str(listing.id),
+        "structured_conditions": {"min_lease_months": 12, "deposit_required": True, "pet_policy": "NO_PETS"},
+        "free_text_clause": "No loud music after 9pm.",
+    }, format="json")
+
+    assert response.status_code == 201
+    assert response.data["structured_conditions"]["min_lease_months"] == 12
+
+
+@pytest.mark.django_db
+def test_conditions_are_publicly_viewable(quarter):
+    from property.models import House, Listing, ListingType, ListingStatus
+    landlord = User.objects.create(username="mp_cond_view_landlord", phone="+237699999902")
+    house = House.objects.create(owner=landlord, quarter=quarter, type="HOUSE")
+    listing = Listing.objects.create(property_asset=house, listed_by=landlord, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("80000"))
+    _auth_client(landlord).post("/api/listing-conditions/", {
+        "target_content_type": "property.Listing", "target_id": str(listing.id), "structured_conditions": {"no_subletting": True},
+    }, format="json")
+
+    response = APIClient().get(f"/api/listing-conditions/?target_content_type=property.Listing&target_id={listing.id}")
+
+    assert response.status_code == 200
+    assert len(response.data) == 1
+
+
+@pytest.mark.django_db
+def test_only_the_listings_own_lister_can_attach_a_condition(quarter):
+    from property.models import House, Listing, ListingType, ListingStatus
+    landlord = User.objects.create(username="mp_cond_owner_landlord", phone="+237699999903")
+    stranger = User.objects.create(username="mp_cond_stranger", phone="+237699999904")
+    house = House.objects.create(owner=landlord, quarter=quarter, type="HOUSE")
+    listing = Listing.objects.create(property_asset=house, listed_by=landlord, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("80000"))
+
+    response = _auth_client(stranger).post("/api/listing-conditions/", {
+        "target_content_type": "property.Listing", "target_id": str(listing.id), "structured_conditions": {},
+    }, format="json")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_attaching_a_condition_to_a_marketplace_listing_too(quarter):
+    """Proves the same generic endpoint genuinely works for a
+    marketplace listing, not just property.Listing — the whole point
+    of the model's own generic (content_type, id) design."""
+    user = User.objects.create(username="mp_cond_car_user", phone="+237699999905")
+    car_response = _auth_client(user).post("/api/cars/", {
+        "title": "Test Car", "price_basis": "SALE", "price_xaf": "3000000", "quarter": str(quarter.id),
+        "vehicle_spec": {"make": "Honda", "model": "Civic", "year": 2015},
+    }, format="json")
+    car_id = car_response.data["id"]
+
+    response = _auth_client(user).post("/api/listing-conditions/", {
+        "target_content_type": "marketplace.CarListing", "target_id": car_id,
+        "structured_conditions": {"mileage_cap_km": 200000}, "free_text_clause": "As-is, no warranty.",
+    }, format="json")
+
+    assert response.status_code == 201
+
+
+@pytest.mark.django_db
+def test_attaching_a_condition_to_a_nonexistent_listing_returns_404():
+    user = User.objects.create(username="mp_cond_404_user", phone="+237699999906")
+    response = _auth_client(user).post("/api/listing-conditions/", {
+        "target_content_type": "property.Listing", "target_id": "11111111-1111-1111-1111-111111111111", "structured_conditions": {},
+    }, format="json")
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_attaching_a_condition_requires_authentication():
+    response = APIClient().post("/api/listing-conditions/", {
+        "target_content_type": "property.Listing", "target_id": "11111111-1111-1111-1111-111111111111", "structured_conditions": {},
+    }, format="json")
+    assert response.status_code == 401

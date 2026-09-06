@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking
+from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, ListingCondition
 
 
 class MarketplaceMediaSerializer(serializers.ModelSerializer):
@@ -95,3 +95,23 @@ class RideRequestSerializer(serializers.Serializer):
 
 class CompleteRideSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
+
+
+class ListingConditionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListingCondition
+        fields = ["id", "target_content_type", "target_id", "structured_conditions", "free_text_clause", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+
+class AttachConditionSerializer(serializers.Serializer):
+    """Write-only input — target_content_type/target_id identify
+    WHICH listing this attaches to (property.Listing or any
+    marketplace subclass, per the model's own generic design),
+    structured_conditions is a real dict (min_lease_months,
+    deposit_required, pet_policy, etc.), free_text_clause covers
+    anything the fixed keys don't."""
+    target_content_type = serializers.CharField()
+    target_id = serializers.UUIDField()
+    structured_conditions = serializers.JSONField(required=False, default=dict)
+    free_text_clause = serializers.CharField(required=False, allow_blank=True, default="")

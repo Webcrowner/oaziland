@@ -13,7 +13,7 @@ class HouseCreateSerializer(serializers.ModelSerializer):
         model = House
         fields = [
             "id", "quarter", "size_sqm", "description", "finish_level", "latitude", "longitude",
-            "distance_to_tarmac_km", "bedrooms", "bathrooms", "pets_allowed", "has_garage", "house_style",
+            "distance_to_tarmac_km", "bedrooms", "bathrooms", "pets_allowed", "has_garage", "house_style", "custom_house_style",
         ]
         read_only_fields = ["id"]
 

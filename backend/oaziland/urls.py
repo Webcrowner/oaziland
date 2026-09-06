@@ -35,7 +35,7 @@ from property_management.views import (
     MaintenanceRequestViewSet, TenantScreeningRequestViewSet, AgentSafetyCheckInViewSet, LeaseViewSet, OpenDisputeView,
 )
 from marketplace.views import (
-    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet,
+    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet, ListingConditionView,
 )
 from services.views import ServiceRequestViewSet, FindTechniciansView, MyTechnicianDashboardView
 from catalogue.views import PartnerServiceCategoryViewSet
@@ -129,6 +129,7 @@ urlpatterns = [
     path('api/bookings/<uuid:booking_id>/open-dispute/', OpenDisputeView.as_view(), name='open-dispute'),
     path('api/technicians/find/', FindTechniciansView.as_view(), name='find-technicians'),
     path('api/my-technician-dashboard/', MyTechnicianDashboardView.as_view(), name='my-technician-dashboard'),
+    path('api/listing-conditions/', ListingConditionView.as_view(), name='listing-conditions'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
