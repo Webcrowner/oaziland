@@ -37,6 +37,7 @@ from property_management.views import (
 from marketplace.views import (
     WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet,
 )
+from services.views import ServiceRequestViewSet, FindTechniciansView, MyTechnicianDashboardView
 from catalogue.views import PartnerServiceCategoryViewSet
 from engagement.views import ContactMessageView
 from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet, JobPostingViewSet, MyJobApplicationViewSet
@@ -60,6 +61,7 @@ router.register(r"stores", StoreListingViewSet, basename="store")
 router.register(r"businesses", BusinessListingViewSet, basename="business")
 router.register(r"cars", CarListingViewSet, basename="car")
 router.register(r"rides", RideViewSet, basename="ride")
+router.register(r"service-requests", ServiceRequestViewSet, basename="service-request")
 router.register(r"comments", CommentViewSet, basename="comment")
 router.register(r"admin/verification-requests", AdminVerificationRequestViewSet, basename="admin-verification-request")
 router.register(r"admin/content-reports", AdminContentReportViewSet, basename="admin-content-report")
@@ -125,6 +127,8 @@ urlpatterns = [
     path('api/valuations/', PropertyValuationView.as_view(), name='property-valuation'),
     path('api/affordability/', AffordabilityEstimateView.as_view(), name='affordability-estimate'),
     path('api/bookings/<uuid:booking_id>/open-dispute/', OpenDisputeView.as_view(), name='open-dispute'),
+    path('api/technicians/find/', FindTechniciansView.as_view(), name='find-technicians'),
+    path('api/my-technician-dashboard/', MyTechnicianDashboardView.as_view(), name='my-technician-dashboard'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
