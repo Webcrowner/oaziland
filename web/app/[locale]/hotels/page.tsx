@@ -1,5 +1,8 @@
 import { getTranslations } from "next-intl/server";
 import { searchHotels } from "@/lib/api";
+import PageHeader from "@/components/ui/PageHeader";
+import Card, { CardMedia, CardBody } from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
 import type { Metadata } from "next";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -13,13 +16,11 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
 }
 
 /**
- * Hotels — the representative example proving the new hospitality
- * APIs (Hotels/Events/Student Hostels/Guest Houses, built this
- * session) genuinely work end-to-end with the web app's existing
- * SSR + bilingual infrastructure, not just at the API layer in
- * isolation. Same server-rendered pattern as /search (Prompt 17):
- * real data fetched at request time, real translations, no
- * client-side fetch.
+ * Hotels — the first page rebuilt on the new shared UI foundation
+ * (PageHeader, Card/CardMedia/CardBody, EmptyState), proving those
+ * components work in a real page before rolling them out further.
+ * Same real data-fetching pattern as before — this is a visual
+ * consolidation, not a functional change.
  */
 export default async function HotelsPage() {
   const t = await getTranslations("HotelsPage");
@@ -28,11 +29,10 @@ export default async function HotelsPage() {
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
-      <p className="text-gray-600 mb-6">{t("subtitle")}</p>
+      <PageHeader title={t("title")} subtitle={t("subtitle")} />
 
       {data.results.length === 0 ? (
-        <p className="text-gray-500">{t("noHotelsYet")}</p>
+        <EmptyState icon="🏨" title={t("noHotelsYet")} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {data.results.map((hotel) => {
@@ -41,14 +41,12 @@ export default async function HotelsPage() {
               : null;
 
             return (
-              <div key={hotel.id} className="border rounded-lg overflow-hidden bg-white transition-all duration-200 hover:shadow-lg hover:-translate-y-1">
-                <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-600 text-sm">
-                  {tCard("noPhotoYet")}
-                </div>
-                <div className="p-4">
+              <Card key={hotel.id}>
+                <CardMedia label={tCard("noPhotoYet")} />
+                <CardBody>
                   <p className="text-sm text-gray-500 mb-1">{hotel.quarter_name}</p>
                   {hotel.star_rating && (
-                    <p className="text-sm text-[#C9A227] font-semibold mb-1">
+                    <p className="text-sm text-[var(--gold)] font-semibold mb-1">
                       {"★".repeat(hotel.star_rating)}
                     </p>
                   )}
@@ -58,13 +56,13 @@ export default async function HotelsPage() {
                       : t("roomsAvailableOther", { count: hotel.room_types.length })}
                   </p>
                   {cheapestRoom && (
-                    <p className="text-lg font-bold text-[#1B2A4A]">
+                    <p className="text-lg font-bold text-[var(--navy)]">
                       {t("from")} {Number(cheapestRoom.base_rate_xaf).toLocaleString()} XAF
                       <span className="text-sm font-normal text-gray-500"> {t("perNight")}</span>
                     </p>
                   )}
-                </div>
-              </div>
+                </CardBody>
+              </Card>
             );
           })}
         </div>
