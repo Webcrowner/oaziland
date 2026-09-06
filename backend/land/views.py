@@ -6,9 +6,10 @@ from rest_framework import viewsets, permissions
 from .models import Land
 from .serializers import LandCreateSerializer
 from oaziland.permissions import IsOwnerOrReadOnly, IsVerifiedAndMfaEnabled
+from property.views import PropertyAmenitiesMixin
 
 
-class LandViewSet(viewsets.ModelViewSet):
+class LandViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
     serializer_class = LandCreateSerializer
 
     def get_permissions(self):

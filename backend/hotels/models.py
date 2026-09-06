@@ -26,9 +26,13 @@ class Hotel(PropertyAsset):
     """WHY this extends PropertyAsset via multi-table inheritance, the
     same pattern as House/Land/Shop and StudentHostel: a hotel IS a
     property with a location, owner, and everything PropertyAsset
-    already provides — no reason to duplicate those fields."""
+    already provides — no reason to duplicate those fields. WHY there's
+    no separate amenities field here: PropertyAsset itself gained a
+    real, validated amenities field (set_property_amenities()) — this
+    used to duplicate that with its own unvalidated JSONField before
+    the parent had one at all; removed to use the inherited field
+    instead of shadowing it with a second, less-validated copy."""
     star_rating = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5, null = unrated
-    amenities = models.JSONField(default=list, blank=True)  # e.g. ["pool", "gym", "spa"]
     verified = models.BooleanField(default=False)
 
     # Dynamic pricing configuration — per-hotel, since the spec makes

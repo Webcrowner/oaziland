@@ -35,6 +35,37 @@ class FinishLevel(models.TextChoices):
     STANDARD = "STANDARD", "Standard (Not Modern)"
 
 
+class PropertyAmenity(models.TextChoices):
+    """A FIXED list, matching the same validated-choice pattern already
+    used for ServiceCategory (services app) — a real value listers pick
+    from, not free text that would fragment into a dozen near-duplicate
+    spellings of 'parking' across different listings."""
+    PARKING = "PARKING", "Parking"
+    BACKUP_GENERATOR = "BACKUP_GENERATOR", "Backup Generator"
+    BOREHOLE_WATER_TANK = "BOREHOLE_WATER_TANK", "Borehole / Water Tank"
+    SECURITY_24_7 = "SECURITY_24_7", "24/7 Security"
+    FENCED_COMPOUND = "FENCED_COMPOUND", "Fenced Compound"
+    SWIMMING_POOL = "SWIMMING_POOL", "Swimming Pool"
+    AIR_CONDITIONING = "AIR_CONDITIONING", "Air Conditioning"
+    FURNISHED = "FURNISHED", "Furnished"
+    SOLAR_POWER = "SOLAR_POWER", "Solar Power"
+    CCTV = "CCTV", "CCTV"
+    BALCONY_TERRACE = "BALCONY_TERRACE", "Balcony / Terrace"
+    WIFI_READY = "WIFI_READY", "WiFi Ready"
+
+
+class HouseRule(models.TextChoices):
+    """Also a FIXED list — the same real reasoning as PropertyAmenity:
+    a consistent, filterable set of real rules rather than each lister
+    phrasing 'no pets' a different way."""
+    NO_PETS = "NO_PETS", "No Pets"
+    NO_SMOKING_INDOORS = "NO_SMOKING_INDOORS", "No Smoking Indoors"
+    NO_SUBLETTING = "NO_SUBLETTING", "No Subletting"
+    NO_PARTIES = "NO_PARTIES", "No Parties / Loud Events"
+    QUIET_HOURS_AFTER_10PM = "QUIET_HOURS_AFTER_10PM", "Quiet Hours After 10PM"
+    ADVANCE_NOTICE_FOR_VISITS = "ADVANCE_NOTICE_FOR_VISITS", "Advance Notice Required for Visits"
+
+
 class PropertyAsset(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
@@ -48,6 +79,20 @@ class PropertyAsset(models.Model):
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     distance_to_tarmac_km = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    # WHY a plain JSONField, validated at the SERVICE layer rather than
+    # a real ManyToManyField to a choices table: matches the exact
+    # pattern already established for TechnicianProfile.specialties
+    # (identity app) — a real fixed list, enforced by a service
+    # function (set_property_amenities), not by the database schema
+    # itself, keeping this consistent with how the rest of this
+    # codebase already handles "a list of values from a fixed set."
+    amenities = models.JSONField(default=list, blank=True)  # PropertyAmenity values
+    house_rules = models.JSONField(default=list, blank=True)  # HouseRule values
+    # A REAL relation to REAL geo data — reuses geo.PointOfInterest
+    # (already populated with real universities, hospitals, markets,
+    # etc.) rather than a second, freeform "nearby facilities" text
+    # field that would just duplicate data that already exists.
+    nearby_facilities = models.ManyToManyField("geo.PointOfInterest", blank=True, related_name="nearby_properties")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)

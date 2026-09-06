@@ -195,7 +195,43 @@ class ListingViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class HouseViewSet(viewsets.ModelViewSet):
+class PropertyAmenitiesMixin:
+    """Shared real actions for setting amenities, house rules, and
+    nearby facilities — lives once here rather than duplicated across
+    House/Shop/Land's three separate ViewSets, since all three inherit
+    the same PropertyAsset fields these actions operate on. Only the
+    property's own owner can set these (IsOwnerOrReadOnly, already
+    the fallback permission on every one of these ViewSets)."""
+
+    @action(detail=True, methods=["post"], url_path="set-amenities")
+    def set_amenities(self, request, pk=None):
+        from .services import set_property_amenities, InvalidAmenityError
+        property_asset = self.get_object()
+        try:
+            set_property_amenities(property_asset, request.data.get("amenities", []))
+        except InvalidAmenityError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"amenities": property_asset.amenities})
+
+    @action(detail=True, methods=["post"], url_path="set-house-rules")
+    def set_house_rules_action(self, request, pk=None):
+        from .services import set_house_rules, InvalidHouseRuleError
+        property_asset = self.get_object()
+        try:
+            set_house_rules(property_asset, request.data.get("house_rules", []))
+        except InvalidHouseRuleError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"house_rules": property_asset.house_rules})
+
+    @action(detail=True, methods=["post"], url_path="set-nearby-facilities")
+    def set_nearby_facilities_action(self, request, pk=None):
+        from .services import set_nearby_facilities
+        property_asset = self.get_object()
+        set_nearby_facilities(property_asset, request.data.get("point_of_interest_ids", []))
+        return Response({"nearby_facilities": list(property_asset.nearby_facilities.values_list("id", flat=True))})
+
+
+class HouseViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
     """Real property-creation, closing a genuine gap: Listing.create()
     could only ATTACH to an already-existing PropertyAsset — nothing
     ever let a user create the House itself. list/retrieve are public
@@ -221,7 +257,7 @@ class HouseViewSet(viewsets.ModelViewSet):
         serializer.save(owner=self.request.user, type="HOUSE")
 
 
-class ShopViewSet(viewsets.ModelViewSet):
+class ShopViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
     serializer_class = ShopCreateSerializer
 
     def get_permissions(self):

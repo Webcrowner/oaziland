@@ -34,10 +34,24 @@ class PropertyAssetSummarySerializer(serializers.ModelSerializer):
     same pattern, not built here to keep this pass focused on what the
     acceptance criteria actually asks for."""
     quarter_name = serializers.CharField(source="quarter.name", read_only=True)
+    nearby_facility_names = serializers.SerializerMethodField()
+
+    def get_nearby_facility_names(self, property_asset) -> list[str]:
+        return [f"{poi.name} ({poi.get_poi_type_display()})" for poi in property_asset.nearby_facilities.all()]
 
     class Meta:
         model = PropertyAsset
-        fields = ["id", "type", "size_sqm", "finish_level", "quarter", "quarter_name", "latitude", "longitude", "description"]
+        fields = [
+            "id", "type", "size_sqm", "finish_level", "quarter", "quarter_name", "latitude", "longitude", "description",
+            "amenities", "house_rules", "nearby_facilities", "nearby_facility_names",
+        ]
+        # WHY these three are read-only here: writes go through
+        # dedicated actions (set-amenities/set-house-rules/set-nearby-
+        # facilities) that call the real validated service functions
+        # instead — a raw M2M/JSONField write through this serializer
+        # would bypass set_property_amenities()'s real validation
+        # against the fixed PropertyAmenity list entirely.
+        read_only_fields = ["amenities", "house_rules", "nearby_facilities"]
 
 
 class ListingSerializer(serializers.ModelSerializer):

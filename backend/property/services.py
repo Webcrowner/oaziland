@@ -290,3 +290,50 @@ def expire_overdue_listings(now=None):
             )
         expired.append(listing)
     return expired
+
+
+class InvalidAmenityError(Exception):
+    pass
+
+
+class InvalidHouseRuleError(Exception):
+    pass
+
+
+def set_property_amenities(property_asset, amenities: list):
+    """The real enforcement behind 'amenities limited to a fixed
+    list' — matches services.set_technician_specialties()'s exact
+    pattern: the underlying field is a plain JSONField with no
+    built-in choice validation, so this is where that validation
+    actually lives."""
+    from .models import PropertyAmenity
+    valid_values = {choice.value for choice in PropertyAmenity}
+    invalid = [a for a in amenities if a not in valid_values]
+    if invalid:
+        raise InvalidAmenityError(f"Not a supported amenity: {invalid}")
+    property_asset.amenities = amenities
+    property_asset.save(update_fields=["amenities"])
+    return property_asset
+
+
+def set_house_rules(property_asset, rules: list):
+    from .models import HouseRule
+    valid_values = {choice.value for choice in HouseRule}
+    invalid = [r for r in rules if r not in valid_values]
+    if invalid:
+        raise InvalidHouseRuleError(f"Not a supported house rule: {invalid}")
+    property_asset.house_rules = rules
+    property_asset.save(update_fields=["house_rules"])
+    return property_asset
+
+
+def set_nearby_facilities(property_asset, point_of_interest_ids: list):
+    """Only ever attaches REAL PointOfInterest rows that actually
+    exist — an ID that doesn't match anything is silently skipped
+    rather than raising, since 'you tagged an unrelated ID' is
+    almost certainly a client-side mistake, not something worth a
+    hard failure over. Real IDs still attach correctly either way."""
+    from geo.models import PointOfInterest
+    real_pois = PointOfInterest.objects.filter(id__in=point_of_interest_ids)
+    property_asset.nearby_facilities.set(real_pois)
+    return property_asset
