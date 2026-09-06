@@ -31,6 +31,9 @@ from monetization.views import MyCreatorPremiumView
 from uploads.views import MediaUploadView
 from finance.views import PropertyValuationView, AffordabilityEstimateView
 from flyers.views import FlyerViewSet
+from property_management.views import (
+    MaintenanceRequestViewSet, TenantScreeningRequestViewSet, AgentSafetyCheckInViewSet, LeaseViewSet, OpenDisputeView,
+)
 from catalogue.views import PartnerServiceCategoryViewSet
 from engagement.views import ContactMessageView
 from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet, JobPostingViewSet, MyJobApplicationViewSet
@@ -45,6 +48,10 @@ router.register(r"lands", LandViewSet, basename="land")
 router.register(r"conversations", ConversationViewSet, basename="conversation")
 router.register(r"posts", PostViewSet, basename="post")
 router.register(r"flyers", FlyerViewSet, basename="flyer")
+router.register(r"maintenance-requests", MaintenanceRequestViewSet, basename="maintenance-request")
+router.register(r"tenant-screenings", TenantScreeningRequestViewSet, basename="tenant-screening")
+router.register(r"safety-check-ins", AgentSafetyCheckInViewSet, basename="safety-check-in")
+router.register(r"leases", LeaseViewSet, basename="lease")
 router.register(r"comments", CommentViewSet, basename="comment")
 router.register(r"admin/verification-requests", AdminVerificationRequestViewSet, basename="admin-verification-request")
 router.register(r"admin/content-reports", AdminContentReportViewSet, basename="admin-content-report")
@@ -109,6 +116,7 @@ urlpatterns = [
     path('api/media/upload/', MediaUploadView.as_view(), name='media-upload'),
     path('api/valuations/', PropertyValuationView.as_view(), name='property-valuation'),
     path('api/affordability/', AffordabilityEstimateView.as_view(), name='affordability-estimate'),
+    path('api/bookings/<uuid:booking_id>/open-dispute/', OpenDisputeView.as_view(), name='open-dispute'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
