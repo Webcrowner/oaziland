@@ -202,7 +202,8 @@
     "spacesAvailable": "{count} space available",
     "spacesAvailableOther": "{count} spaces available",
     "theatreCapacity": "Theatre: {count}",
-    "banquetCapacity": "Banquet: {count}"
+    "banquetCapacity": "Banquet: {count}",
+    "verifiedBadge": "Verified"
   },
   "GuestHousesPage": {
     "title": "Guest Houses",

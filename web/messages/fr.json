@@ -202,7 +202,8 @@
     "spacesAvailable": "{count} espace disponible",
     "spacesAvailableOther": "{count} espaces disponibles",
     "theatreCapacity": "Théâtre : {count}",
-    "banquetCapacity": "Banquet : {count}"
+    "banquetCapacity": "Banquet : {count}",
+    "verifiedBadge": "Vérifié"
   },
   "GuestHousesPage": {
     "title": "Maisons d'Hôtes",
