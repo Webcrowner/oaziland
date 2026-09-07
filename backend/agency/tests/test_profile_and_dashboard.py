@@ -151,3 +151,30 @@ def test_agency_public_profile_endpoint_is_actually_reachable():
 
     assert response.status_code == 200
     assert response.data["registration_number"] == "RC-REACHABLE-001"
+
+
+@pytest.mark.django_db
+def test_rating_an_agent_moves_the_real_agencys_aggregate_rating():
+    """Verifies the actual chain end-to-end, not just that the
+    aggregation code LOOKS correct: rate a real agent through the
+    real API, then confirm the agency they belong to genuinely shows
+    a moved average — since an agency has no rating of its own, this
+    is the only way anyone ever actually rates one."""
+    agency_user = User.objects.create(username="agency_rating_chain_agency", phone="+237699555501")
+    agency = AgencyProfile.objects.create(user=agency_user, registration_number="RC-CHAIN-001", agency_commission_percent=Decimal("15"))
+    agent_user = User.objects.create(username="agency_rating_chain_agent", phone="+237699555502")
+    AgentProfile.objects.create(user=agent_user, agency=agency, agent_commission_percent=Decimal("10"))
+    rater = User.objects.create(username="agency_rating_chain_rater", phone="+237699555503")
+
+    before = APIClient().get(f"/api/agencies/{agency.id}/profile/")
+    assert before.data["average_rating"] is None
+
+    rater_client = APIClient()
+    token = RefreshToken.for_user(rater)
+    rater_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+    rate_response = rater_client.post("/api/ratings/", {"subject_user": str(agent_user.id), "score": "4.5"})
+    assert rate_response.status_code == 201
+
+    after = APIClient().get(f"/api/agencies/{agency.id}/profile/")
+    assert float(after.data["average_rating"]) == 4.5
+    assert after.data["rating_count"] == 1
