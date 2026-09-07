@@ -510,7 +510,8 @@
     "title": "Saved Listings",
     "subtitle": "Properties you've saved to look at later.",
     "noFavoritesYet": "You haven't saved any listings yet.",
-    "signInRequired": "Sign in to see your saved listings"
+    "signInRequired": "Sign in to see your saved listings",
+    "browseListings": "Browse Listings"
   },
   "SavedSearchesPage": {
     "title": "Saved Searches",

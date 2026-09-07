@@ -510,7 +510,8 @@
     "title": "Annonces Enregistrées",
     "subtitle": "Les propriétés que vous avez enregistrées pour plus tard.",
     "noFavoritesYet": "Vous n'avez encore enregistré aucune annonce.",
-    "signInRequired": "Connectez-vous pour voir vos annonces enregistrées"
+    "signInRequired": "Connectez-vous pour voir vos annonces enregistrées",
+    "browseListings": "Parcourir les Annonces"
   },
   "SavedSearchesPage": {
     "title": "Recherches Enregistrées",

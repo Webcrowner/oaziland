@@ -2,6 +2,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import PageHeader from "@/components/ui/PageHeader";
+import EmptyState from "@/components/ui/EmptyState";
+import Button from "@/components/ui/Button";
 import { listSavedSearches, deleteSavedSearch, type SavedSearch } from "@/lib/api";
 
 export default function SavedSearchesPage() {
@@ -39,30 +42,25 @@ export default function SavedSearchesPage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
-          {t("signInRequired")}
-        </Link>
+        <Button href="/login">{t("signInRequired")}</Button>
       </main>
     );
   }
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
-      <p className="text-gray-600 mb-8">{t("subtitle")}</p>
+      <PageHeader title={t("title")} subtitle={t("subtitle")} />
 
       {status === "loading" ? (
         <p className="text-gray-400">...</p>
       ) : searches.length === 0 ? (
-        <p className="text-gray-500">
-          {t("noSavedSearchesYet")} <Link href="/search" className="text-[#1B2A4A] underline">{t("saveThisSearch")}</Link>
-        </p>
+        <EmptyState icon="🔎" title={t("noSavedSearchesYet")} action={<Button variant="secondary" href="/search">{t("saveThisSearch")}</Button>} />
       ) : (
         <div className="flex flex-col gap-3">
           {searches.map((search) => (
             <div key={search.id} className="border rounded-lg p-4 bg-white flex items-center justify-between">
               <div>
-                <p className="font-semibold text-[#1B2A4A]">{search.name || t("title")}</p>
+                <p className="font-semibold text-[var(--navy)]">{search.name || t("title")}</p>
                 <p className="text-xs text-gray-500 mt-1">
                   {search.last_notified_at
                     ? t("lastNotified", { date: new Date(search.last_notified_at).toLocaleDateString(locale === "fr" ? "fr-FR" : "en-US") })

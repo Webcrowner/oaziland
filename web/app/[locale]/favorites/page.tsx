@@ -1,8 +1,10 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
 import PropertyCard from "@/components/PropertyCard";
+import PageHeader from "@/components/ui/PageHeader";
+import EmptyState from "@/components/ui/EmptyState";
+import Button from "@/components/ui/Button";
 import { getMyFavorites, getListing, type Listing } from "@/lib/api";
 
 export default function FavoritesPage() {
@@ -29,22 +31,19 @@ export default function FavoritesPage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
-          {t("signInRequired")}
-        </Link>
+        <Button href="/login">{t("signInRequired")}</Button>
       </main>
     );
   }
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
-      <p className="text-gray-600 mb-8">{t("subtitle")}</p>
+      <PageHeader title={t("title")} subtitle={t("subtitle")} />
 
       {status === "loading" ? (
         <p className="text-gray-400">...</p>
       ) : listings.length === 0 ? (
-        <p className="text-gray-500">{t("noFavoritesYet")}</p>
+        <EmptyState icon="❤️" title={t("noFavoritesYet")} action={<Button variant="secondary" href="/search">{t("browseListings")}</Button>} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {listings.map((listing) => (

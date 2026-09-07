@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { Link } from "@/i18n/navigation";
 import { getMyReferralCode } from "@/lib/api";
+import Button from "@/components/ui/Button";
 
 /**
  * A real referral code AND link page — fetches the user's actual,
@@ -56,9 +56,7 @@ export default function ReferralsPage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInToSeeCode")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
-          {t("signInToSeeCode")}
-        </Link>
+        <Button href="/login">{t("signInToSeeCode")}</Button>
       </main>
     );
   }
@@ -68,30 +66,30 @@ export default function ReferralsPage() {
 
   return (
     <main className="max-w-md mx-auto px-4 py-16 text-center">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-2">{t("title")}</h1>
+      <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-2">{t("title")}</h1>
       <p className="text-gray-600 mb-8">{t("subtitle")}</p>
 
       {code ? (
         <>
-          <div className="border-2 border-dashed border-[#C9A227] rounded-lg py-6 px-4 mb-4">
+          <div className="border-2 border-dashed border-[var(--gold)] rounded-lg py-6 px-4 mb-4">
             <p className="text-xs text-gray-500 mb-1">{t("yourCode")}</p>
-            <p className="text-3xl font-bold text-[#1B2A4A] tracking-widest mb-3">{code}</p>
+            <p className="text-3xl font-bold text-[var(--navy)] tracking-widest mb-3">{code}</p>
             {referralLink && (
               <>
                 <p className="text-xs text-gray-500 mb-1">{t("yourLink")}</p>
-                <p className="text-sm text-[#1B2A4A] break-all">{referralLink}</p>
+                <p className="text-sm text-[var(--navy)] break-all">{referralLink}</p>
               </>
             )}
           </div>
 
           <div className="flex flex-col gap-3">
-            <button onClick={handleCopyCode} className="border border-[#1B2A4A] text-[#1B2A4A] font-semibold py-2 rounded hover:bg-gray-50">
+            <button onClick={handleCopyCode} className="border border-[var(--navy)] text-[var(--navy)] font-semibold py-2 rounded hover:bg-gray-50">
               {copiedCode ? t("copied") : t("copyCode")}
             </button>
-            <button onClick={handleCopyLink} disabled={!referralLink} className="border border-[#1B2A4A] text-[#1B2A4A] font-semibold py-2 rounded hover:bg-gray-50 disabled:opacity-50">
+            <button onClick={handleCopyLink} disabled={!referralLink} className="border border-[var(--navy)] text-[var(--navy)] font-semibold py-2 rounded hover:bg-gray-50 disabled:opacity-50">
               {copiedLink ? t("copied") : t("copyLink")}
             </button>
-            <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-3 rounded hover:opacity-90">
+            <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-3 rounded hover:opacity-90">
               {t("shareOnWhatsApp")}
             </a>
           </div>

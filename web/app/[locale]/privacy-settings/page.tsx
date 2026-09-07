@@ -39,7 +39,7 @@ export default function PrivacySettingsPage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
+        <Link href="/login" className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("signInRequired")}
         </Link>
       </main>
@@ -52,18 +52,18 @@ export default function PrivacySettingsPage() {
 
   return (
     <main className="max-w-md mx-auto px-4 py-12">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
+      <h1 className="text-2xl font-bold text-[var(--navy)] mb-1">{t("title")}</h1>
       <p className="text-gray-600 mb-8 text-sm">{t("subtitle")}</p>
 
       <div className="flex flex-col gap-6">
         <div className="flex items-start justify-between gap-4 border rounded-lg p-4 bg-white">
           <div>
-            <p className="font-semibold text-[#1B2A4A] text-sm">{t("onlineStatusLabel")}</p>
+            <p className="font-semibold text-[var(--navy)] text-sm">{t("onlineStatusLabel")}</p>
             <p className="text-xs text-gray-500 mt-1">{t("onlineStatusDescription")}</p>
           </div>
           <button
             onClick={() => handleToggle("show_online_status")}
-            className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${settings.show_online_status ? "bg-[#C9A227]" : "bg-gray-300"}`}
+            className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${settings.show_online_status ? "bg-[var(--gold)]" : "bg-gray-300"}`}
           >
             <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settings.show_online_status ? "translate-x-6" : "translate-x-0.5"}`} />
           </button>
@@ -71,12 +71,12 @@ export default function PrivacySettingsPage() {
 
         <div className="flex items-start justify-between gap-4 border rounded-lg p-4 bg-white">
           <div>
-            <p className="font-semibold text-[#1B2A4A] text-sm">{t("typingIndicatorLabel")}</p>
+            <p className="font-semibold text-[var(--navy)] text-sm">{t("typingIndicatorLabel")}</p>
             <p className="text-xs text-gray-500 mt-1">{t("typingIndicatorDescription")}</p>
           </div>
           <button
             onClick={() => handleToggle("show_typing_indicator")}
-            className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${settings.show_typing_indicator ? "bg-[#C9A227]" : "bg-gray-300"}`}
+            className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${settings.show_typing_indicator ? "bg-[var(--gold)]" : "bg-gray-300"}`}
           >
             <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settings.show_typing_indicator ? "translate-x-6" : "translate-x-0.5"}`} />
           </button>
