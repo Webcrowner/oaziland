@@ -748,3 +748,59 @@ def unfavorite_post(*, user, post):
 def list_my_favorite_listing_ids(user):
     from .models import Favorite
     return list(Favorite.objects.filter(user=user, listing_id__isnull=False).values_list("listing_id", flat=True))
+
+
+# ---------------------------------------------------------------------------
+# Real gap this closes: Rating and Review both had real models —
+# Rating already consumed by agent/agency dashboard aggregation
+# (agency.services) for average_rating/rating_count — but zero way
+# for a real user to actually create either one.
+# ---------------------------------------------------------------------------
+class CannotRateSelfError(Exception):
+    pass
+
+
+class ReviewRequiresCompletedBookingError(Exception):
+    pass
+
+
+class AlreadyReviewedError(Exception):
+    pass
+
+
+def create_or_update_rating(*, author, score, subject_user=None, subject_property_id=None):
+    """WHY update-in-place rather than a new row each time: a person
+    re-rating the same agent should move that ONE opinion, not let
+    them stack multiple ratings and skew the real average — the same
+    integrity concern behind AlreadyEnrolledError/AlreadyAppliedError
+    elsewhere in this codebase, applied here as an update instead of a
+    rejection since changing a rating is a legitimate, common action
+    (unlike re-applying to the same job)."""
+    if subject_user is not None and subject_user.id == author.id:
+        raise CannotRateSelfError("You cannot rate yourself.")
+
+    from .models import Rating
+    rating, _ = Rating.objects.update_or_create(
+        author=author, subject_user=subject_user, subject_property_id=subject_property_id,
+        defaults={"score": score},
+    )
+    return rating
+
+
+def create_review(*, author, booking, score: int, text: str = ""):
+    """Tied to a completed Booking, per Review's own documented trust
+    rationale — only a real transacting party can leave one. Only the
+    booking's own requester may review it (the other side of a real
+    transaction is who's actually being reviewed — an agent, landlord,
+    or technician, depending on booking type)."""
+    from transactions.models import BookingStatus
+    from .models import Review
+
+    if booking.requester_id != author.id:
+        raise PermissionError("Only the booking's own requester can leave a review for it.")
+    if booking.status != BookingStatus.COMPLETED:
+        raise ReviewRequiresCompletedBookingError("A review can only be left for a completed booking.")
+    if Review.objects.filter(author=author, booking=booking).exists():
+        raise AlreadyReviewedError("You have already reviewed this booking.")
+
+    return Review.objects.create(author=author, booking=booking, score=score, text=text)

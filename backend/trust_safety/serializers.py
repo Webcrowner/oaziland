@@ -18,8 +18,22 @@ class ContentReportSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ContentReport
-        fields = ["id", "reported_by", "reported_by_name", "reason", "status", "target_post", "target_listing_id", "target_comment", "notes", "created_at"]
+        fields = ["id", "reported_by", "reported_by_name", "reason", "status", "target_post", "target_listing_id", "target_comment", "target_user", "notes", "created_at"]
         read_only_fields = ["status", "created_at"]
+
+
+class FileContentReportSerializer(serializers.Serializer):
+    """Write-only input for the real user-facing filing endpoint —
+    deliberately separate from ContentReportSerializer above (which
+    stays the read/admin shape) since exactly one target field should
+    be provided here, a constraint that doesn't belong on the general
+    read serializer."""
+    reason = serializers.ChoiceField(choices=ContentReport._meta.get_field("reason").choices)
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+    target_post = serializers.UUIDField(required=False, allow_null=True)
+    target_listing_id = serializers.UUIDField(required=False, allow_null=True)
+    target_comment = serializers.UUIDField(required=False, allow_null=True)
+    target_user = serializers.UUIDField(required=False, allow_null=True)
 
 
 class DisputeCaseSerializer(serializers.ModelSerializer):

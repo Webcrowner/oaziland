@@ -20,6 +20,7 @@ class ReportReason(models.TextChoices):
     INAPPROPRIATE_CONTENT = "INAPPROPRIATE_CONTENT", "Inappropriate Content"
     HARASSMENT = "HARASSMENT", "Harassment"
     MISLEADING_LISTING = "MISLEADING_LISTING", "Misleading Listing"
+    USER_BEHAVIOR = "USER_BEHAVIOR", "Reporting a Person's Behavior"
     OTHER = "OTHER", "Other"
 
 
@@ -30,10 +31,14 @@ class ReportStatus(models.TextChoices):
 
 
 class ContentReport(models.Model):
-    """A human-filed report against a post, listing, or comment. Exactly
-    one of post/listing_id/comment should be set — enforced in application
-    code (a Django CheckConstraint could also do this, but the validation
-    message is clearer as Python for a non-technical reader)."""
+    """A human-filed report against a post, listing, comment, OR a
+    person directly (target_user — an agent, agency, landlord, or
+    owner). WHY target_user was added here rather than as a separate
+    model: it's the same real workflow (a reason, notes, an admin
+    resolution) already built for content — a person report doesn't
+    need a different shape, just one more possible target. Exactly
+    one of post/listing_id/comment/target_user should be set —
+    enforced in application code, same as the other three."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reported_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reports_filed")
     reason = models.CharField(max_length=30, choices=ReportReason.choices)
@@ -41,6 +46,9 @@ class ContentReport(models.Model):
     target_post = models.ForeignKey("social.Post", on_delete=models.CASCADE, null=True, blank=True)
     target_listing_id = models.UUIDField(null=True, blank=True)
     target_comment = models.ForeignKey("social.Comment", on_delete=models.CASCADE, null=True, blank=True)
+    target_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name="reports_received",
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

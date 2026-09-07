@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { getAgentPublicProfile } from "@/lib/api";
+import RateAndReport from "@/components/RateAndReport";
 import type { Metadata } from "next";
 
 /**
@@ -76,6 +77,10 @@ export default async function AgentProfilePage({ params }: { params: Promise<{ i
             ? t("activeListings", { count: profile.active_listing_count })
             : t("activeListingsOther", { count: profile.active_listing_count })}
         </p>
+
+        <div className="mb-6 pb-6 border-b border-gray-100">
+          <RateAndReport subjectUserId={id} />
+        </div>
 
         <Link href="/search" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("viewListings")}

@@ -18,8 +18,8 @@ from geo.views import QuarterViewSet
 from property.views import ListingViewSet, HouseViewSet, ShopViewSet
 from land.views import LandViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
-from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView, MyFavoriteListingsView, ToggleFavoriteListingView, PostViewSet, CommentViewSet
-from trust_safety.views import AdminConsoleSummaryView, AdminVerificationRequestViewSet, AdminContentReportViewSet, AdminDisputeCaseViewSet
+from social.views import SocialAccountLinkViewSet, TestimonialsView, ConversationViewSet, MyPresenceSettingsView, MyFavoriteListingsView, ToggleFavoriteListingView, PostViewSet, CommentViewSet, RateUserView, ReviewViewSet
+from trust_safety.views import AdminConsoleSummaryView, AdminVerificationRequestViewSet, AdminContentReportViewSet, AdminDisputeCaseViewSet, FileContentReportView
 from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
 from hotels.views import HotelViewSet, ReservationViewSet
 from events.views import VenueViewSet, EventBookingViewSet
@@ -63,6 +63,7 @@ router.register(r"cars", CarListingViewSet, basename="car")
 router.register(r"rides", RideViewSet, basename="ride")
 router.register(r"service-requests", ServiceRequestViewSet, basename="service-request")
 router.register(r"comments", CommentViewSet, basename="comment")
+router.register(r"reviews", ReviewViewSet, basename="review")
 router.register(r"admin/verification-requests", AdminVerificationRequestViewSet, basename="admin-verification-request")
 router.register(r"admin/content-reports", AdminContentReportViewSet, basename="admin-content-report")
 router.register(r"admin/dispute-cases", AdminDisputeCaseViewSet, basename="admin-dispute-case")
@@ -130,6 +131,8 @@ urlpatterns = [
     path('api/technicians/find/', FindTechniciansView.as_view(), name='find-technicians'),
     path('api/my-technician-dashboard/', MyTechnicianDashboardView.as_view(), name='my-technician-dashboard'),
     path('api/listing-conditions/', ListingConditionView.as_view(), name='listing-conditions'),
+    path('api/ratings/', RateUserView.as_view(), name='rate-user'),
+    path('api/content-reports/', FileContentReportView.as_view(), name='file-content-report'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.

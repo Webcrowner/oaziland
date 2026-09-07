@@ -1,8 +1,10 @@
 """
-trust_safety.views — the real Admin Console API. Every endpoint here
-is IsAdminRole-only: this is a queue of real, sensitive moderation
-actions, never intended for anyone browsing anonymously or as a
-regular user.
+trust_safety.views — mostly the real Admin Console API (IsAdminRole-only:
+a queue of real, sensitive moderation actions). FileContentReportView is
+the one deliberate exception — the real, user-facing way to actually
+FILE a report in the first place, which nothing in this file (or
+anywhere else) previously exposed; every other report-related endpoint
+here is about an admin resolving one that already exists.
 """
 from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
@@ -11,8 +13,8 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 
 from .models import ContentReport, ReportStatus
-from .serializers import VerificationRequestSerializer, ContentReportSerializer, DisputeCaseSerializer
-from .services import get_admin_console_summary, resolve_content_report
+from .serializers import VerificationRequestSerializer, ContentReportSerializer, FileContentReportSerializer, DisputeCaseSerializer
+from .services import get_admin_console_summary, resolve_content_report, file_content_report, CannotReportSelfError
 from oaziland.permissions import IsAdminRole
 from engagement.models import VerificationRequest, VerificationRequestStatus
 from engagement.services import approve_verification_request, reject_verification_request
@@ -104,3 +106,45 @@ class AdminDisputeCaseViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": "outcome must be RELEASE or REFUND."}, status=status.HTTP_400_BAD_REQUEST)
         resolve_dispute(dispute=dispute, outcome=outcome, notes=request.data.get("notes", ""))
         return Response(DisputeCaseSerializer(dispute).data)
+
+
+class FileContentReportView(APIView):
+    """The real, user-facing way to file a report — against a post,
+    listing, comment, OR a person directly (an agent, agency,
+    landlord, or owner). Requires login: an anonymous, unaccountable
+    reporting endpoint is itself a real abuse vector."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=FileContentReportSerializer, responses={201: ContentReportSerializer, 400: dict})
+    def post(self, request):
+        input_serializer = FileContentReportSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        data = input_serializer.validated_data
+
+        target_user = None
+        if data.get("target_user"):
+            from identity.models import User
+            target_user = User.objects.filter(id=data["target_user"]).first()
+            if target_user is None:
+                return Response({"detail": "That user was not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        target_post = None
+        if data.get("target_post"):
+            from social.models import Post
+            target_post = Post.objects.filter(id=data["target_post"]).first()
+
+        target_comment = None
+        if data.get("target_comment"):
+            from social.models import Comment
+            target_comment = Comment.objects.filter(id=data["target_comment"]).first()
+
+        try:
+            report = file_content_report(
+                reported_by=request.user, reason=data["reason"], notes=data["notes"],
+                target_post=target_post, target_listing_id=data.get("target_listing_id"),
+                target_comment=target_comment, target_user=target_user,
+            )
+        except (ValueError, CannotReportSelfError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(ContentReportSerializer(report).data, status=status.HTTP_201_CREATED)

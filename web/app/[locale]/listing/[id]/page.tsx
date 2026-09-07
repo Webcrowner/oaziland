@@ -8,6 +8,7 @@ import CompareButton from "@/components/CompareButton";
 import PropertyMap from "@/components/PropertyMap";
 import PhotoGallery from "@/components/PhotoGallery";
 import SimilarListings from "@/components/SimilarListings";
+import RateAndReport from "@/components/RateAndReport";
 import Badge from "@/components/ui/Badge";
 import type { Metadata } from "next";
 
@@ -200,6 +201,9 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
               >
                 {t("shareOnSocial")}
               </Link>
+              <div className="mt-3 pt-3 border-t border-black/10">
+                <RateAndReport subjectUserId={listing.lister_id} />
+              </div>
             </div>
 
             <div className="flex flex-col gap-3">

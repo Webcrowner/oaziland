@@ -714,5 +714,21 @@
     "jobsTrend": "Jobs This Period",
     "noHistoryYet": "New — no history yet",
     "vsLastPeriod": "vs. last period"
+  },
+  "RateAndReport": {
+    "rateThisPerson": "Rate this person",
+    "report": "Report",
+    "reportTitle": "Report this person",
+    "notesPlaceholder": "Add details (optional)...",
+    "submitReport": "Submit Report",
+    "cancel": "Cancel",
+    "thanksForRating": "Thanks for your rating!",
+    "reportSubmitted": "Report submitted. Our team will review it.",
+    "genericError": "Something went wrong. Please try again.",
+    "reason_SCAM_SUSPECTED": "Scam Suspected",
+    "reason_HARASSMENT": "Harassment",
+    "reason_MISLEADING_LISTING": "Misleading Listing",
+    "reason_USER_BEHAVIOR": "Inappropriate Behavior",
+    "reason_OTHER": "Other"
   }
 }

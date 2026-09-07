@@ -10,9 +10,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema
-from .models import SocialAccountLink, Conversation, Post, Comment, ContentStatus
-from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer, PostSerializer, CommentSerializer
-from .services import link_social_account
+from .models import SocialAccountLink, Conversation, Post, Comment, ContentStatus, Rating, Review
+from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer, PostSerializer, CommentSerializer, RatingSerializer, ReviewSerializer
+from .services import link_social_account, create_or_update_rating, create_review, CannotRateSelfError, ReviewRequiresCompletedBookingError, AlreadyReviewedError
 
 
 class SocialAccountLinkViewSet(viewsets.ModelViewSet):
@@ -372,3 +372,68 @@ class CommentViewSet(viewsets.ModelViewSet):
         except PermissionError as e:
             return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RateUserView(APIView):
+    """The real gap this closes: Rating had a real model, already
+    consumed by agent/agency dashboard aggregation for
+    average_rating/rating_count, but zero way for a real user to
+    actually rate an agent, agency, landlord, or owner. Requires
+    login: an anonymous rating is a real integrity problem for a
+    number meant to reflect real people's real opinions."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=RatingSerializer, responses={201: RatingSerializer, 400: dict})
+    def post(self, request):
+        subject_user_id = request.data.get("subject_user")
+        subject_property_id = request.data.get("subject_property_id")
+        score = request.data.get("score")
+        if not subject_user_id and not subject_property_id:
+            return Response({"detail": "Either subject_user or subject_property_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if score is None:
+            return Response({"detail": "score is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        subject_user = None
+        if subject_user_id:
+            from identity.models import User
+            subject_user = User.objects.filter(id=subject_user_id).first()
+            if subject_user is None:
+                return Response({"detail": "That user was not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            rating = create_or_update_rating(author=request.user, score=score, subject_user=subject_user, subject_property_id=subject_property_id)
+        except CannotRateSelfError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RatingSerializer(rating).data, status=status.HTTP_201_CREATED)
+
+
+class ReviewViewSet(viewsets.ModelViewSet):
+    """The real gap this closes: Review had a real model — TestimonialsView
+    already reads FROM it — but zero way for a real user to actually
+    leave one. create/list/retrieve only; a review is left once for a
+    real completed transaction, not something to freely rewrite via a
+    generic update endpoint (edit() exists as its own real, permission-
+    checked method on the model itself for the one legitimate case)."""
+    serializer_class = ReviewSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Review.objects.none()
+        return Review.objects.all().order_by("-created_at")
+
+    def create(self, request, *args, **kwargs):
+        from transactions.models import Booking
+        booking_id = request.data.get("booking")
+        booking = Booking.objects.filter(id=booking_id).first()
+        if booking is None:
+            return Response({"detail": "That booking was not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            review = create_review(author=request.user, booking=booking, score=request.data.get("score"), text=request.data.get("text", ""))
+        except PermissionError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except (ReviewRequiresCompletedBookingError, AlreadyReviewedError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)

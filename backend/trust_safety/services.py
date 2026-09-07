@@ -177,7 +177,40 @@ def resolve_content_report(*, report, resolved_by, action_taken: str, issue_stri
             subject = report.target_post.author
         elif report.target_comment_id:
             subject = report.target_comment.author
+        elif report.target_user_id:
+            # A real gap this closes: a report filed directly against
+            # a person (an agent, agency, landlord, or owner) had no
+            # subject this lookup would ever find — a strike decision
+            # on a person-report would have silently done nothing.
+            subject = report.target_user
         if subject:
             issue_strike_and_apply_consequences(subject=subject, reason=action_taken, issued_by=resolved_by)
 
     return report
+
+
+# ---------------------------------------------------------------------------
+# Real gap this closes: ContentReport had a real model (already
+# consumed by AdminContentReportViewSet for RESOLUTION) but zero way
+# for a real user to actually file one — only admin resolution of an
+# already-existing report was ever built.
+# ---------------------------------------------------------------------------
+class CannotReportSelfError(Exception):
+    pass
+
+
+def file_content_report(*, reported_by, reason: str, notes: str = "", target_post=None, target_listing_id=None, target_comment=None, target_user=None):
+    """Exactly one target should be provided — matching the model's
+    own documented invariant, enforced here since nothing previously
+    checked it (nothing previously created a report at all)."""
+    targets_provided = sum(1 for t in [target_post, target_listing_id, target_comment, target_user] if t)
+    if targets_provided != 1:
+        raise ValueError("Exactly one of target_post, target_listing_id, target_comment, or target_user must be provided.")
+    if target_user is not None and target_user.id == reported_by.id:
+        raise CannotReportSelfError("You cannot report yourself.")
+
+    from .models import ContentReport
+    return ContentReport.objects.create(
+        reported_by=reported_by, reason=reason, notes=notes,
+        target_post=target_post, target_listing_id=target_listing_id, target_comment=target_comment, target_user=target_user,
+    )

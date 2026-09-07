@@ -7,7 +7,7 @@ any of them over HTTP — no real inbox was possible).
 """
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import SocialAccountLink, Conversation, Message, Post, Comment, PostMedia
+from .models import SocialAccountLink, Conversation, Message, Post, Comment, PostMedia, Rating, Review
 from .services import get_message_tick_status, get_post_reaction_counts
 
 
@@ -114,3 +114,21 @@ class PostSerializer(serializers.ModelSerializer):
 
     def get_comment_count(self, post) -> int:
         return post.comments.count()
+
+
+class RatingSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source="author.full_name", read_only=True)
+
+    class Meta:
+        model = Rating
+        fields = ["id", "author", "author_name", "subject_user", "subject_property_id", "score", "created_at"]
+        read_only_fields = ["author", "created_at"]
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source="author.full_name", read_only=True)
+
+    class Meta:
+        model = Review
+        fields = ["id", "author", "author_name", "booking", "score", "text", "created_at", "edited_at"]
+        read_only_fields = ["author", "created_at", "edited_at"]

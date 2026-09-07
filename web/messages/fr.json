@@ -714,5 +714,21 @@
     "jobsTrend": "Travaux Cette Période",
     "noHistoryYet": "Nouveau — pas encore d'historique",
     "vsLastPeriod": "vs. période précédente"
+  },
+  "RateAndReport": {
+    "rateThisPerson": "Évaluer cette personne",
+    "report": "Signaler",
+    "reportTitle": "Signaler cette personne",
+    "notesPlaceholder": "Ajouter des détails (optionnel)...",
+    "submitReport": "Envoyer le Signalement",
+    "cancel": "Annuler",
+    "thanksForRating": "Merci pour votre évaluation !",
+    "reportSubmitted": "Signalement envoyé. Notre équipe l'examinera.",
+    "genericError": "Une erreur s'est produite. Veuillez réessayer.",
+    "reason_SCAM_SUSPECTED": "Arnaque Suspectée",
+    "reason_HARASSMENT": "Harcèlement",
+    "reason_MISLEADING_LISTING": "Annonce Trompeuse",
+    "reason_USER_BEHAVIOR": "Comportement Inapproprié",
+    "reason_OTHER": "Autre"
   }
 }

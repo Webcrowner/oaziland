@@ -371,6 +371,33 @@ export async function getAgentPublicProfile(userId: string): Promise<AgentPublic
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// Real ratings and reporting a person directly — closing the gap
+// between the aggregated rating a profile already shows and any real
+// way for a visitor to actually contribute one.
+// ---------------------------------------------------------------------------
+export async function rateUser(subjectUserId: string, score: number, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/ratings/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ subject_user: subjectUserId, score }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit rating");
+  return data;
+}
+
+export async function fileReportAgainstUser(targetUserId: string, reason: string, notes: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ target_user: targetUserId, reason, notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit report");
+  return data;
+}
+
 export async function setupMfa(mfaType: "SMS_OTP" | "EMAIL_OTP", destination: string, accessToken: string) {
   const res = await fetch(`${API_BASE_URL}/api/auth/mfa/setup/`, {
     method: "POST",
