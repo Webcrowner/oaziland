@@ -745,5 +745,16 @@
     "reason_MISLEADING_LISTING": "Misleading Listing",
     "reason_USER_BEHAVIOR": "Inappropriate Behavior",
     "reason_OTHER": "Other"
+  },
+  "AgencyProfilePage": {
+    "registrationLabel": "Registration No.",
+    "ratingCount": "({count} rating)",
+    "ratingCountOther": "({count} ratings)",
+    "noRatingsYet": "No ratings yet",
+    "agentCount": "Agent",
+    "agentCountOther": "Agents",
+    "listingCount": "Active Listing",
+    "listingCountOther": "Active Listings",
+    "viewListings": "View Listings"
   }
 }

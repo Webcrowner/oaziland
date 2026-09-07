@@ -480,6 +480,12 @@ export async function listAgencies(): Promise<{ count: number; results: AgencyDi
   return res.json();
 }
 
+export async function getAgencyPublicProfile(agencyId: string): Promise<AgencyDirectoryEntry> {
+  const res = await fetch(`${API_BASE_URL}/api/agencies/${agencyId}/profile/`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Agency profile fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export interface Testimonial {
   author_name: string;
   score: number;

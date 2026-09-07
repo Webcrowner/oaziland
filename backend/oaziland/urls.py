@@ -143,7 +143,7 @@ urlpatterns = [
 
     # Agent/agency profiles — public (anyone) and the private dashboard.
     path('api/agents/<uuid:user_id>/profile/', AgentPublicProfileView.as_view(), name='agent-public-profile'),
-    path('api/agencies/<uuid:agency_id>/profile/', AgencyPublicProfileView.as_view(), name='agency-public-profile'),
+    path('api/agencies/<int:agency_id>/profile/', AgencyPublicProfileView.as_view(), name='agency-public-profile'),
     path('api/agents/', AgentDirectoryView.as_view(), name='agent-directory'),
     path('api/agencies/', AgencyDirectoryView.as_view(), name='agency-directory'),
     path('api/my-agent-dashboard/', MyAgentDashboardView.as_view(), name='my-agent-dashboard'),

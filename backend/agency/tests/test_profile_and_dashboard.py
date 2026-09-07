@@ -133,3 +133,21 @@ def test_agency_directory_lists_every_agency(quarter):
     assert response.status_code == 200
     assert response.data["count"] == 1
     assert response.data["results"][0]["agency_name"] == "Directory Agency"
+
+
+@pytest.mark.django_db
+def test_agency_public_profile_endpoint_is_actually_reachable():
+    """A real bug this test would have caught immediately: the URL
+    pattern required a UUID (<uuid:agency_id>), but AgencyProfile has
+    no explicit id field, so Django gives it the default integer
+    AutoField — meaning this endpoint could never actually be reached
+    with a real AgencyProfile's real id. Found only by testing the
+    actual HTTP route end-to-end, not by reading the view in
+    isolation, since the view's own code was completely correct."""
+    agency_user = User.objects.create(username="agency_profile_reachable_user", phone="+237699444401")
+    agency = AgencyProfile.objects.create(user=agency_user, registration_number="RC-REACHABLE-001", agency_commission_percent=Decimal("15"))
+
+    response = APIClient().get(f"/api/agencies/{agency.id}/profile/")
+
+    assert response.status_code == 200
+    assert response.data["registration_number"] == "RC-REACHABLE-001"

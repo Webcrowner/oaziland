@@ -745,5 +745,16 @@
     "reason_MISLEADING_LISTING": "Annonce Trompeuse",
     "reason_USER_BEHAVIOR": "Comportement Inapproprié",
     "reason_OTHER": "Autre"
+  },
+  "AgencyProfilePage": {
+    "registrationLabel": "N° d'Enregistrement",
+    "ratingCount": "({count} évaluation)",
+    "ratingCountOther": "({count} évaluations)",
+    "noRatingsYet": "Aucune évaluation pour le moment",
+    "agentCount": "Agent",
+    "agentCountOther": "Agents",
+    "listingCount": "Annonce Active",
+    "listingCountOther": "Annonces Actives",
+    "viewListings": "Voir les Annonces"
   }
 }
