@@ -209,7 +209,19 @@
     "title": "Guest Houses",
     "subtitle": "Short-stay lodges across Cameroon, including coastal leisure spots.",
     "noGuestHousesYet": "No guest houses are listed yet.",
-    "coastalLeisure": "Coastal Leisure"
+    "coastalLeisure": "Coastal Leisure",
+    "amenity_PARKING": "Parking",
+    "amenity_BACKUP_GENERATOR": "Generator",
+    "amenity_BOREHOLE_WATER_TANK": "Water Tank",
+    "amenity_SECURITY_24_7": "24/7 Security",
+    "amenity_FENCED_COMPOUND": "Fenced",
+    "amenity_SWIMMING_POOL": "Pool",
+    "amenity_AIR_CONDITIONING": "A/C",
+    "amenity_FURNISHED": "Furnished",
+    "amenity_SOLAR_POWER": "Solar",
+    "amenity_CCTV": "CCTV",
+    "amenity_BALCONY_TERRACE": "Balcony",
+    "amenity_WIFI_READY": "WiFi"
   },
   "StudentHostelsPage": {
     "title": "Student Hostels",

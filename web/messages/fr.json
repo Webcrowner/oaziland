@@ -209,7 +209,19 @@
     "title": "Maisons d'Hôtes",
     "subtitle": "Des logements de courte durée à travers le Cameroun, y compris des sites balnéaires.",
     "noGuestHousesYet": "Aucune maison d'hôtes n'est encore répertoriée.",
-    "coastalLeisure": "Loisirs Balnéaires"
+    "coastalLeisure": "Loisirs Balnéaires",
+    "amenity_PARKING": "Parking",
+    "amenity_BACKUP_GENERATOR": "Générateur",
+    "amenity_BOREHOLE_WATER_TANK": "Réservoir d'Eau",
+    "amenity_SECURITY_24_7": "Sécurité 24/7",
+    "amenity_FENCED_COMPOUND": "Clôturé",
+    "amenity_SWIMMING_POOL": "Piscine",
+    "amenity_AIR_CONDITIONING": "Clim.",
+    "amenity_FURNISHED": "Meublé",
+    "amenity_SOLAR_POWER": "Solaire",
+    "amenity_CCTV": "Vidéosurveillance",
+    "amenity_BALCONY_TERRACE": "Balcon",
+    "amenity_WIFI_READY": "WiFi"
   },
   "StudentHostelsPage": {
     "title": "Résidences Étudiantes",

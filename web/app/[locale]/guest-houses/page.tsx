@@ -1,5 +1,9 @@
 import { getTranslations } from "next-intl/server";
 import { searchGuestHouses } from "@/lib/api";
+import PageHeader from "@/components/ui/PageHeader";
+import Card, { CardMedia, CardBody } from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
+import Badge from "@/components/ui/Badge";
 import type { Metadata } from "next";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -12,6 +16,13 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
   };
 }
 
+/**
+ * Guest Houses — brought onto the shared UI foundation, same pattern
+ * as Events. A real amenities badge row now shows here too — the
+ * data already existed on GuestHouseLodge (inherited from
+ * PropertyAsset, the same field property listings use) but was never
+ * exposed by this app's own serializer until this pass.
+ */
 export default async function GuestHousesPage() {
   const t = await getTranslations("GuestHousesPage");
   const tCard = await getTranslations("PropertyCard");
@@ -19,27 +30,31 @@ export default async function GuestHousesPage() {
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
-      <p className="text-gray-600 mb-6">{t("subtitle")}</p>
+      <PageHeader title={t("title")} subtitle={t("subtitle")} />
 
       {data.results.length === 0 ? (
-        <p className="text-gray-500">{t("noGuestHousesYet")}</p>
+        <EmptyState icon="🏡" title={t("noGuestHousesYet")} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {data.results.map((gh) => (
-            <div key={gh.id} className="border rounded-lg overflow-hidden bg-white transition-all duration-200 hover:shadow-lg hover:-translate-y-1">
-              <div className="h-40 bg-gray-200 flex items-center justify-center text-gray-600 text-sm">
-                {tCard("noPhotoYet")}
-              </div>
-              <div className="p-4">
-                <p className="text-sm text-gray-500 mb-2">{gh.quarter_name}</p>
-                {gh.is_coastal_leisure && (
-                  <span className="text-xs font-semibold uppercase text-white bg-[#1B2A4A] px-2 py-1 rounded">
-                    {t("coastalLeisure")}
-                  </span>
+            <Card key={gh.id}>
+              <CardMedia label={tCard("noPhotoYet")} />
+              <CardBody>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <p className="text-sm text-gray-500">📍 {gh.quarter_name}</p>
+                  {gh.is_coastal_leisure && <Badge variant="gold">{t("coastalLeisure")}</Badge>}
+                </div>
+                {gh.amenities.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {gh.amenities.slice(0, 4).map((a) => (
+                      <span key={a} className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded">
+                        {t(`amenity_${a}`)}
+                      </span>
+                    ))}
+                  </div>
                 )}
-              </div>
-            </div>
+              </CardBody>
+            </Card>
           ))}
         </div>
       )}

@@ -322,6 +322,7 @@ export interface GuestHouse {
   quarter: string;
   quarter_name: string;
   finish_level: string;
+  amenities: string[];
 }
 
 export async function searchGuestHouses(): Promise<PaginatedResponse<GuestHouse>> {
