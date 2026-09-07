@@ -1270,6 +1270,16 @@ export async function createMarketplaceListing(category: MarketplaceCategory, pa
   return data;
 }
 
+export async function addMarketplaceMedia(category: MarketplaceCategory, listingId: string, url: string, mediaType: "PHOTO" | "VIDEO", accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${listingId}/add-media/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach media");
+  return res.json();
+}
+
 export interface RideBookingItem {
   id: string;
   rider: string;

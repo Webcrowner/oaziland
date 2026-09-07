@@ -681,7 +681,9 @@
     "carsTitle": "Voitures",
     "carsSubtitle": "Véhicules à vendre ou à louer.",
     "listACar": "Publier une Voiture",
-    "noCarsYet": "Aucune voiture publiée pour le moment."
+    "noCarsYet": "Aucune voiture publiée pour le moment.",
+    "addPhotoOrVideo": "Ajouter une Photo ou Vidéo",
+    "mediaAttached": "{count} fichier(s) joint(s)"
   },
   "RidesPage": {
     "title": "Courses",

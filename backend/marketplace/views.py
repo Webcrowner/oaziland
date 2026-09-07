@@ -55,6 +55,41 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         owner_profile = _get_or_create_owner_profile(self.request.user)
         serializer.save(owner=owner_profile, lister_user=self.request.user, lister_role="OWNER")
 
+    @action(detail=True, methods=["post"], url_path="add-media")
+    def add_media(self, request, pk=None):
+        """The real gap this closes: MarketplaceMedia and the read-side
+        `media` field on every category serializer already existed,
+        but nothing ever let a real lister actually attach a photo or
+        video — the exact same class of gap already found and fixed
+        for property listings (ListingPhoto/add-photo). Takes a URL
+        already produced by /api/media/upload/, same two-step pattern
+        as property listings: upload the file, then attach the URL."""
+        from .models import MarketplaceMedia
+
+        listing = self.get_object()
+        if listing.lister_user_id != request.user.id:
+            return Response({"detail": "Only the listing's own lister can add media to it."}, status=status.HTTP_403_FORBIDDEN)
+        url = request.data.get("url")
+        if not url:
+            return Response({"detail": "url is required — upload the file to /api/media/upload/ first."}, status=status.HTTP_400_BAD_REQUEST)
+        media_type = request.data.get("media_type", "PHOTO")
+        order = listing.media.count()
+        media = MarketplaceMedia.objects.create(listing=listing, media_type=media_type, file_url=url, order=order)
+        return Response({"id": media.id, "media_type": media.media_type, "file_url": media.file_url, "order": media.order}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="remove-media")
+    def remove_media(self, request, pk=None):
+        from .models import MarketplaceMedia
+
+        listing = self.get_object()
+        if listing.lister_user_id != request.user.id:
+            return Response({"detail": "Only the listing's own lister can remove its media."}, status=status.HTTP_403_FORBIDDEN)
+        media_id = request.data.get("media_id")
+        deleted_count, _ = MarketplaceMedia.objects.filter(listing=listing, id=media_id).delete()
+        if deleted_count == 0:
+            return Response({"detail": "Media not found on this listing."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class WarehouseListingViewSet(BaseMarketplaceViewSet):
     serializer_class = WarehouseListingSerializer

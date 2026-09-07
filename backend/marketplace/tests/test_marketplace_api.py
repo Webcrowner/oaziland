@@ -284,3 +284,54 @@ def test_attaching_a_condition_requires_authentication():
         "target_content_type": "property.Listing", "target_id": "11111111-1111-1111-1111-111111111111", "structured_conditions": {},
     }, format="json")
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------
+# Marketplace media — a real gap this closes: MarketplaceMedia and the
+# read-side `media` field already existed on every category
+# serializer, but nothing ever let a lister actually attach a photo.
+# ---------------------------------------------------------------------
+@pytest.mark.django_db
+def test_adding_real_media_to_a_warehouse_listing(quarter):
+    user = User.objects.create(username="mp_media_user", phone="+237699888801")
+    client = _auth_client(user)
+    create_response = client.post("/api/warehouses/", {
+        "title": "Media Test Warehouse", "price_basis": "RENT_MONTHLY", "price_xaf": "300000", "quarter": str(quarter.id), "size_sqm": "400",
+    })
+    listing_id = create_response.data["id"]
+
+    response = client.post(f"/api/warehouses/{listing_id}/add-media/", {"url": "https://example.com/warehouse1.jpg", "media_type": "PHOTO"})
+
+    assert response.status_code == 201
+    detail = client.get(f"/api/warehouses/{listing_id}/")
+    assert len(detail.data["media"]) == 1
+
+
+@pytest.mark.django_db
+def test_only_the_listings_own_lister_can_add_media(quarter):
+    user = User.objects.create(username="mp_media_owner", phone="+237699888802")
+    stranger = User.objects.create(username="mp_media_stranger", phone="+237699888803")
+    create_response = _auth_client(user).post("/api/warehouses/", {
+        "title": "Media Perm Warehouse", "price_basis": "RENT_MONTHLY", "price_xaf": "300000", "quarter": str(quarter.id), "size_sqm": "400",
+    })
+    listing_id = create_response.data["id"]
+
+    response = _auth_client(stranger).post(f"/api/warehouses/{listing_id}/add-media/", {"url": "https://example.com/hijack.jpg"})
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_removing_media_from_a_listing(quarter):
+    user = User.objects.create(username="mp_media_remove_user", phone="+237699888804")
+    client = _auth_client(user)
+    create_response = client.post("/api/warehouses/", {
+        "title": "Media Remove Warehouse", "price_basis": "RENT_MONTHLY", "price_xaf": "300000", "quarter": str(quarter.id), "size_sqm": "400",
+    })
+    listing_id = create_response.data["id"]
+    add_response = client.post(f"/api/warehouses/{listing_id}/add-media/", {"url": "https://example.com/w1.jpg"})
+    media_id = add_response.data["id"]
+
+    remove_response = client.post(f"/api/warehouses/{listing_id}/remove-media/", {"media_id": media_id})
+
+    assert remove_response.status_code == 204

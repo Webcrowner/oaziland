@@ -1,12 +1,13 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { listMarketplaceListings, createMarketplaceListing, listQuarters, type CarListing, type Quarter } from "@/lib/api";
+import { listMarketplaceListings, createMarketplaceListing, addMarketplaceMedia, listQuarters, type CarListing, type Quarter, type MediaUploadResult } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Card, { CardMedia, CardBody } from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
+import MediaUploader from "@/components/MediaUploader";
 
 const PRICE_BASIS_LABELS: Record<string, string> = {
   SALE: "For Sale", RENT_NIGHTLY: "Rent / Night", RENT_WEEKLY: "Rent / Week", RENT_MONTHLY: "Rent / Month", RENT_ANNUAL: "Rent / Year",
@@ -15,8 +16,10 @@ const PRICE_BASIS_LABELS: Record<string, string> = {
 /**
  * Cars — the richest of the four marketplace categories, with a real
  * composed VehicleSpec written in the same request as the listing
- * itself, not a separate manual step. Built on the shared UI
- * foundation (PageHeader, Card, EmptyState, Badge, Button).
+ * itself, not a separate manual step. Now also with real photo
+ * upload and display, closing a gap found while continuing the
+ * redesign pass: MarketplaceMedia already existed but nothing ever
+ * let a lister actually attach one.
  */
 export default function CarsMarketplacePage() {
   const t = useTranslations("MarketplaceCategoryPage");
@@ -33,6 +36,7 @@ export default function CarsMarketplacePage() {
   const [model, setModel] = useState("");
   const [year, setYear] = useState("");
   const [mileage, setMileage] = useState("");
+  const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [errorText, setErrorText] = useState("");
 
@@ -57,12 +61,13 @@ export default function CarsMarketplacePage() {
     }
     setSubmitStatus("submitting");
     try {
-      await createMarketplaceListing("cars", {
+      const listing = await createMarketplaceListing("cars", {
         title, price_basis: priceBasis, price_xaf: price, quarter: quarterId || null,
         vehicle_spec: { make, model, year: Number(year), mileage_km: mileage ? Number(mileage) : null },
       }, token);
+      await Promise.all(media.map((m) => addMarketplaceMedia("cars", listing.id, m.url, m.media_type, token)));
       setShowForm(false);
-      setTitle(""); setPrice(""); setMake(""); setModel(""); setYear(""); setMileage("");
+      setTitle(""); setPrice(""); setMake(""); setModel(""); setYear(""); setMileage(""); setMedia([]);
       load();
     } catch {
       setErrorText(t("submitFailed"));
@@ -94,6 +99,10 @@ export default function CarsMarketplacePage() {
             <option value="">{t("chooseNeighborhood")}</option>
             {quarters.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
           </select>
+          <div className="md:col-span-2">
+            <MediaUploader folder="marketplace" onUploaded={(m) => setMedia((prev) => [...prev, m])} label={t("addPhotoOrVideo")} />
+            {media.length > 0 && <p className="text-xs text-gray-500 mt-1">{t("mediaAttached", { count: media.length })}</p>}
+          </div>
           {submitStatus === "error" && <p className="text-red-600 text-sm md:col-span-2">{errorText}</p>}
           <Button className="md:col-span-2" size="lg">{submitStatus === "submitting" ? t("submitting") : t("submitListing")}</Button>
         </form>
@@ -105,20 +114,27 @@ export default function CarsMarketplacePage() {
         <EmptyState icon="🚗" title={t("noCarsYet")} action={<Button variant="secondary" onClick={() => setShowForm(true)}>{t("listACar")}</Button>} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {listings.map((listing) => (
-            <Card key={listing.id}>
-              <CardMedia label={t("noPhotoYet")} />
-              <CardBody>
-                <p className="font-semibold text-[var(--navy)] mb-1">{listing.title}</p>
-                <p className="text-sm text-gray-500 mb-2">{listing.vehicle_spec.year} {listing.vehicle_spec.make} {listing.vehicle_spec.model}</p>
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge variant="gold">{PRICE_BASIS_LABELS[listing.price_basis]}</Badge>
-                  {listing.quarter_name && <Badge variant="neutral">{listing.quarter_name}</Badge>}
-                </div>
-                <p className="text-lg font-bold text-[var(--navy)]">{Number(listing.price_xaf).toLocaleString()} XAF</p>
-              </CardBody>
-            </Card>
-          ))}
+          {listings.map((listing) => {
+            const photo = listing.media.find((m) => m.media_type === "PHOTO");
+            return (
+              <Card key={listing.id}>
+                {photo ? (
+                  <div className="h-40 bg-gray-100"><img src={photo.file_url} alt="" className="w-full h-full object-cover" /></div>
+                ) : (
+                  <CardMedia label={t("noPhotoYet")} />
+                )}
+                <CardBody>
+                  <p className="font-semibold text-[var(--navy)] mb-1">{listing.title}</p>
+                  <p className="text-sm text-gray-500 mb-2">{listing.vehicle_spec.year} {listing.vehicle_spec.make} {listing.vehicle_spec.model}</p>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge variant="gold">{PRICE_BASIS_LABELS[listing.price_basis]}</Badge>
+                    {listing.quarter_name && <Badge variant="neutral">{listing.quarter_name}</Badge>}
+                  </div>
+                  <p className="text-lg font-bold text-[var(--navy)]">{Number(listing.price_xaf).toLocaleString()} XAF</p>
+                </CardBody>
+              </Card>
+            );
+          })}
         </div>
       )}
     </main>

@@ -681,7 +681,9 @@
     "carsTitle": "Cars",
     "carsSubtitle": "Vehicles for sale or rent.",
     "listACar": "List a Car",
-    "noCarsYet": "No cars listed yet."
+    "noCarsYet": "No cars listed yet.",
+    "addPhotoOrVideo": "Add Photo or Video",
+    "mediaAttached": "{count} file(s) attached"
   },
   "RidesPage": {
     "title": "Rides",
