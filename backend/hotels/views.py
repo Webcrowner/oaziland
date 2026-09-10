@@ -16,15 +16,16 @@ from drf_spectacular.utils import extend_schema
 from .models import Hotel, RoomType, Reservation
 from .serializers import HotelSerializer, HotelCreateSerializer, ReservationSerializer
 from .services import create_reservation
-from oaziland.permissions import IsVerifiedAndMfaEnabled
+from oaziland.permissions import IsVerifiedAndMfaEnabled, IsAdminRole
 
 
 class HotelViewSet(viewsets.ModelViewSet):
     """list is public and verified-only (matching how property listing
     search already works) PLUS the requester's own not-yet-verified
-    hotels — an owner needs to see their own listing while it's
-    awaiting review, not just once an admin has approved it. Detail
-    actions (photos) use an unscoped queryset with their own explicit
+    hotels, PLUS — for an admin — every hotel regardless of verified
+    status, so the admin console's own queue can reuse this same
+    endpoint rather than needing a separate one. Detail actions
+    (photos, verify) use an unscoped queryset with their own explicit
     checks, the same lesson already applied to marketplace/services
     this session — scoping them the same way as list would silently
     turn a deliberate 403 into an uninformative 404."""
@@ -35,8 +36,10 @@ class HotelViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return Hotel.objects.none()
         if self.action == "list":
-            from django.db.models import Q
             user = self.request.user
+            if user.is_authenticated and hasattr(user, "admin_profile"):
+                return Hotel.objects.all().prefetch_related("room_types").order_by("-created_at")
+            from django.db.models import Q
             base = Q(verified=True)
             if user.is_authenticated:
                 base |= Q(owner=user)
@@ -87,6 +90,19 @@ class HotelViewSet(viewsets.ModelViewSet):
         if deleted_count == 0:
             return Response({"detail": "Photo not found on this hotel."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdminRole])
+    def verify(self, request, pk=None):
+        """The real gap this closes: Hotel.verified defaults to False
+        on real creation (added this session), and nothing anywhere
+        could ever flip it back to True — a real hotel owner's
+        listing would have stayed permanently invisible to the public.
+        Admin-only, matching the same moderation posture already used
+        for approving a property listing."""
+        hotel = self.get_object()
+        hotel.verified = True
+        hotel.save(update_fields=["verified"])
+        return Response(HotelSerializer(hotel).data)
 
 
 class ReservationViewSet(viewsets.ModelViewSet):

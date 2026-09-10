@@ -546,7 +546,15 @@
     "notAdmin": "Ce compte n'a pas d'accès administrateur.",
     "signInRequired": "Connectez-vous pour accéder à la console d'administration",
     "submit": "Soumettre",
-    "actionFailed": "Cette action a échoué. Veuillez réessayer."
+    "actionFailed": "Cette action a échoué. Veuillez réessayer.",
+    "tabListings": "Annonces en Attente",
+    "pendingHotels": "Hôtels en Attente",
+    "pendingVenues": "Salles en Attente",
+    "verify": "Vérifier",
+    "roomsAvailable": "{count} type de chambre",
+    "roomsAvailableOther": "{count} types de chambres",
+    "spacesAvailable": "{count} espace",
+    "spacesAvailableOther": "{count} espaces"
   },
   "FavoritesPage": {
     "title": "Annonces Enregistrées",

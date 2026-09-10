@@ -90,3 +90,53 @@ def test_only_the_venues_own_owner_can_add_a_photo(quarter):
     response = _auth_client(stranger).post(f"/api/venues/{venue_id}/add-photo/", {"url": "https://example.com/hijack.jpg"})
 
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------
+# Real venue verification — the same real gap found for Hotel.
+# ---------------------------------------------------------------------
+@pytest.mark.django_db
+def test_an_admin_can_verify_a_real_venue(quarter):
+    from identity.models import AdminProfile
+
+    owner = User.objects.create(username="venue_verify_owner", phone="+237699777707")
+    admin_user = User.objects.create(username="venue_verify_admin", phone="+237699777708")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    create_response = _auth_client(owner).post("/api/venues/", {"quarter": str(quarter.id), "spaces": [{"space_name": "Hall C"}]}, format="json")
+    venue_id = create_response.data["id"]
+
+    response = _auth_client(admin_user).post(f"/api/venues/{venue_id}/verify/")
+
+    assert response.status_code == 200
+    assert response.data["verified"] is True
+
+    public_view = APIClient().get("/api/venues/")
+    assert public_view.data["count"] == 1
+
+
+@pytest.mark.django_db
+def test_only_an_admin_can_verify_a_venue(quarter):
+    owner = User.objects.create(username="venue_verify_perm_owner", phone="+237699777709")
+    stranger = User.objects.create(username="venue_verify_perm_stranger", phone="+237699777710")
+    create_response = _auth_client(owner).post("/api/venues/", {"quarter": str(quarter.id), "spaces": [{"space_name": "Hall D"}]}, format="json")
+    venue_id = create_response.data["id"]
+
+    response = _auth_client(stranger).post(f"/api/venues/{venue_id}/verify/")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_an_admin_sees_pending_venues_in_the_real_list_endpoint(quarter):
+    from identity.models import AdminProfile
+
+    owner = User.objects.create(username="venue_admin_queue_owner", phone="+237699777711")
+    admin_user = User.objects.create(username="venue_admin_queue_admin", phone="+237699777712")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    _auth_client(owner).post("/api/venues/", {"quarter": str(quarter.id), "spaces": [{"space_name": "Hall E"}]}, format="json")
+
+    admin_view = _auth_client(admin_user).get("/api/venues/")
+    stranger_view = APIClient().get("/api/venues/")
+
+    assert admin_view.data["count"] == 1
+    assert stranger_view.data["count"] == 0

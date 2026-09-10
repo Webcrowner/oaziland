@@ -6,10 +6,12 @@ import {
   getAdminConsoleSummary, listAdminVerificationRequests, approveVerificationRequest, rejectVerificationRequest,
   listAdminContentReports, resolveContentReport,
   listAdminDisputeCases, respondToDispute, resolveDispute,
+  listHotelsForAdmin, verifyHotel, listVenuesForAdmin, verifyVenue,
   type AdminConsoleSummary, type AdminVerificationRequest, type AdminContentReport, type AdminDisputeCase,
+  type Hotel, type Venue,
 } from "@/lib/api";
 
-type Tab = "summary" | "verifications" | "reports" | "disputes";
+type Tab = "summary" | "verifications" | "reports" | "disputes" | "listings";
 
 /**
  * The real Admin Console — every queue an admin actually works
@@ -27,6 +29,8 @@ export default function AdminConsolePage() {
   const [verifications, setVerifications] = useState<AdminVerificationRequest[]>([]);
   const [reports, setReports] = useState<AdminContentReport[]>([]);
   const [disputes, setDisputes] = useState<AdminDisputeCase[]>([]);
+  const [pendingHotels, setPendingHotels] = useState<Hotel[]>([]);
+  const [pendingVenues, setPendingVenues] = useState<Venue[]>([]);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
 
@@ -40,12 +44,16 @@ export default function AdminConsolePage() {
       listAdminVerificationRequests(token),
       listAdminContentReports(token),
       listAdminDisputeCases(token),
+      listHotelsForAdmin(token),
+      listVenuesForAdmin(token),
     ])
-      .then(([summaryData, verificationsData, reportsData, disputesData]) => {
+      .then(([summaryData, verificationsData, reportsData, disputesData, hotelsData, venuesData]) => {
         setSummary(summaryData);
         setVerifications(verificationsData.results);
         setReports(reportsData.results);
         setDisputes(disputesData.results);
+        setPendingHotels(hotelsData.results.filter((h) => !h.verified));
+        setPendingVenues(venuesData.results.filter((v) => !v.verified));
         setStatus("ready");
       })
       .catch(() => setStatus("notAdmin"));
@@ -110,6 +118,26 @@ export default function AdminConsolePage() {
     loadAll();
   }
 
+  async function handleVerifyHotel(id: string) {
+    if (!token) return;
+    const res = await verifyHotel(id, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
+    loadAll();
+  }
+
+  async function handleVerifyVenue(id: string) {
+    if (!token) return;
+    const res = await verifyVenue(id, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
+    loadAll();
+  }
+
   if (status === "signedOut") {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
@@ -134,6 +162,7 @@ export default function AdminConsolePage() {
     { key: "verifications", labelKey: "tabVerifications" },
     { key: "reports", labelKey: "tabReports" },
     { key: "disputes", labelKey: "tabDisputes" },
+    { key: "listings", labelKey: "tabListings" },
   ];
 
   return (
@@ -151,6 +180,7 @@ export default function AdminConsolePage() {
             {tabItem.key === "verifications" && verifications.length > 0 && ` (${verifications.length})`}
             {tabItem.key === "reports" && reports.length > 0 && ` (${reports.length})`}
             {tabItem.key === "disputes" && disputes.length > 0 && ` (${disputes.length})`}
+            {tabItem.key === "listings" && (pendingHotels.length + pendingVenues.length) > 0 && ` (${pendingHotels.length + pendingVenues.length})`}
           </button>
         ))}
       </div>
@@ -233,6 +263,52 @@ export default function AdminConsolePage() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {tab === "listings" && (
+        <div className="flex flex-col gap-6">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">{t("pendingHotels")}</h2>
+            {pendingHotels.length === 0 ? (
+              <p className="text-gray-500">{t("noItems")}</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {pendingHotels.map((hotel) => (
+                  <div key={hotel.id} className="border rounded-lg p-4 bg-white flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                      <p className="font-semibold text-[var(--navy)] text-sm">{hotel.quarter_name}</p>
+                      <p className="text-xs text-gray-500">
+                        {hotel.room_types.length === 1 ? t("roomsAvailable", { count: hotel.room_types.length }) : t("roomsAvailableOther", { count: hotel.room_types.length })}
+                      </p>
+                    </div>
+                    <button onClick={() => handleVerifyHotel(hotel.id)} className="bg-green-600 text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("verify")}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">{t("pendingVenues")}</h2>
+            {pendingVenues.length === 0 ? (
+              <p className="text-gray-500">{t("noItems")}</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {pendingVenues.map((venue) => (
+                  <div key={venue.id} className="border rounded-lg p-4 bg-white flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                      <p className="font-semibold text-[var(--navy)] text-sm">{venue.quarter_name}</p>
+                      <p className="text-xs text-gray-500">
+                        {venue.spaces.length === 1 ? t("spacesAvailable", { count: venue.spaces.length }) : t("spacesAvailableOther", { count: venue.spaces.length })}
+                      </p>
+                    </div>
+                    <button onClick={() => handleVerifyVenue(venue.id)} className="bg-green-600 text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("verify")}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </main>

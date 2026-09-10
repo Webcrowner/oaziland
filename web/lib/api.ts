@@ -279,6 +279,20 @@ export async function searchHotels(): Promise<PaginatedResponse<Hotel>> {
   return res.json();
 }
 
+export async function verifyHotel(hotelId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/${hotelId}/verify/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return res;
+}
+
+export async function listHotelsForAdmin(accessToken: string): Promise<PaginatedResponse<Hotel>> {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error(`Hotel fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export async function createHotel(
   payload: { quarter: string; star_rating?: number; room_types: { category: string; capacity: number; base_rate_xaf: string }[] },
   accessToken: string
@@ -323,6 +337,20 @@ export interface Venue {
 export async function searchVenues(): Promise<PaginatedResponse<Venue>> {
   const res = await fetch(`${API_BASE_URL}/api/venues/`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Venue search failed: ${res.status}`);
+  return res.json();
+}
+
+export async function verifyVenue(venueId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/venues/${venueId}/verify/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return res;
+}
+
+export async function listVenuesForAdmin(accessToken: string): Promise<PaginatedResponse<Venue>> {
+  const res = await fetch(`${API_BASE_URL}/api/venues/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error(`Venue fetch failed: ${res.status}`);
   return res.json();
 }
 

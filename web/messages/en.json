@@ -546,7 +546,15 @@
     "notAdmin": "This account does not have admin access.",
     "signInRequired": "Sign in to access the admin console",
     "submit": "Submit",
-    "actionFailed": "That action failed. Please try again."
+    "actionFailed": "That action failed. Please try again.",
+    "tabListings": "Pending Listings",
+    "pendingHotels": "Pending Hotels",
+    "pendingVenues": "Pending Venues",
+    "verify": "Verify",
+    "roomsAvailable": "{count} room type",
+    "roomsAvailableOther": "{count} room types",
+    "spacesAvailable": "{count} space",
+    "spacesAvailableOther": "{count} spaces"
   },
   "FavoritesPage": {
     "title": "Saved Listings",

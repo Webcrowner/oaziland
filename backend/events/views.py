@@ -13,14 +13,15 @@ from drf_spectacular.utils import extend_schema
 from .models import Venue, VenueSpace, EventBooking
 from .serializers import VenueSerializer, VenueCreateSerializer, EventBookingSerializer
 from .services import create_event_booking, VenueUnavailableError
-from oaziland.permissions import IsVerifiedAndMfaEnabled
+from oaziland.permissions import IsVerifiedAndMfaEnabled, IsAdminRole
 
 
 class VenueViewSet(viewsets.ModelViewSet):
     """Same real visibility pattern as HotelViewSet: list is public
     and verified-only PLUS the requester's own not-yet-verified
-    venues. Detail actions (photos) use an unscoped queryset with
-    their own explicit checks, the same lesson already applied
+    venues, PLUS — for an admin — every venue regardless of verified
+    status. Detail actions (photos, verify) use an unscoped queryset
+    with their own explicit checks, the same lesson already applied
     repeatedly this session."""
     serializer_class = VenueSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -29,8 +30,10 @@ class VenueViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return Venue.objects.none()
         if self.action == "list":
-            from django.db.models import Q
             user = self.request.user
+            if user.is_authenticated and hasattr(user, "admin_profile"):
+                return Venue.objects.all().prefetch_related("spaces").order_by("-created_at")
+            from django.db.models import Q
             base = Q(verified=True)
             if user.is_authenticated:
                 base |= Q(owner=user)
@@ -79,6 +82,18 @@ class VenueViewSet(viewsets.ModelViewSet):
         if deleted_count == 0:
             return Response({"detail": "Photo not found on this venue."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdminRole])
+    def verify(self, request, pk=None):
+        """The real gap this closes: Venue.verified defaults to False
+        on real creation (added this session), and nothing anywhere
+        could ever flip it back to True. Admin-only, matching the
+        same moderation posture already used for approving a property
+        listing."""
+        venue = self.get_object()
+        venue.verified = True
+        venue.save(update_fields=["verified"])
+        return Response(VenueSerializer(venue).data)
 
 
 class EventBookingViewSet(viewsets.ModelViewSet):
