@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { submitContactMessage } from "@/lib/api";
+import Button from "@/components/ui/Button";
 
 /**
  * A real, working contact form — posts to the actual public
@@ -27,7 +28,7 @@ export default function ContactPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-12">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-2">{t("title")}</h1>
+      <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-2">{t("title")}</h1>
       <p className="text-gray-600 mb-8">{t("subtitle")}</p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -51,13 +52,11 @@ export default function ContactPage() {
           {status === "success" && <p className="text-green-700 text-sm">{t("success")}</p>}
           {status === "error" && <p className="text-red-600 text-sm">{t("error")}</p>}
 
-          <button type="submit" disabled={status === "sending"} className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
-            {status === "sending" ? t("sending") : t("send")}
-          </button>
+          <Button size="lg" disabled={status === "sending"}>{status === "sending" ? t("sending") : t("send")}</Button>
         </form>
 
         <div>
-          <h2 className="text-sm font-semibold text-[#1B2A4A] mb-2">{t("addressTitle")}</h2>
+          <h2 className="text-sm font-semibold text-[var(--navy)] mb-2">{t("addressTitle")}</h2>
           <p className="text-sm text-gray-600">{t("address")}</p>
         </div>
       </div>

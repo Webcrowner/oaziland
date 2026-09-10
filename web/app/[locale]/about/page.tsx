@@ -16,13 +16,13 @@ export default async function AboutPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-12">
-      <h1 className="text-3xl font-bold text-[#1B2A4A] mb-6">{t("title")}</h1>
+      <h1 className="font-[family-name:var(--font-display)] text-3xl text-[var(--navy)] mb-6">{t("title")}</h1>
       <p className="text-gray-700 mb-8 text-lg">{t("intro")}</p>
 
-      <h2 className="text-xl font-semibold text-[#1B2A4A] mb-2">{t("missionTitle")}</h2>
+      <h2 className="text-xl font-semibold text-[var(--navy)] mb-2">{t("missionTitle")}</h2>
       <p className="text-gray-700 mb-8">{t("missionText")}</p>
 
-      <h2 className="text-xl font-semibold text-[#1B2A4A] mb-2">{t("basedTitle")}</h2>
+      <h2 className="text-xl font-semibold text-[var(--navy)] mb-2">{t("basedTitle")}</h2>
       <p className="text-gray-700">{t("basedText")}</p>
     </main>
   );

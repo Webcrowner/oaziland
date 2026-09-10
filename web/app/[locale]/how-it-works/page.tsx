@@ -53,7 +53,7 @@ export default function GuidedTourPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
+      <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-1">{t("title")}</h1>
       <p className="text-gray-600 mb-6">{t("subtitle")}</p>
 
       <div className="flex flex-wrap gap-2 mb-8 border-b pb-4">
@@ -62,7 +62,7 @@ export default function GuidedTourPage() {
             key={tab.key}
             onClick={() => setPersona(tab.key)}
             className={`px-4 py-2 rounded text-sm font-semibold transition-colors ${
-              persona === tab.key ? "bg-[#1B2A4A] text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              persona === tab.key ? "bg-[var(--navy)] text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
             }`}
           >
             {t(tab.labelKey)}
@@ -73,11 +73,11 @@ export default function GuidedTourPage() {
       <div className="flex flex-col gap-6">
         {stepsByPersona[persona].map((step, index) => (
           <div key={step.titleKey} className="flex gap-4">
-            <div className="w-8 h-8 rounded-full bg-[#C9A227] text-[#1B2A4A] font-bold flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-[var(--gold)] text-[var(--navy)] font-bold flex items-center justify-center flex-shrink-0">
               {index + 1}
             </div>
             <div>
-              <h2 className="font-semibold text-[#1B2A4A] mb-1">{t(step.titleKey)}</h2>
+              <h2 className="font-semibold text-[var(--navy)] mb-1">{t(step.titleKey)}</h2>
               <p className="text-gray-600 text-sm">{t(step.textKey)}</p>
             </div>
           </div>
@@ -85,7 +85,7 @@ export default function GuidedTourPage() {
       </div>
 
       {persona === "student" && (
-        <Link href="/referrals" className="inline-block mt-8 bg-[#C9A227] text-[#1B2A4A] font-semibold px-6 py-3 rounded hover:opacity-90">
+        <Link href="/referrals" className="inline-block mt-8 bg-[var(--gold)] text-[var(--navy)] font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("referralCta")}
         </Link>
       )}
