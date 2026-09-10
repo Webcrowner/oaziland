@@ -1078,3 +1078,130 @@ export async function listTestimonials(): Promise<PaginatedResponse<Testimonial>
   if (!res.ok) throw new Error(`Testimonials fetch failed: ${res.status}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Trainings — mobile parity with the web app's /trainings page.
+// ---------------------------------------------------------------------------
+export interface TrainingProgram {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  provider_name: string;
+  price_xaf: string | null;
+  issues_certification: boolean;
+}
+
+export async function listTrainings(): Promise<PaginatedResponse<TrainingProgram>> {
+  const res = await fetch(`${API_BASE_URL}/api/trainings/`);
+  if (!res.ok) throw new Error(`Training fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function enrollInTraining(programId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/trainings/${programId}/enroll/`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// Services — mobile parity with the web app's /services partner
+// directory page.
+// ---------------------------------------------------------------------------
+export interface ServiceOffering {
+  id: string;
+  name: string;
+  description: string;
+  price_hint_xaf: string | null;
+}
+
+export interface ServiceCategory {
+  id: string;
+  name: string;
+  offerings: ServiceOffering[];
+}
+
+export async function listServiceCategories(): Promise<PaginatedResponse<ServiceCategory>> {
+  const res = await fetch(`${API_BASE_URL}/api/service-categories/`);
+  if (!res.ok) throw new Error(`Service catalogue fetch failed: ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Creator Premium — mobile parity with the web app's /premium page.
+// ---------------------------------------------------------------------------
+export async function getMyCreatorPremiumStatus(): Promise<{ is_premium: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/my-creator-premium/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch premium status");
+  return res.json();
+}
+
+export async function subscribeCreatorPremium(phoneNumber: string) {
+  const res = await fetch(`${API_BASE_URL}/api/my-creator-premium/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ phone_number: phoneNumber }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Subscription failed");
+  return data;
+}
+
+export async function cancelCreatorPremium() {
+  const res = await fetch(`${API_BASE_URL}/api/my-creator-premium/`, { method: "DELETE", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not cancel");
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// Privacy Settings — mobile parity with the web app's
+// /privacy-settings page.
+// ---------------------------------------------------------------------------
+export interface PresenceSettings {
+  show_online_status: boolean;
+  show_typing_indicator: boolean;
+}
+
+export async function getMyPresenceSettings(): Promise<PresenceSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/my-presence-settings/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch settings");
+  return res.json();
+}
+
+export async function updateMyPresenceSettings(payload: Partial<PresenceSettings>) {
+  const res = await fetch(`${API_BASE_URL}/api/my-presence-settings/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Could not update settings");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Referrals — mobile parity with the web app's /referrals page.
+// ---------------------------------------------------------------------------
+export async function getMyReferralCode(): Promise<{ referral_code: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/my-referral-code/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch referral code");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Technician Dashboard — mobile parity with the web app's
+// /technician-dashboard page.
+// ---------------------------------------------------------------------------
+export interface TechnicianDashboardData {
+  active_job_count: number;
+  completed_job_count: number;
+  wallet_balance_xaf: string;
+  jobs_trend: { percent_change: number | null };
+}
+
+export async function getMyTechnicianDashboard(): Promise<TechnicianDashboardData> {
+  const res = await fetch(`${API_BASE_URL}/api/my-technician-dashboard/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch dashboard");
+  return res.json();
+}

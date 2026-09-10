@@ -104,9 +104,15 @@ export default function HomeScreen({ navigation }: Props) {
           { label: "Agencies", screen: "Agencies" as const },
           { label: "Careers", screen: "Careers" as const },
           { label: "Testimonials", screen: "Testimonials" as const },
+          { label: "Trainings", screen: "Trainings" as const },
+          { label: "Services", screen: "Services" as const },
+          { label: "Premium", screen: "Premium" as const },
+          { label: "Privacy Settings", screen: "PrivacySettings" as const },
+          { label: "Referrals", screen: "Referrals" as const },
+          { label: "Technician Dashboard", screen: "TechnicianDashboard" as const },
           { label: "Admin Console", screen: "AdminConsole" as const },
         ]).map((category) => (
-          <TouchableOpacity key={category.screen} style={styles.exploreCard} onPress={() => navigation.navigate(category.screen)}>
+          <TouchableOpacity key={category.screen} style={styles.exploreCard} onPress={() => navigation.navigate(category.screen as never)}>
             <Text style={styles.exploreCardText}>{category.label}</Text>
           </TouchableOpacity>
         ))}

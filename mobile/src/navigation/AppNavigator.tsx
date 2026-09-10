@@ -37,6 +37,12 @@ import AgenciesScreen from "../screens/AgenciesScreen";
 import AgencyProfileScreen from "../screens/AgencyProfileScreen";
 import CareersScreen from "../screens/CareersScreen";
 import TestimonialsScreen from "../screens/TestimonialsScreen";
+import TrainingsScreen from "../screens/TrainingsScreen";
+import ServicesScreen from "../screens/ServicesScreen";
+import PremiumScreen from "../screens/PremiumScreen";
+import PrivacySettingsScreen from "../screens/PrivacySettingsScreen";
+import ReferralsScreen from "../screens/ReferralsScreen";
+import TechnicianDashboardScreen from "../screens/TechnicianDashboardScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -75,6 +81,12 @@ export type RootStackParamList = {
   AgencyProfile: { agencyId: string };
   Careers: undefined;
   Testimonials: undefined;
+  Trainings: undefined;
+  Services: undefined;
+  Premium: undefined;
+  PrivacySettings: undefined;
+  Referrals: undefined;
+  TechnicianDashboard: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -132,6 +144,12 @@ export default function AppNavigator() {
         <Stack.Screen name="AgencyProfile" component={AgencyProfileScreen} options={{ title: "Agency Profile" }} />
         <Stack.Screen name="Careers" component={CareersScreen} options={{ title: "Careers" }} />
         <Stack.Screen name="Testimonials" component={TestimonialsScreen} options={{ title: "Testimonials" }} />
+        <Stack.Screen name="Trainings" component={TrainingsScreen} options={{ title: "Trainings" }} />
+        <Stack.Screen name="Services" component={ServicesScreen} options={{ title: "Services" }} />
+        <Stack.Screen name="Premium" component={PremiumScreen} options={{ title: "Premium" }} />
+        <Stack.Screen name="PrivacySettings" component={PrivacySettingsScreen} options={{ title: "Privacy Settings" }} />
+        <Stack.Screen name="Referrals" component={ReferralsScreen} options={{ title: "Referrals" }} />
+        <Stack.Screen name="TechnicianDashboard" component={TechnicianDashboardScreen} options={{ title: "Technician Dashboard" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
