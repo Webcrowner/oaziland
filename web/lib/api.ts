@@ -1421,10 +1421,15 @@ export interface RideBookingItem {
   rider_name: string;
   driver: string | null;
   driver_name: string | null;
+  vehicle: number | null;
   pickup_description: string;
   dropoff_description: string;
   fare_estimate_xaf: string;
   status: string;
+  ride_category: string;
+  transport_type: string;
+  has_luggage: boolean;
+  cargo_description: string;
   requested_at: string;
   completed_at: string | null;
 }
@@ -1435,7 +1440,13 @@ export async function listMyRides(accessToken: string): Promise<{ count: number;
   return res.json();
 }
 
-export async function requestRide(payload: { pickup_description: string; dropoff_description: string; distance_km: string }, accessToken: string) {
+export async function requestRide(
+  payload: {
+    pickup_description: string; dropoff_description: string; distance_km: string;
+    ride_category?: string; transport_type?: string; has_luggage?: boolean; cargo_description?: string;
+  },
+  accessToken: string
+) {
   const res = await fetch(`${API_BASE_URL}/api/rides/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
@@ -1446,10 +1457,71 @@ export async function requestRide(payload: { pickup_description: string; dropoff
   return data;
 }
 
-export async function acceptRide(rideId: string, accessToken: string) {
-  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/accept/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+export async function acceptRide(rideId: string, vehicleId: number, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/accept/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ vehicle_id: vehicleId }),
+  });
   if (!res.ok) throw new Error((await res.json()).detail || "Could not accept ride");
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// OaziGo — real driver and vehicle registration. The real gap this
+// closes: previously any signed-in user could accept a ride with no
+// registration or vetting at all.
+// ---------------------------------------------------------------------------
+export interface DriverProfileItem {
+  id: number;
+  license_number: string;
+  is_verified: boolean;
+}
+
+export async function getMyDriverProfile(accessToken: string): Promise<DriverProfileItem | null> {
+  const res = await fetch(`${API_BASE_URL}/api/my-driver-profile/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Could not fetch driver profile");
+  return res.json();
+}
+
+export async function registerAsDriver(licenseNumber: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/my-driver-profile/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ license_number: licenseNumber }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not register as a driver");
+  return data;
+}
+
+export interface VehicleItem {
+  id: number;
+  vehicle_category: string;
+  make: string;
+  model: string;
+  plate_number: string;
+}
+
+export async function listMyVehicles(accessToken: string): Promise<{ count: number; results: VehicleItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/my-vehicles/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch vehicles");
+  return res.json();
+}
+
+export async function registerVehicle(
+  payload: { vehicle_category: string; make: string; model: string; plate_number: string },
+  accessToken: string
+) {
+  const res = await fetch(`${API_BASE_URL}/api/my-vehicles/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not register vehicle");
+  return data;
 }
 
 export async function startRide(rideId: string, accessToken: string) {

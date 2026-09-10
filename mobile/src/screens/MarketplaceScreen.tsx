@@ -32,10 +32,10 @@ export default function MarketplaceScreen({ navigation }: Props) {
         </TouchableOpacity>
       ))}
 
-      <TouchableOpacity style={styles.ridesCard} onPress={() => navigation.navigate("Rides")}>
-        <Text style={styles.ridesTitle}>Need a ride?</Text>
-        <Text style={styles.ridesDesc}>Real rides, with a transparent fare and secure Mobile Money payment.</Text>
-        <Text style={styles.ridesCta}>Book a Ride →</Text>
+      <TouchableOpacity style={styles.ridesCard} onPress={() => navigation.navigate("OaziGo")}>
+        <Text style={styles.ridesTitle}>OaziGo</Text>
+        <Text style={styles.ridesDesc}>Real rides for people, or moving building materials between properties — with a transparent fare and secure Mobile Money payment.</Text>
+        <Text style={styles.ridesCta}>Open OaziGo →</Text>
       </TouchableOpacity>
     </ScrollView>
   );

@@ -28,7 +28,7 @@ import WarehousesScreen from "../screens/WarehousesScreen";
 import StoresScreen from "../screens/StoresScreen";
 import BusinessesScreen from "../screens/BusinessesScreen";
 import CarsScreen from "../screens/CarsScreen";
-import RidesScreen from "../screens/RidesScreen";
+import OaziGoScreen from "../screens/OaziGoScreen";
 import TasklnServiceScreen from "../screens/TasklnServiceScreen";
 import PropertyManagementScreen from "../screens/PropertyManagementScreen";
 import AgentsScreen from "../screens/AgentsScreen";
@@ -75,7 +75,7 @@ export type RootStackParamList = {
   Stores: undefined;
   Businesses: undefined;
   Cars: undefined;
-  Rides: undefined;
+  OaziGo: undefined;
   TasklnService: undefined;
   PropertyManagement: undefined;
   Agents: undefined;
@@ -141,7 +141,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Stores" component={StoresScreen} options={{ title: "Stores" }} />
         <Stack.Screen name="Businesses" component={BusinessesScreen} options={{ title: "Businesses" }} />
         <Stack.Screen name="Cars" component={CarsScreen} options={{ title: "Cars" }} />
-        <Stack.Screen name="Rides" component={RidesScreen} options={{ title: "Rides" }} />
+        <Stack.Screen name="OaziGo" component={OaziGoScreen} options={{ title: "OaziGo" }} />
         <Stack.Screen name="TasklnService" component={TasklnServiceScreen} options={{ title: "Taskln Service" }} />
         <Stack.Screen name="PropertyManagement" component={PropertyManagementScreen} options={{ title: "Property Management" }} />
         <Stack.Screen name="Agents" component={AgentsScreen} options={{ title: "Agents" }} />

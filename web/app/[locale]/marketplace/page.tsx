@@ -52,16 +52,16 @@ export default async function MarketplacePage() {
         ))}
       </div>
 
-      {/* Rides gets its own distinct visual treatment — it's a
+      {/* OaziGo gets its own distinct visual treatment — it's a
           transaction, not a listing category, and deserves to read
           differently rather than sitting in the same grid. */}
       <div className="rounded-2xl bg-[var(--navy)] text-white p-8 flex flex-col md:flex-row items-center justify-between gap-6">
         <div>
-          <h2 className="font-[family-name:var(--font-display)] text-2xl mb-2">{t("ridesTitle")}</h2>
-          <p className="text-gray-300 max-w-md">{t("ridesDesc")}</p>
+          <h2 className="font-[family-name:var(--font-display)] text-2xl mb-2">{t("oaziGoTitle")}</h2>
+          <p className="text-gray-300 max-w-md">{t("oaziGoDesc")}</p>
         </div>
-        <Link href="/marketplace/rides" className="bg-[var(--gold)] text-[var(--navy)] font-semibold px-6 py-3 rounded-lg whitespace-nowrap hover:brightness-105 transition-all">
-          {t("bookARide")}
+        <Link href="/oazigo" className="bg-[var(--gold)] text-[var(--navy)] font-semibold px-6 py-3 rounded-lg whitespace-nowrap hover:brightness-105 transition-all">
+          {t("openOaziGo")}
         </Link>
       </div>
     </main>
