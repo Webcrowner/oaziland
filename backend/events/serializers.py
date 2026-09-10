@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from property.models import PropertyAssetPhoto
 from .models import Venue, VenueSpace, EventBooking
 
 
@@ -8,13 +9,33 @@ class VenueSpaceSerializer(serializers.ModelSerializer):
         fields = ["id", "space_name", "capacity_theatre", "capacity_banquet", "capacity_cocktail", "capacity_classroom", "base_price_per_hour_xaf", "catering_policy"]
 
 
+class PropertyAssetPhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyAssetPhoto
+        fields = ["id", "url", "media_type", "is_primary", "uploaded_at"]
+
+
 class VenueSerializer(serializers.ModelSerializer):
     spaces = VenueSpaceSerializer(many=True, read_only=True)
     quarter_name = serializers.CharField(source="quarter.name", read_only=True)
+    photos = serializers.SerializerMethodField()
+
+    def get_photos(self, venue) -> list[dict]:
+        return PropertyAssetPhotoSerializer(venue.asset_photos.all(), many=True).data
 
     class Meta:
         model = Venue
-        fields = ["id", "verified", "quarter", "quarter_name", "spaces"]
+        fields = ["id", "verified", "quarter", "quarter_name", "spaces", "photos"]
+        read_only_fields = ["verified"]
+
+
+class VenueCreateSerializer(serializers.Serializer):
+    """Write-only input for real venue creation — the actual gap this
+    closes: VenueViewSet was ReadOnlyModelViewSet, meaning no real
+    venue owner could ever list their own property. Requires at least
+    one real bookable space."""
+    quarter = serializers.UUIDField()
+    spaces = serializers.ListField(child=serializers.DictField(), min_length=1)
 
 
 class EventBookingSerializer(serializers.ModelSerializer):

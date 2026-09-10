@@ -581,3 +581,30 @@ class ListingPhoto(models.Model):
     class Meta:
         db_table = "listing_photos"
         ordering = ["-is_primary", "uploaded_at"]
+
+
+class PropertyAssetPhoto(models.Model):
+    """The real gap this closes: Hotel, Venue, GuestHouseLodge, and
+    StudentHostel are all PropertyAsset subclasses (multi-table
+    inheritance, same pattern as House/Land/Shop) but never had a real
+    creation path at all — HotelViewSet/VenueViewSet/GuestHouseLodge
+    ViewSet/StudentHostelViewSet were all ReadOnlyModelViewSet. Even
+    once real creation exists, none of these four go through Listing
+    the way House/Land/Shop do (a hotel is booked by room-night, not
+    listed for rent/sale), so ListingPhoto (FK to Listing) genuinely
+    doesn't apply here — this is a parallel, PropertyAsset-level photo
+    model instead, reusable across all four in one place rather than
+    four separate near-identical models."""
+    class MediaType(models.TextChoices):
+        PHOTO = "PHOTO", "Photo"
+        VIDEO = "VIDEO", "Video"
+
+    property_asset = models.ForeignKey(PropertyAsset, on_delete=models.CASCADE, related_name="asset_photos")
+    url = models.URLField()
+    media_type = models.CharField(max_length=10, choices=MediaType.choices, default=MediaType.PHOTO)
+    is_primary = models.BooleanField(default=False)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "property_asset_photos"
+        ordering = ["-is_primary", "uploaded_at"]
