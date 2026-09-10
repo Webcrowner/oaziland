@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
 import { getMyCreatorPremiumStatus, subscribeCreatorPremium, cancelCreatorPremium } from "@/lib/api";
+import Button from "@/components/ui/Button";
 
 export default function PremiumPage() {
   const t = useTranslations("PremiumPage");
@@ -53,18 +53,16 @@ export default function PremiumPage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
-          {t("signInRequired")}
-        </Link>
+        <Button href="/login">{t("signInRequired")}</Button>
       </main>
     );
   }
 
   return (
     <main className="max-w-md mx-auto px-4 py-16 text-center">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-2">{t("title")}</h1>
+      <h1 className="text-2xl font-bold text-[var(--navy)] mb-2">{t("title")}</h1>
       <p className="text-gray-600 mb-1">{t("subtitle")}</p>
-      <p className="text-3xl font-bold text-[#C9A227] mb-6">{t("priceLabel")}</p>
+      <p className="text-3xl font-bold text-[var(--gold)] mb-6">{t("priceLabel")}</p>
 
       <ul className="text-left text-sm text-gray-700 flex flex-col gap-2 mb-8 max-w-xs mx-auto">
         <li>✓ {t("benefit1")}</li>
@@ -89,7 +87,7 @@ export default function PremiumPage() {
             onChange={(e) => setPhone(e.target.value)} className="border rounded px-3 py-2"
           />
           {error && <p className="text-red-600 text-sm">{error}</p>}
-          <button type="submit" disabled={status === "subscribing"} className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-3 rounded hover:opacity-90 disabled:opacity-50">
+          <button type="submit" disabled={status === "subscribing"} className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-3 rounded hover:opacity-90 disabled:opacity-50">
             {status === "subscribing" ? t("subscribing") : t("subscribe")}
           </button>
         </form>

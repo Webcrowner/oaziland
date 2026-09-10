@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import Button from "@/components/ui/Button";
 import {
   listConversations, getConversationMessages, sendConversationMessage, markConversationSeen,
   sendTypingHeartbeat, getTypingStatus,
@@ -91,9 +92,7 @@ export default function MessagesPage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
-          {t("signInRequired")}
-        </Link>
+        <Button href="/login">{t("signInRequired")}</Button>
       </main>
     );
   }
@@ -101,8 +100,8 @@ export default function MessagesPage() {
   return (
     <main className="max-w-5xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-[#1B2A4A]">{t("title")}</h1>
-        <Link href="/privacy-settings" className="text-sm text-gray-500 hover:text-[#1B2A4A] underline">
+        <h1 className="text-2xl font-bold text-[var(--navy)]">{t("title")}</h1>
+        <Link href="/privacy-settings" className="text-sm text-gray-500 hover:text-[var(--navy)] underline">
           {t("typingSettingsLink")}
         </Link>
       </div>
@@ -120,9 +119,9 @@ export default function MessagesPage() {
                 className={`w-full text-left p-4 border-b hover:bg-gray-50 transition-colors ${selectedId === conv.id ? "bg-gray-100" : ""}`}
               >
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold text-[#1B2A4A] text-sm">{conv.participant_usernames.join(", ")}</p>
+                  <p className="font-semibold text-[var(--navy)] text-sm">{conv.participant_usernames.join(", ")}</p>
                   {conv.unread_count > 0 && (
-                    <span className="bg-[#C9A227] text-[#1B2A4A] text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                    <span className="bg-[var(--gold)] text-[var(--navy)] text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
                       {conv.unread_count}
                     </span>
                   )}
@@ -161,7 +160,7 @@ export default function MessagesPage() {
                   type="text" placeholder={t("typeMessage")} className="flex-1 border rounded px-3 py-2 text-sm"
                   value={draft} onChange={(e) => handleDraftChange(e.target.value)}
                 />
-                <button type="submit" disabled={sending} className="bg-[#1B2A4A] text-white font-semibold px-4 py-2 rounded text-sm disabled:opacity-50">
+                <button type="submit" disabled={sending} className="bg-[var(--navy)] text-white font-semibold px-4 py-2 rounded text-sm disabled:opacity-50">
                   {sending ? t("sending") : t("send")}
                 </button>
               </form>
