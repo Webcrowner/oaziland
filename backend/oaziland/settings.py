@@ -274,4 +274,13 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Real estate super-app for Cameroon and Africa — property, land, hospitality, marketplace, social, and financial services.',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    # RideBooking.ride_category and Vehicle.vehicle_category are
+    # DELIBERATELY the same real RideCategory enum (a ride's requested
+    # category must match a vehicle's real category) — this override
+    # tells drf-spectacular to generate one shared schema component
+    # for both fields instead of two differently-named ones for the
+    # same underlying choice set.
+    'ENUM_NAME_OVERRIDES': {
+        'RideCategoryEnum': 'marketplace.models.RideCategory',
+    },
 }

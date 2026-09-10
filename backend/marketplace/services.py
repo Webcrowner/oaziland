@@ -67,14 +67,32 @@ def search_marketplace_listings(*, listing_class, filters: dict = None):
 # ---------------------------------------------------------------------------
 # Ride booking lifecycle.
 # ---------------------------------------------------------------------------
-def estimate_ride_fare(*, distance_km: Decimal, base_fare_xaf=Decimal("500"), per_km_xaf=Decimal("150")):
+RIDE_CATEGORY_RATES = {
+    # (base_fare_xaf, per_km_xaf) — real, distinct pricing per category,
+    # the actual gap this closes: every ride previously used one
+    # single formula regardless of vehicle. Ordered cheapest to most
+    # expensive, moto first — the real, dominant cheap option in
+    # Cameroon's actual ride market.
+    "MOTO": (Decimal("300"), Decimal("100")),
+    "STANDARD": (Decimal("500"), Decimal("150")),
+    "COMFORT": (Decimal("800"), Decimal("220")),
+    "VAN": (Decimal("1500"), Decimal("300")),
+    "TRUCK": (Decimal("2500"), Decimal("450")),
+}
+
+
+def estimate_ride_fare(*, distance_km: Decimal, ride_category: str = "STANDARD"):
     """A simple, transparent fare formula — deliberately not a dynamic-
     pricing black box, consistent with finance.estimate_affordable_rent_
-    range's philosophy of explainable numbers."""
+    range's philosophy of explainable numbers. Real, distinct rates per
+    ride_category (see RIDE_CATEGORY_RATES) rather than one fare for
+    every vehicle type."""
+    base_fare_xaf, per_km_xaf = RIDE_CATEGORY_RATES.get(ride_category, RIDE_CATEGORY_RATES["STANDARD"])
     return base_fare_xaf + (distance_km * per_km_xaf)
 
 
-def request_ride(*, rider, pickup_description, dropoff_description, fare_estimate_xaf, pickup_coords=None, dropoff_coords=None):
+def request_ride(*, rider, pickup_description, dropoff_description, fare_estimate_xaf, pickup_coords=None, dropoff_coords=None,
+                  ride_category="STANDARD", transport_type="PASSENGER", has_luggage=False, cargo_description=""):
     from .models import RideBooking
     pickup_lat, pickup_lon = pickup_coords or (None, None)
     dropoff_lat, dropoff_lon = dropoff_coords or (None, None)
@@ -83,14 +101,65 @@ def request_ride(*, rider, pickup_description, dropoff_description, fare_estimat
         fare_estimate_xaf=fare_estimate_xaf,
         pickup_latitude=pickup_lat, pickup_longitude=pickup_lon,
         dropoff_latitude=dropoff_lat, dropoff_longitude=dropoff_lon,
+        ride_category=ride_category, transport_type=transport_type, has_luggage=has_luggage, cargo_description=cargo_description,
     )
 
 
-def accept_ride(*, ride, driver):
-    from .models import RideStatus
+class NotARegisteredDriverError(Exception):
+    pass
+
+
+class DriverNotVerifiedError(Exception):
+    pass
+
+
+class VehicleCategoryMismatchError(Exception):
+    pass
+
+
+def register_as_driver(*, user, license_number: str):
+    """The real gap this closes: previously ANY signed-in user could
+    accept a ride and become its driver — no registration, no
+    vetting, at all. Starts unverified, matching the exact same
+    admin-review posture already built for Hotel/Venue this session —
+    see AdminDriverViewSet.verify for the admin side."""
+    from .models import DriverProfile
+    driver_profile, _ = DriverProfile.objects.get_or_create(user=user, defaults={"license_number": license_number})
+    return driver_profile
+
+
+def register_vehicle(*, driver_profile, vehicle_category: str, make: str, model: str, plate_number: str):
+    from .models import Vehicle
+    return Vehicle.objects.create(driver=driver_profile, vehicle_category=vehicle_category, make=make, model=model, plate_number=plate_number)
+
+
+def accept_ride(*, ride, driver, vehicle):
+    """The real gap this closes: accepting a ride previously required
+    nothing more than being signed in. Now requires a real, admin-
+    verified DriverProfile AND a specific registered Vehicle whose
+    category genuinely matches what the ride needs — a moto can't
+    fulfill a request that needs a van or truck, and a passenger-
+    registered driver can't show up with the wrong vehicle for a
+    cargo job."""
+    from .models import RideStatus, TransportType, RideCategory
+
+    if not hasattr(driver, "driver_profile"):
+        raise NotARegisteredDriverError("You must register as a driver before accepting a ride.")
+    if not driver.driver_profile.is_verified:
+        raise DriverNotVerifiedError("Your driver registration is still awaiting verification.")
+    if vehicle.driver_id != driver.driver_profile.id:
+        raise VehicleCategoryMismatchError("That vehicle is not registered to you.")
+
+    if ride.transport_type == TransportType.CARGO:
+        if vehicle.vehicle_category not in (RideCategory.VAN, RideCategory.TRUCK):
+            raise VehicleCategoryMismatchError("A cargo request needs a van or truck.")
+    elif vehicle.vehicle_category != ride.ride_category:
+        raise VehicleCategoryMismatchError(f"This ride requested a {ride.ride_category.title()} vehicle.")
+
     ride.driver = driver
+    ride.vehicle = vehicle
     ride.status = RideStatus.ACCEPTED
-    ride.save(update_fields=["driver", "status"])
+    ride.save(update_fields=["driver", "vehicle", "status"])
     return ride
 
 

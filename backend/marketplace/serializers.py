@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, ListingCondition
+from .models import (
+    WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, ListingCondition,
+    RideCategory, TransportType, Vehicle, DriverProfile,
+)
 
 
 class MarketplaceMediaSerializer(serializers.ModelSerializer):
@@ -72,18 +75,21 @@ class RideBookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = RideBooking
         fields = [
-            "id", "rider", "rider_name", "driver", "driver_name",
+            "id", "rider", "rider_name", "driver", "driver_name", "vehicle",
             "pickup_description", "pickup_latitude", "pickup_longitude",
             "dropoff_description", "dropoff_latitude", "dropoff_longitude",
-            "fare_estimate_xaf", "status", "requested_at", "completed_at",
+            "fare_estimate_xaf", "status", "ride_category", "transport_type", "has_luggage", "cargo_description",
+            "requested_at", "completed_at",
         ]
-        read_only_fields = ["rider", "driver", "fare_estimate_xaf", "status", "requested_at", "completed_at"]
+        read_only_fields = ["rider", "driver", "vehicle", "fare_estimate_xaf", "status", "requested_at", "completed_at"]
 
 
 class RideRequestSerializer(serializers.Serializer):
     """Write-only input — fare_estimate_xaf is CALCULATED server-side
-    from distance via estimate_ride_fare(), never trusted from the
-    client (a real person could otherwise just claim any fare)."""
+    from distance and ride_category via estimate_ride_fare(), never
+    trusted from the client (a real person could otherwise just claim
+    any fare). cargo_description is only meaningful when
+    transport_type is CARGO — validated together below."""
     pickup_description = serializers.CharField()
     dropoff_description = serializers.CharField()
     distance_km = serializers.DecimalField(max_digits=6, decimal_places=2, min_value=0)
@@ -91,6 +97,35 @@ class RideRequestSerializer(serializers.Serializer):
     pickup_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     dropoff_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     dropoff_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    ride_category = serializers.ChoiceField(choices=RideCategory.choices, default=RideCategory.STANDARD)
+    transport_type = serializers.ChoiceField(choices=TransportType.choices, default=TransportType.PASSENGER)
+    has_luggage = serializers.BooleanField(default=False)
+    cargo_description = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, data):
+        if data["transport_type"] == TransportType.CARGO and not data.get("cargo_description"):
+            raise serializers.ValidationError({"cargo_description": "Please describe what's being moved for a cargo request."})
+        return data
+
+
+class DriverRegistrationSerializer(serializers.Serializer):
+    """Write-only input for the real gap this closes: previously any
+    signed-in user could accept a ride with zero registration."""
+    license_number = serializers.CharField()
+
+
+class DriverProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DriverProfile
+        fields = ["id", "license_number", "is_verified", "created_at"]
+        read_only_fields = ["is_verified", "created_at"]
+
+
+class VehicleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vehicle
+        fields = ["id", "vehicle_category", "make", "model", "plate_number", "created_at"]
+        read_only_fields = ["created_at"]
 
 
 class CompleteRideSerializer(serializers.Serializer):

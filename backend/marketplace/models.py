@@ -166,6 +166,63 @@ class RideStatus(models.TextChoices):
     CANCELLED = "CANCELLED", "Cancelled"
 
 
+class RideCategory(models.TextChoices):
+    """The real gap this closes: every ride previously used one
+    single fare formula regardless of vehicle — no way to choose a
+    cheaper moto-taxi over a car, or a comfort tier, the way Yango
+    (the real ride-hailing app Cameroonians actually use day to day)
+    already lets riders choose. VAN and TRUCK exist specifically for
+    CARGO rides — see TransportType below — not for passenger trips."""
+    MOTO = "MOTO", "Moto (motorcycle taxi)"
+    STANDARD = "STANDARD", "Standard Car"
+    COMFORT = "COMFORT", "Comfort"
+    VAN = "VAN", "Van"
+    TRUCK = "TRUCK", "Truck"
+
+
+class TransportType(models.TextChoices):
+    """Per the founder's own explicit real-estate use case: Rides
+    isn't only for moving people — a landlord or agent regularly
+    needs to move building materials, furniture, or documents between
+    properties, sometimes with no passenger involved at all. Modeled
+    as a real, distinct request type rather than overloading
+    cargo_description onto a passenger trip."""
+    PASSENGER = "PASSENGER", "Passenger"
+    CARGO = "CARGO", "Cargo / Building Materials"
+
+
+class DriverProfile(models.Model):
+    """A real, admin-verified driver registration — the actual gap
+    this closes: previously ANY signed-in user could accept a ride
+    and become its driver, with no vetting at all. Mirrors the exact
+    verified-by-default-False pattern just built for Hotel/Venue —
+    only a verified driver can accept a real ride (see accept_ride())."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="driver_profile")
+    license_number = models.CharField(max_length=50)
+    is_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "driver_profiles"
+
+
+class Vehicle(models.Model):
+    """A real registered vehicle tied to a driver — accept_ride()
+    requires the accepting driver to name one of their own registered
+    vehicles, and that vehicle's category must genuinely match what
+    the ride actually needs (a moto can't fulfill a cargo request that
+    needs a van or truck)."""
+    driver = models.ForeignKey(DriverProfile, on_delete=models.CASCADE, related_name="vehicles")
+    vehicle_category = models.CharField(max_length=10, choices=RideCategory.choices)
+    make = models.CharField(max_length=50)
+    model = models.CharField(max_length=50)
+    plate_number = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vehicles"
+
+
 class RideBooking(models.Model):
     """Deliberately NOT a Listing subtype — it represents a TRANSACTION
     (like services.ServiceRequest), not a property/item for sale. Settles
@@ -174,6 +231,7 @@ class RideBooking(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     rider = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rides_as_rider")
     driver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="rides_as_driver")
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.SET_NULL, null=True, blank=True, related_name="rides")
     pickup_description = models.CharField(max_length=255)
     pickup_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     pickup_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
@@ -182,6 +240,10 @@ class RideBooking(models.Model):
     dropoff_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     fare_estimate_xaf = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=15, choices=RideStatus.choices, default=RideStatus.REQUESTED)
+    ride_category = models.CharField(max_length=10, choices=RideCategory.choices, default=RideCategory.STANDARD)
+    transport_type = models.CharField(max_length=10, choices=TransportType.choices, default=TransportType.PASSENGER)
+    has_luggage = models.BooleanField(default=False)
+    cargo_description = models.CharField(max_length=255, blank=True)
     booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="ride_booking")
     requested_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)

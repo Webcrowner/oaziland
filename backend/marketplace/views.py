@@ -11,13 +11,18 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition
+from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile
 from .serializers import (
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer,
     RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer,
     ListingConditionSerializer, AttachConditionSerializer,
+    DriverProfileSerializer, DriverRegistrationSerializer, VehicleSerializer,
 )
-from .services import search_marketplace_listings, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition
+from .services import (
+    search_marketplace_listings, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition,
+    register_as_driver, register_vehicle, NotARegisteredDriverError, DriverNotVerifiedError, VehicleCategoryMismatchError,
+)
+from oaziland.permissions import IsAdminRole
 
 
 def _get_or_create_owner_profile(user):
@@ -155,7 +160,7 @@ class RideViewSet(viewsets.ModelViewSet):
         input_serializer = RideRequestSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data
-        fare = estimate_ride_fare(distance_km=data["distance_km"])
+        fare = estimate_ride_fare(distance_km=data["distance_km"], ride_category=data["ride_category"])
 
         pickup_coords = None
         if data.get("pickup_latitude") is not None:
@@ -167,19 +172,33 @@ class RideViewSet(viewsets.ModelViewSet):
         ride = request_ride(
             rider=request.user, pickup_description=data["pickup_description"], dropoff_description=data["dropoff_description"],
             fare_estimate_xaf=fare, pickup_coords=pickup_coords, dropoff_coords=dropoff_coords,
+            ride_category=data["ride_category"], transport_type=data["transport_type"],
+            has_luggage=data["has_luggage"], cargo_description=data.get("cargo_description", ""),
         )
         return Response(RideBookingSerializer(ride).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def accept(self, request, pk=None):
-        """Any authenticated user can accept an open ride request —
-        matching the platform's real driver model (no separate
-        DriverProfile gate exists yet; this is an honest reflection of
-        that, not a shortcut hiding a missing check)."""
+        """The real gap this closes: previously ANY authenticated user
+        could accept a ride — no driver registration, no vehicle, at
+        all. Now requires a real, admin-verified DriverProfile and one
+        of the driver's own registered vehicles, whose category
+        genuinely matches what the ride needs."""
         ride = self.get_object()
         if ride.status != RideStatus.REQUESTED:
             return Response({"detail": "This ride is no longer available to accept."}, status=status.HTTP_400_BAD_REQUEST)
-        accept_ride(ride=ride, driver=request.user)
+        if not hasattr(request.user, "driver_profile"):
+            return Response({"detail": "You must register as a driver before accepting a ride."}, status=status.HTTP_403_FORBIDDEN)
+        vehicle_id = request.data.get("vehicle_id")
+        if not vehicle_id:
+            return Response({"detail": "vehicle_id is required — select one of your registered vehicles."}, status=status.HTTP_400_BAD_REQUEST)
+        vehicle = Vehicle.objects.filter(id=vehicle_id).first()
+        if vehicle is None:
+            return Response({"detail": "That vehicle was not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            accept_ride(ride=ride, driver=request.user, vehicle=vehicle)
+        except (NotARegisteredDriverError, DriverNotVerifiedError, VehicleCategoryMismatchError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
         return Response(RideBookingSerializer(ride).data)
 
     @action(detail=True, methods=["post"])
@@ -291,3 +310,64 @@ class ListingConditionView(APIView):
             structured_conditions=data["structured_conditions"], free_text_clause=data["free_text_clause"],
         )
         return Response(ListingConditionSerializer(condition).data, status=status.HTTP_201_CREATED)
+
+
+class MyDriverProfileView(APIView):
+    """The real gap this closes: previously ANY signed-in user could
+    accept a ride and become its driver — no registration, no
+    vetting, at all. Real self-service registration; starts
+    unverified, matching the same admin-review posture already built
+    for Hotel/Venue this session."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: DriverProfileSerializer, 404: dict})
+    def get(self, request):
+        if not hasattr(request.user, "driver_profile"):
+            return Response({"detail": "You have not registered as a driver yet."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(DriverProfileSerializer(request.user.driver_profile).data)
+
+    @extend_schema(request=DriverRegistrationSerializer, responses={201: DriverProfileSerializer})
+    def post(self, request):
+        input_serializer = DriverRegistrationSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        driver_profile = register_as_driver(user=request.user, license_number=input_serializer.validated_data["license_number"])
+        return Response(DriverProfileSerializer(driver_profile).data, status=status.HTTP_201_CREATED)
+
+
+class MyVehicleViewSet(viewsets.ModelViewSet):
+    """A driver's own registered vehicles — create/list/retrieve only;
+    a vehicle used on a completed ride shouldn't be silently editable
+    after the fact."""
+    serializer_class = VehicleSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Vehicle.objects.none()
+        if not hasattr(self.request.user, "driver_profile"):
+            return Vehicle.objects.none()
+        return Vehicle.objects.filter(driver=self.request.user.driver_profile)
+
+    def create(self, request, *args, **kwargs):
+        if not hasattr(request.user, "driver_profile"):
+            return Response({"detail": "You must register as a driver before registering a vehicle."}, status=status.HTTP_403_FORBIDDEN)
+        input_serializer = VehicleSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        vehicle = register_vehicle(driver_profile=request.user.driver_profile, **input_serializer.validated_data)
+        return Response(VehicleSerializer(vehicle).data, status=status.HTTP_201_CREATED)
+
+
+class AdminDriverViewSet(viewsets.ReadOnlyModelViewSet):
+    """The other real half of the same gap: an admin previously had no
+    way to see or verify a pending driver registration at all."""
+    serializer_class = DriverProfileSerializer
+    permission_classes = [IsAdminRole]
+    queryset = DriverProfile.objects.filter(is_verified=False).order_by("-created_at")
+
+    @action(detail=True, methods=["post"])
+    def verify(self, request, pk=None):
+        driver_profile = self.get_object()
+        driver_profile.is_verified = True
+        driver_profile.save(update_fields=["is_verified"])
+        return Response(DriverProfileSerializer(driver_profile).data)

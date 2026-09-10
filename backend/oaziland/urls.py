@@ -36,6 +36,7 @@ from property_management.views import (
 )
 from marketplace.views import (
     WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet, ListingConditionView,
+    MyDriverProfileView, MyVehicleViewSet, AdminDriverViewSet,
 )
 from services.views import ServiceRequestViewSet, FindTechniciansView, MyTechnicianDashboardView
 from catalogue.views import PartnerServiceCategoryViewSet
@@ -61,6 +62,8 @@ router.register(r"stores", StoreListingViewSet, basename="store")
 router.register(r"businesses", BusinessListingViewSet, basename="business")
 router.register(r"cars", CarListingViewSet, basename="car")
 router.register(r"rides", RideViewSet, basename="ride")
+router.register(r"my-vehicles", MyVehicleViewSet, basename="my-vehicle")
+router.register(r"admin/drivers", AdminDriverViewSet, basename="admin-driver")
 router.register(r"service-requests", ServiceRequestViewSet, basename="service-request")
 router.register(r"comments", CommentViewSet, basename="comment")
 router.register(r"reviews", ReviewViewSet, basename="review")
@@ -132,6 +135,7 @@ urlpatterns = [
     path('api/my-technician-dashboard/', MyTechnicianDashboardView.as_view(), name='my-technician-dashboard'),
     path('api/listing-conditions/', ListingConditionView.as_view(), name='listing-conditions'),
     path('api/ratings/', RateUserView.as_view(), name='rate-user'),
+    path('api/my-driver-profile/', MyDriverProfileView.as_view(), name='my-driver-profile'),
     path('api/content-reports/', FileContentReportView.as_view(), name='file-content-report'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,

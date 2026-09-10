@@ -132,9 +132,15 @@ def test_car_listing_with_vehicle_spec(quarter):
 def test_full_ride_booking_settles_through_shared_escrow():
     """The module's other literal acceptance criteria: a ride, paid
     through the exact same escrow system as everything else."""
+    from marketplace.services import register_as_driver, register_vehicle
+
     PlatformFeePolicy.objects.create(category=TransactionCategory.RIDE_FARE, fee_percent=Decimal("10.0"))
     rider = User.objects.create(username="ride_rider", phone="+237699600005")
     driver = User.objects.create(username="ride_driver", phone="+237699600006")
+    driver_profile = register_as_driver(user=driver, license_number="CM-DL-90001")
+    driver_profile.is_verified = True
+    driver_profile.save(update_fields=["is_verified"])
+    vehicle = register_vehicle(driver_profile=driver_profile, vehicle_category="STANDARD", make="Toyota", model="Corolla", plate_number="LT-001-AB")
 
     fare = estimate_ride_fare(distance_km=Decimal("10"))
     assert fare == Decimal("500") + (Decimal("10") * Decimal("150"))  # 2000 XAF
@@ -145,7 +151,7 @@ def test_full_ride_booking_settles_through_shared_escrow():
     )
     assert ride.status == RideStatus.REQUESTED
 
-    accept_ride(ride=ride, driver=driver)
+    accept_ride(ride=ride, driver=driver, vehicle=vehicle)
     ride.refresh_from_db()
     assert ride.status == RideStatus.ACCEPTED
     assert ride.driver == driver

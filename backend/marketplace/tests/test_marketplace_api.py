@@ -128,17 +128,31 @@ def test_requesting_a_ride_computes_a_real_fare_server_side():
 @pytest.mark.django_db
 def test_the_full_real_ride_lifecycle_settles_through_the_real_payment_gateway():
     from monetization.models import PlatformFeePolicy, TransactionCategory
+    from identity.models import AdminProfile
     PlatformFeePolicy.objects.get_or_create(category=TransactionCategory.RIDE_FARE, defaults={"fee_percent": Decimal("10.0")})
 
     rider = User.objects.create(username="mp_ride_full_rider", phone="+237699777706")
     driver = User.objects.create(username="mp_ride_full_driver", phone="+237699777707")
+    admin_user = User.objects.create(username="mp_ride_full_admin", phone="+237699777708")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
     rider_client = _auth_client(rider)
     driver_client = _auth_client(driver)
+    admin_client = _auth_client(admin_user)
+
+    # A real driver must register, be admin-verified, and register a
+    # real vehicle before they can accept anything — exercised through
+    # the actual API, not the service layer directly.
+    driver_profile_response = driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-90002"})
+    assert driver_profile_response.status_code == 201
+    verify_response = admin_client.post(f"/api/admin/drivers/{driver_profile_response.data['id']}/verify/")
+    assert verify_response.status_code == 200
+    vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Toyota", "model": "Corolla", "plate_number": "LT-002-CD"})
+    assert vehicle_response.status_code == 201
 
     create_response = rider_client.post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
     ride_id = create_response.data["id"]
 
-    accept_response = driver_client.post(f"/api/rides/{ride_id}/accept/")
+    accept_response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
     assert accept_response.status_code == 200
     assert accept_response.data["status"] == "ACCEPTED"
 
@@ -153,12 +167,21 @@ def test_the_full_real_ride_lifecycle_settles_through_the_real_payment_gateway()
 
 @pytest.mark.django_db
 def test_only_the_rides_own_driver_can_start_it():
+    from identity.models import AdminProfile
     rider = User.objects.create(username="mp_ride_perm_rider", phone="+237699777708")
     driver = User.objects.create(username="mp_ride_perm_driver", phone="+237699777709")
     stranger = User.objects.create(username="mp_ride_perm_stranger", phone="+237699777710")
+    admin_user = User.objects.create(username="mp_ride_perm_admin", phone="+237699777718")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    driver_client = _auth_client(driver)
+    profile_response = driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-22222"})
+    _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
+    vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Nissan", "model": "Almera", "plate_number": "LT-008-OP"})
+
     create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
     ride_id = create_response.data["id"]
-    _auth_client(driver).post(f"/api/rides/{ride_id}/accept/")
+    accept_response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
+    assert accept_response.status_code == 200
 
     response = _auth_client(stranger).post(f"/api/rides/{ride_id}/start/")
 
@@ -167,12 +190,21 @@ def test_only_the_rides_own_driver_can_start_it():
 
 @pytest.mark.django_db
 def test_cannot_accept_a_ride_thats_already_accepted():
+    from identity.models import AdminProfile
     rider = User.objects.create(username="mp_ride_double_rider", phone="+237699777711")
     driver_a = User.objects.create(username="mp_ride_double_driver_a", phone="+237699777712")
     driver_b = User.objects.create(username="mp_ride_double_driver_b", phone="+237699777713")
+    admin_user = User.objects.create(username="mp_ride_double_admin", phone="+237699777717")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    driver_a_client = _auth_client(driver_a)
+    profile_response = driver_a_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-22221"})
+    _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
+    vehicle_response = driver_a_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Honda", "model": "Civic", "plate_number": "LT-007-MN"})
+
     create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
     ride_id = create_response.data["id"]
-    _auth_client(driver_a).post(f"/api/rides/{ride_id}/accept/")
+    first_accept = driver_a_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
+    assert first_accept.status_code == 200
 
     second_accept = _auth_client(driver_b).post(f"/api/rides/{ride_id}/accept/")
 
@@ -181,13 +213,21 @@ def test_cannot_accept_a_ride_thats_already_accepted():
 
 @pytest.mark.django_db
 def test_only_the_rider_can_complete_and_pay_for_their_own_ride():
+    from identity.models import AdminProfile
     rider = User.objects.create(username="mp_ride_pay_rider", phone="+237699777714")
     driver = User.objects.create(username="mp_ride_pay_driver", phone="+237699777715")
     stranger = User.objects.create(username="mp_ride_pay_stranger", phone="+237699777716")
+    admin_user = User.objects.create(username="mp_ride_pay_admin", phone="+237699777719")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    driver_client = _auth_client(driver)
+    profile_response = driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-22223"})
+    _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
+    vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Hyundai", "model": "Accent", "plate_number": "LT-009-QR"})
+
     create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
     ride_id = create_response.data["id"]
-    _auth_client(driver).post(f"/api/rides/{ride_id}/accept/")
-    _auth_client(driver).post(f"/api/rides/{ride_id}/start/")
+    assert driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]}).status_code == 200
+    assert driver_client.post(f"/api/rides/{ride_id}/start/").status_code == 200
 
     response = _auth_client(stranger).post(f"/api/rides/{ride_id}/complete/", {"phone_number": stranger.phone})
 
@@ -335,3 +375,137 @@ def test_removing_media_from_a_listing(quarter):
     remove_response = client.post(f"/api/warehouses/{listing_id}/remove-media/", {"media_id": media_id})
 
     assert remove_response.status_code == 204
+
+
+# ---------------------------------------------------------------------
+# Real driver/vehicle registration, luggage, ride categories, and
+# cargo/building-materials transport — the real gap this closes: any
+# signed-in user could previously accept a ride with zero
+# registration, no vehicle, and every ride used one single fare
+# formula regardless of what was actually needed.
+# ---------------------------------------------------------------------
+@pytest.mark.django_db
+def test_registering_as_a_driver_starts_unverified():
+    user = User.objects.create(username="driver_reg_user", phone="+237699888801")
+    response = _auth_client(user).post("/api/my-driver-profile/", {"license_number": "CM-DL-11111"})
+    assert response.status_code == 201
+    assert response.data["is_verified"] is False
+
+
+@pytest.mark.django_db
+def test_an_unverified_driver_cannot_accept_a_ride():
+    rider = User.objects.create(username="ride_gate_rider", phone="+237699888802")
+    driver = User.objects.create(username="ride_gate_driver", phone="+237699888803")
+    driver_client = _auth_client(driver)
+    driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-11112"})
+    vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Kia", "model": "Rio", "plate_number": "LT-003-EF"})
+
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    ride_id = create_response.data["id"]
+
+    response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_a_non_registered_user_cannot_accept_a_ride_at_all():
+    rider = User.objects.create(username="ride_noreg_rider", phone="+237699888804")
+    stranger = User.objects.create(username="ride_noreg_stranger", phone="+237699888805")
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    ride_id = create_response.data["id"]
+
+    response = _auth_client(stranger).post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": "1"})
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_a_moto_only_vehicle_cannot_accept_a_ride_requesting_a_standard_car():
+    from identity.models import AdminProfile
+    rider = User.objects.create(username="ride_mismatch_rider", phone="+237699888806")
+    driver = User.objects.create(username="ride_mismatch_driver", phone="+237699888807")
+    admin_user = User.objects.create(username="ride_mismatch_admin", phone="+237699888808")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    driver_client = _auth_client(driver)
+    profile_response = driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-11113"})
+    _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
+    vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "MOTO", "make": "Bajaj", "model": "Boxer", "plate_number": "LT-004-GH"})
+
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5", "ride_category": "STANDARD"})
+    ride_id = create_response.data["id"]
+
+    response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_a_cargo_ride_requires_a_van_or_truck_not_a_car():
+    from identity.models import AdminProfile
+    rider = User.objects.create(username="ride_cargo_rider", phone="+237699888809")
+    driver = User.objects.create(username="ride_cargo_driver", phone="+237699888810")
+    admin_user = User.objects.create(username="ride_cargo_admin", phone="+237699888811")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    driver_client = _auth_client(driver)
+    profile_response = driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-11114"})
+    _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
+    car_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Toyota", "model": "Camry", "plate_number": "LT-005-IJ"})
+    van_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "VAN", "make": "Toyota", "model": "Hiace", "plate_number": "LT-006-KL"})
+
+    create_response = _auth_client(rider).post("/api/rides/", {
+        "pickup_description": "Property A", "dropoff_description": "Property B", "distance_km": "8",
+        "transport_type": "CARGO", "cargo_description": "20 bags of cement and roofing sheets",
+    })
+    ride_id = create_response.data["id"]
+
+    car_attempt = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": car_response.data["id"]})
+    assert car_attempt.status_code == 403
+
+    van_attempt = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": van_response.data["id"]})
+    assert van_attempt.status_code == 200
+
+
+@pytest.mark.django_db
+def test_a_cargo_ride_without_a_description_is_rejected():
+    rider = User.objects.create(username="ride_cargo_nodesc_rider", phone="+237699888812")
+    response = _auth_client(rider).post("/api/rides/", {
+        "pickup_description": "A", "dropoff_description": "B", "distance_km": "5", "transport_type": "CARGO",
+    })
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_luggage_and_ride_category_are_real_and_reflected_on_the_ride():
+    rider = User.objects.create(username="ride_luggage_rider", phone="+237699888813")
+    response = _auth_client(rider).post("/api/rides/", {
+        "pickup_description": "Airport", "dropoff_description": "Hotel", "distance_km": "12",
+        "ride_category": "COMFORT", "has_luggage": True,
+    })
+    assert response.status_code == 201
+    assert response.data["ride_category"] == "COMFORT"
+    assert response.data["has_luggage"] is True
+
+
+@pytest.mark.django_db
+def test_moto_and_comfort_fares_are_genuinely_different_not_one_formula_for_everyone():
+    rider = User.objects.create(username="ride_fare_rider", phone="+237699888814")
+    moto_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "10", "ride_category": "MOTO"})
+    comfort_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "10", "ride_category": "COMFORT"})
+
+    assert Decimal(moto_response.data["fare_estimate_xaf"]) < Decimal(comfort_response.data["fare_estimate_xaf"])
+
+
+@pytest.mark.django_db
+def test_an_admin_sees_and_can_verify_a_pending_driver():
+    from identity.models import AdminProfile
+    driver = User.objects.create(username="ride_admin_verify_driver", phone="+237699888815")
+    admin_user = User.objects.create(username="ride_admin_verify_admin", phone="+237699888816")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    driver_client = _auth_client(driver)
+    profile_response = driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-11115"})
+
+    admin_client = _auth_client(admin_user)
+    pending_view = admin_client.get("/api/admin/drivers/")
+    assert pending_view.data["count"] == 1
+
+    verify_response = admin_client.post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
+    assert verify_response.status_code == 200
+    assert verify_response.data["is_verified"] is True
