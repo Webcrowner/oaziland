@@ -1,10 +1,14 @@
 import { useState, useEffect } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image, ActivityIndicator, ScrollView, Switch } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import NetInfo from "@react-native-community/netinfo";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { createHouse, createListing, listQuarters, uploadMediaFile, addListingPhoto, type Quarter, type MediaUploadResult } from "../lib/api";
+import {
+  createHouse, createListing, listQuarters, uploadMediaFile, addListingPhoto,
+  setPropertyAmenities, setPropertyHouseRules, listPointsOfInterest, setNearbyFacilities, attachListingCondition,
+  type Quarter, type MediaUploadResult, type PointOfInterestItem,
+} from "../lib/api";
 import { enqueueAction } from "../offline/queue";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ListProperty">;
@@ -13,23 +17,40 @@ interface PendingMedia extends MediaUploadResult {
   localUri: string;
 }
 
+const AMENITIES = [
+  "PARKING", "BACKUP_GENERATOR", "BOREHOLE_WATER_TANK", "SECURITY_24_7", "FENCED_COMPOUND",
+  "SWIMMING_POOL", "AIR_CONDITIONING", "FURNISHED", "SOLAR_POWER", "CCTV", "BALCONY_TERRACE", "WIFI_READY",
+];
+const HOUSE_RULES = ["NO_PETS", "NO_SMOKING_INDOORS", "NO_SUBLETTING", "NO_PARTIES", "QUIET_HOURS_AFTER_10PM", "ADVANCE_NOTICE_FOR_VISITS"];
+// Mirrors the real backend HouseStyle choices exactly — mobile parity
+// with the web app's list-property page, same session. OTHER pairs
+// with a free-text field so a lister is never blocked by an
+// incomplete list.
+const HOUSE_TYPES = ["ROOM", "STUDIO", "SELF_CONTAIN", "APARTMENT", "STANDARD", "DUPLEX", "BUNGALOW", "DETACHED_VILLA", "CHALET", "OTHER"];
+
 /**
  * List a Property — the mobile equivalent of the web app's real
- * property-creation wizard. This pass fixes a real, separate bug
- * found while wiring in genuine media upload: a photo taken here was
- * ONLY EVER shown as a local preview — handleSubmit never uploaded
- * or attached it to anything. Now supports real photo AND video
- * capture/selection (expo-image-picker's mediaTypes accepts both),
- * genuinely uploaded via the real /api/media/upload/ endpoint and
- * attached to the listing once it's created.
+ * property-creation wizard, now with real amenities, house rules,
+ * nearby facilities, a house-type dropdown, and conditions/rules —
+ * mobile parity with everything added to web's list-property page
+ * this same session.
  */
 export default function ListPropertyScreen({ navigation }: Props) {
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [quarterId, setQuarterId] = useState("");
+  const [houseType, setHouseType] = useState("STANDARD");
+  const [customHouseType, setCustomHouseType] = useState("");
   const [bedrooms, setBedrooms] = useState("");
   const [description, setDescription] = useState("");
   const [listingType, setListingType] = useState<"RENT" | "SALE">("RENT");
   const [price, setPrice] = useState("");
+  const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
+  const [selectedRules, setSelectedRules] = useState<string[]>([]);
+  const [pointsOfInterest, setPointsOfInterest] = useState<PointOfInterestItem[]>([]);
+  const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
+  const [minLeaseMonths, setMinLeaseMonths] = useState("");
+  const [depositRequired, setDepositRequired] = useState(false);
+  const [conditionsNotes, setConditionsNotes] = useState("");
   const [media, setMedia] = useState<PendingMedia[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
@@ -44,6 +65,25 @@ export default function ListPropertyScreen({ navigation }: Props) {
       })
       .catch(() => {});
   }, []);
+
+  // Real nearby facilities are quarter-specific — refetched whenever
+  // the selected quarter changes, matching the exact pattern already
+  // established on web.
+  useEffect(() => {
+    if (!quarterId) return;
+    listPointsOfInterest(quarterId).then(setPointsOfInterest).catch(() => setPointsOfInterest([]));
+    setSelectedFacilities([]);
+  }, [quarterId]);
+
+  function toggleAmenity(value: string) {
+    setSelectedAmenities((prev) => (prev.includes(value) ? prev.filter((a) => a !== value) : [...prev, value]));
+  }
+  function toggleRule(value: string) {
+    setSelectedRules((prev) => (prev.includes(value) ? prev.filter((r) => r !== value) : [...prev, value]));
+  }
+  function toggleFacility(value: string) {
+    setSelectedFacilities((prev) => (prev.includes(value) ? prev.filter((f) => f !== value) : [...prev, value]));
+  }
 
   async function uploadAndTrack(asset: ImagePicker.ImagePickerAsset) {
     setUploadingMedia(true);
@@ -64,9 +104,6 @@ export default function ListPropertyScreen({ navigation }: Props) {
       setMessage({ type: "error", text: "Camera permission is required to photograph the property." });
       return;
     }
-    // mediaTypes accepting both images and videos means the native
-    // camera UI itself offers a photo/video toggle — real video
-    // capture, not just photos.
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images", "videos"], quality: 0.7, videoMaxDuration: 60 });
     if (!result.canceled && result.assets?.[0]) {
       await uploadAndTrack(result.assets[0]);
@@ -91,22 +128,30 @@ export default function ListPropertyScreen({ navigation }: Props) {
       setMessage({ type: "error", text: "Please choose a neighborhood." });
       return;
     }
+    if (houseType === "OTHER" && !customHouseType.trim()) {
+      setMessage({ type: "error", text: "Please describe the property type." });
+      return;
+    }
     setLoading(true);
 
     const housePayload = {
       quarter: quarterId,
       bedrooms: bedrooms ? Number(bedrooms) : undefined,
       description: description || undefined,
+      house_style: houseType,
+      custom_house_style: houseType === "OTHER" ? customHouseType : undefined,
     };
     const combinedPayload = { house: housePayload, listing_type: listingType, price_xaf: price };
 
     try {
       const netState = await NetInfo.fetch();
       if (!netState.isConnected) {
-        // Offline: queue the WHOLE two-step flow as one item — the
-        // sync logic (once wired to a real connectivity listener)
-        // creates the house, then the listing referencing it,
-        // sequentially, using this same payload.
+        // Offline: same real two-step queued flow already
+        // established. Amenities/rules/facilities/conditions are
+        // deliberately NOT part of the offline queue, matching the
+        // same honest scope already established for photos in this
+        // exact file — they require a real listing id that doesn't
+        // exist until the queued creation actually runs online.
         await enqueueAction("CREATE_HOUSE_AND_LISTING", combinedPayload);
         setMessage({ type: "info", text: "You're offline — this listing has been saved and will submit automatically once you're back online." });
         return;
@@ -124,6 +169,16 @@ export default function ListPropertyScreen({ navigation }: Props) {
       }
       const house = await houseRes.json();
 
+      if (selectedAmenities.length > 0) {
+        await setPropertyAmenities("HOUSE", house.id, selectedAmenities).catch(() => {});
+      }
+      if (selectedRules.length > 0) {
+        await setPropertyHouseRules(house.id, selectedRules).catch(() => {});
+      }
+      if (selectedFacilities.length > 0) {
+        await setNearbyFacilities(house.id, selectedFacilities).catch(() => {});
+      }
+
       const listingRes = await createListing({ property_asset_id: house.id, listing_type: listingType, price_xaf: price });
       if (!listingRes.ok) {
         setMessage({ type: "error", text: "The property was saved, but the listing itself could not be created. Please try again." });
@@ -131,16 +186,20 @@ export default function ListPropertyScreen({ navigation }: Props) {
       }
       const listing = await listingRes.json();
 
-      // Attach every real photo/video already uploaded before submit —
-      // the actual gap this whole rewrite closes: this used to just
-      // discard whatever was captured, attaching nothing at all.
       await Promise.all(media.map((m) => addListingPhoto(listing.id, m.url, m.media_type)));
+
+      if (minLeaseMonths || depositRequired || conditionsNotes) {
+        const structuredConditions: Record<string, unknown> = {};
+        if (minLeaseMonths) structuredConditions.min_lease_months = Number(minLeaseMonths);
+        if (depositRequired) structuredConditions.deposit_required = true;
+        await attachListingCondition({
+          target_content_type: "property.Listing", target_id: listing.id,
+          structured_conditions: structuredConditions, free_text_clause: conditionsNotes,
+        }).catch(() => {});
+      }
 
       setMessage({ type: "success", text: "Your listing was created — it goes live once an admin reviews it." });
     } catch {
-      // A network error mid-request is functionally the same as being
-      // offline from this screen's point of view — queue it rather
-      // than losing the user's work.
       await enqueueAction("CREATE_HOUSE_AND_LISTING", combinedPayload);
       setMessage({ type: "info", text: "Could not reach the server — this listing has been saved and will submit automatically once you're back online." });
     } finally {
@@ -162,19 +221,13 @@ export default function ListPropertyScreen({ navigation }: Props) {
             {media.map((m, i) => (
               <View key={i} style={styles.mediaPreviewItem}>
                 {m.media_type === "VIDEO" ? (
-                  <View style={styles.videoPreviewBadge}>
-                    <Text style={styles.videoPreviewBadgeText}>▶ Video</Text>
-                  </View>
+                  <View style={styles.videoPreviewBadge}><Text style={styles.videoPreviewBadgeText}>▶ Video</Text></View>
                 ) : (
                   <Image source={{ uri: m.localUri }} style={styles.photoPreview} />
                 )}
               </View>
             ))}
-            {uploadingMedia && (
-              <View style={[styles.photoPreview, styles.uploadingBox]}>
-                <ActivityIndicator color="#1B2A4A" />
-              </View>
-            )}
+            {uploadingMedia && <View style={[styles.photoPreview, styles.uploadingBox]}><ActivityIndicator color="#1B2A4A" /></View>}
           </ScrollView>
         )}
         <View style={styles.photoButtonRow}>
@@ -188,44 +241,85 @@ export default function ListPropertyScreen({ navigation }: Props) {
       </View>
 
       <Text style={styles.label}>Neighborhood</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quarterRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
         {quarters.map((q) => (
-          <TouchableOpacity
-            key={q.id}
-            style={[styles.quarterChip, quarterId === q.id && styles.quarterChipSelected]}
-            onPress={() => setQuarterId(q.id)}
-          >
-            <Text style={[styles.quarterChipText, quarterId === q.id && styles.quarterChipTextSelected]}>{q.name}</Text>
+          <TouchableOpacity key={q.id} style={[styles.chip, quarterId === q.id && styles.chipSelected]} onPress={() => setQuarterId(q.id)}>
+            <Text style={[styles.chipText, quarterId === q.id && styles.chipTextSelected]}>{q.name}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
+
+      <Text style={styles.label}>Property Type</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+        {HOUSE_TYPES.map((type) => (
+          <TouchableOpacity key={type} style={[styles.chip, houseType === type && styles.chipSelected]} onPress={() => setHouseType(type)}>
+            <Text style={[styles.chipText, houseType === type && styles.chipTextSelected]}>{type.replace(/_/g, " ")}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+      {houseType === "OTHER" && (
+        <TextInput style={styles.input} placeholder="Describe the property type" value={customHouseType} onChangeText={setCustomHouseType} />
+      )}
 
       <Text style={styles.label}>Bedrooms</Text>
       <TextInput style={styles.input} keyboardType="numeric" value={bedrooms} onChangeText={setBedrooms} placeholder="e.g. 3" />
 
       <Text style={styles.label}>Description</Text>
-      <TextInput
-        style={[styles.input, styles.textArea]} multiline numberOfLines={4}
-        value={description} onChangeText={setDescription} placeholder="Describe the property..."
-      />
+      <TextInput style={[styles.input, styles.textArea]} multiline numberOfLines={4} value={description} onChangeText={setDescription} placeholder="Describe the property..." />
+
+      <Text style={styles.label}>Amenities</Text>
+      <View style={styles.checkGrid}>
+        {AMENITIES.map((a) => (
+          <TouchableOpacity key={a} style={styles.checkItem} onPress={() => toggleAmenity(a)}>
+            <View style={[styles.checkbox, selectedAmenities.includes(a) && styles.checkboxChecked]} />
+            <Text style={styles.checkLabel}>{a.replace(/_/g, " ")}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Text style={styles.label}>House Rules</Text>
+      <View style={styles.checkGrid}>
+        {HOUSE_RULES.map((r) => (
+          <TouchableOpacity key={r} style={styles.checkItem} onPress={() => toggleRule(r)}>
+            <View style={[styles.checkbox, selectedRules.includes(r) && styles.checkboxChecked]} />
+            <Text style={styles.checkLabel}>{r.replace(/_/g, " ")}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {pointsOfInterest.length > 0 && (
+        <>
+          <Text style={styles.label}>Nearby Facilities</Text>
+          <View style={styles.checkGrid}>
+            {pointsOfInterest.map((poi) => (
+              <TouchableOpacity key={poi.id} style={styles.checkItem} onPress={() => toggleFacility(poi.id)}>
+                <View style={[styles.checkbox, selectedFacilities.includes(poi.id) && styles.checkboxChecked]} />
+                <Text style={styles.checkLabel}>{poi.name} ({poi.poi_type_display})</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      )}
 
       <Text style={styles.label}>Listing Type</Text>
       <View style={styles.toggleRow}>
         {(["RENT", "SALE"] as const).map((type) => (
-          <TouchableOpacity
-            key={type}
-            style={[styles.toggle, listingType === type && styles.toggleSelected]}
-            onPress={() => setListingType(type)}
-          >
-            <Text style={[styles.toggleText, listingType === type && styles.toggleTextSelected]}>
-              {type === "RENT" ? "For Rent" : "For Sale"}
-            </Text>
+          <TouchableOpacity key={type} style={[styles.toggle, listingType === type && styles.toggleSelected]} onPress={() => setListingType(type)}>
+            <Text style={[styles.toggleText, listingType === type && styles.toggleTextSelected]}>{type === "RENT" ? "For Rent" : "For Sale"}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
       <Text style={styles.label}>Price (XAF)</Text>
       <TextInput style={styles.input} keyboardType="numeric" value={price} onChangeText={setPrice} placeholder="e.g. 100000" />
+
+      <Text style={styles.label}>Conditions & Rules (optional)</Text>
+      <TextInput style={styles.input} keyboardType="numeric" placeholder="Minimum lease (months)" value={minLeaseMonths} onChangeText={setMinLeaseMonths} />
+      <View style={styles.switchRow}>
+        <Text style={styles.checkLabel}>Deposit required</Text>
+        <Switch value={depositRequired} onValueChange={setDepositRequired} />
+      </View>
+      <TextInput style={[styles.input, styles.textArea]} multiline numberOfLines={2} placeholder="Any other conditions or rules..." value={conditionsNotes} onChangeText={setConditionsNotes} />
 
       {message && (
         <Text style={[styles.message, message.type === "success" ? styles.success : message.type === "info" ? styles.info : styles.errorText]}>
@@ -261,18 +355,24 @@ const styles = StyleSheet.create({
   photoButton: { flex: 1, borderWidth: 1, borderColor: "#1B2A4A", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
   photoButtonText: { color: "#1B2A4A", fontSize: 13, fontWeight: "600" },
   label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6, marginTop: 4 },
-  quarterRow: { marginBottom: 16 },
-  quarterChip: { borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16, marginRight: 8 },
-  quarterChipSelected: { backgroundColor: "#1B2A4A", borderColor: "#1B2A4A" },
-  quarterChipText: { color: "#374151", fontSize: 13 },
-  quarterChipTextSelected: { color: "#fff", fontWeight: "600" },
+  chipRow: { marginBottom: 16 },
+  chip: { borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16, marginRight: 8 },
+  chipSelected: { backgroundColor: "#1B2A4A", borderColor: "#1B2A4A" },
+  chipText: { color: "#374151", fontSize: 13 },
+  chipTextSelected: { color: "#fff", fontWeight: "600" },
+  checkGrid: { marginBottom: 16 },
+  checkItem: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: "#9CA3AF", marginRight: 8 },
+  checkboxChecked: { backgroundColor: "#1B2A4A", borderColor: "#1B2A4A" },
+  checkLabel: { fontSize: 13, color: "#374151" },
   toggleRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   toggle: { flex: 1, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
   toggleSelected: { backgroundColor: "#1B2A4A", borderColor: "#1B2A4A" },
   toggleText: { color: "#374151" },
   toggleTextSelected: { color: "#fff", fontWeight: "600" },
   input: { borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 15 },
-  textArea: { height: 90, textAlignVertical: "top" },
+  textArea: { height: 70, textAlignVertical: "top" },
+  switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   message: { marginBottom: 12, fontSize: 13 },
   mfaLink: { color: "#1B2A4A", fontWeight: "600", fontSize: 13, marginBottom: 16 },
   success: { color: "#15803D" },

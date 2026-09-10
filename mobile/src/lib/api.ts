@@ -128,6 +128,8 @@ export interface HouseCreatePayload {
   finish_level?: string;
   bedrooms?: number;
   bathrooms?: number;
+  house_style?: string;
+  custom_house_style?: string;
 }
 
 export async function createHouse(payload: HouseCreatePayload) {
@@ -137,6 +139,65 @@ export async function createHouse(payload: HouseCreatePayload) {
     body: JSON.stringify(payload),
   });
   return res;
+}
+
+// ---------------------------------------------------------------------------
+// Real amenities, house rules, nearby facilities, and listing
+// conditions — mobile parity with the web app's List a Property page,
+// same session.
+// ---------------------------------------------------------------------------
+export async function setPropertyAmenities(propertyType: string, propertyId: string, amenities: string[]) {
+  const endpoint = propertyType === "HOUSE" ? "houses" : propertyType.toLowerCase() + "s";
+  const res = await fetch(`${API_BASE_URL}/api/${endpoint}/${propertyId}/set-amenities/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ amenities }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set amenities");
+  return res.json();
+}
+
+export async function setPropertyHouseRules(propertyId: string, houseRules: string[]) {
+  const res = await fetch(`${API_BASE_URL}/api/houses/${propertyId}/set-house-rules/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ house_rules: houseRules }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set house rules");
+  return res.json();
+}
+
+export interface PointOfInterestItem {
+  id: string;
+  name: string;
+  poi_type_display: string;
+}
+
+export async function listPointsOfInterest(quarterId: string): Promise<PointOfInterestItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/points-of-interest/?quarter=${quarterId}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.results || data;
+}
+
+export async function setNearbyFacilities(propertyId: string, pointOfInterestIds: string[]) {
+  const res = await fetch(`${API_BASE_URL}/api/houses/${propertyId}/set-nearby-facilities/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ point_of_interest_ids: pointOfInterestIds }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set nearby facilities");
+  return res.json();
+}
+
+export async function attachListingCondition(payload: { target_content_type: string; target_id: string; structured_conditions: Record<string, unknown>; free_text_clause: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/listing-conditions/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not set listing conditions");
+  return res.json();
 }
 
 // ---------------------------------------------------------------------------
@@ -1203,5 +1264,15 @@ export interface TechnicianDashboardData {
 export async function getMyTechnicianDashboard(): Promise<TechnicianDashboardData> {
   const res = await fetch(`${API_BASE_URL}/api/my-technician-dashboard/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error("Could not fetch dashboard");
+  return res.json();
+}
+
+export async function submitContactMessage(payload: { name: string; email: string; message: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/contact/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Contact submission failed");
   return res.json();
 }

@@ -43,6 +43,9 @@ import PremiumScreen from "../screens/PremiumScreen";
 import PrivacySettingsScreen from "../screens/PrivacySettingsScreen";
 import ReferralsScreen from "../screens/ReferralsScreen";
 import TechnicianDashboardScreen from "../screens/TechnicianDashboardScreen";
+import AboutScreen from "../screens/AboutScreen";
+import ContactScreen from "../screens/ContactScreen";
+import HowItWorksScreen from "../screens/HowItWorksScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -87,6 +90,9 @@ export type RootStackParamList = {
   PrivacySettings: undefined;
   Referrals: undefined;
   TechnicianDashboard: undefined;
+  About: undefined;
+  Contact: undefined;
+  HowItWorks: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -150,6 +156,9 @@ export default function AppNavigator() {
         <Stack.Screen name="PrivacySettings" component={PrivacySettingsScreen} options={{ title: "Privacy Settings" }} />
         <Stack.Screen name="Referrals" component={ReferralsScreen} options={{ title: "Referrals" }} />
         <Stack.Screen name="TechnicianDashboard" component={TechnicianDashboardScreen} options={{ title: "Technician Dashboard" }} />
+        <Stack.Screen name="About" component={AboutScreen} options={{ title: "About" }} />
+        <Stack.Screen name="Contact" component={ContactScreen} options={{ title: "Contact" }} />
+        <Stack.Screen name="HowItWorks" component={HowItWorksScreen} options={{ title: "How It Works" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
