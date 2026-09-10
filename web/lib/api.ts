@@ -1434,6 +1434,41 @@ export interface RideBookingItem {
   completed_at: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// My Bookings and real dispute-opening. The real gap this closes:
+// open_dispute() existed, fully built (real SLA deadlines, flips the
+// escrow to DISPUTED), but was never called from anywhere reachable
+// — a real person whose payment went wrong had no way to raise it.
+// ---------------------------------------------------------------------------
+export interface BookingItem {
+  id: string;
+  booking_type: string;
+  target_content_type: string;
+  target_id: string;
+  status: string;
+  amount_xaf: string;
+  has_escrow: boolean;
+  hold_expires_at: string | null;
+  created_at: string;
+}
+
+export async function listMyBookings(accessToken: string): Promise<PaginatedResponse<BookingItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/bookings/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch bookings");
+  return res.json();
+}
+
+export async function openDispute(bookingId: string, reason: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/bookings/${bookingId}/open-dispute/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ reason }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not open a dispute");
+  return data;
+}
+
 export async function listMyRides(accessToken: string): Promise<{ count: number; results: RideBookingItem[] }> {
   const res = await fetch(`${API_BASE_URL}/api/rides/`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error("Could not fetch rides");

@@ -150,3 +150,52 @@ def test_completing_a_booking_releases_the_escrow(sample_listing):
     assert booking.status == BookingStatus.COMPLETED
     assert escrow.status == EscrowStatus.RELEASED
     assert escrow.released_at is not None
+
+
+# ---------------------------------------------------------------------
+# has_escrow — a real gap this closes: OpenDisputeView already
+# correctly rejects a dispute on a booking with no payment escrow
+# yet, but a real client had no way to know that in advance without
+# trying and getting a 400.
+# ---------------------------------------------------------------------
+@pytest.mark.django_db
+def test_a_booking_with_no_payment_reports_has_escrow_false():
+    from rest_framework.test import APIClient
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from transactions.models import Booking
+
+    user = User.objects.create(username="escrow_flag_no_payment", phone="+237699444401")
+    booking = Booking.objects.create(
+        booking_type=BookingType.GENERAL_RENTAL, target_content_type="property.Listing", target_id=uuid.uuid4(),
+        requester=user, status=BookingStatus.PENDING, amount_xaf=Decimal("50000"), idempotency_key="has-escrow-test-1",
+    )
+    token = RefreshToken.for_user(user)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+
+    response = client.get(f"/api/bookings/{booking.id}/")
+
+    assert response.data["has_escrow"] is False
+
+
+@pytest.mark.django_db
+def test_a_booking_with_real_payment_reports_has_escrow_true():
+    from rest_framework.test import APIClient
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from transactions.models import Booking, PaymentEscrow, EscrowStatus
+
+    user = User.objects.create(username="escrow_flag_with_payment", phone="+237699444402")
+    booking = Booking.objects.create(
+        booking_type=BookingType.GENERAL_RENTAL, target_content_type="property.Listing", target_id=uuid.uuid4(),
+        requester=user, status=BookingStatus.CONFIRMED, amount_xaf=Decimal("50000"), idempotency_key="has-escrow-test-2",
+    )
+    PaymentEscrow.objects.create(
+        booking=booking, gross_amount_xaf=Decimal("50000"), payee_amount_xaf=Decimal("45000"), status=EscrowStatus.HELD,
+    )
+    token = RefreshToken.for_user(user)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+
+    response = client.get(f"/api/bookings/{booking.id}/")
+
+    assert response.data["has_escrow"] is True

@@ -46,7 +46,8 @@
     "careers": "Careers",
     "propertyManagement": "Property Management",
     "marketplace": "Marketplace",
-    "tasklnService": "Taskln Service"
+    "tasklnService": "Taskln Service",
+    "myBookings": "My Bookings"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -833,5 +834,26 @@
     "completeAndPay": "Complete & Pay",
     "phoneNumberPlaceholder": "Phone number",
     "pay": "Pay"
+  },
+  "BookingsPage": {
+    "title": "My Bookings",
+    "subtitle": "Every real booking and payment you've made on Oaziland.",
+    "signInRequired": "Please sign in to view your bookings",
+    "noBookingsYet": "No bookings yet.",
+    "bookingType_LAND_RESERVATION": "Land Reservation",
+    "bookingType_HOTEL": "Hotel",
+    "bookingType_EVENT": "Event Venue",
+    "bookingType_HOSTEL_SEMESTER": "Student Hostel",
+    "bookingType_GUEST_HOUSE": "Guest House",
+    "bookingType_GENERAL_RENTAL": "Property Rental",
+    "bookingType_SERVICE_REQUEST": "Taskln Service",
+    "bookingType_MARKETPLACE_ITEM": "Marketplace",
+    "bookingType_RIDE": "OaziGo",
+    "openDispute": "Open a Dispute",
+    "disputeReasonPlaceholder": "What went wrong with this payment?",
+    "submitDispute": "Submit Dispute",
+    "cancel": "Cancel",
+    "disputeSubmitted": "Dispute submitted. Our team will review it.",
+    "disputeFailed": "Could not open a dispute. Please try again."
   }
 }

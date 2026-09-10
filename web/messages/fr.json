@@ -46,7 +46,8 @@
     "careers": "Carrières",
     "propertyManagement": "Gestion Immobilière",
     "marketplace": "Marché",
-    "tasklnService": "Taskln Service"
+    "tasklnService": "Taskln Service",
+    "myBookings": "Mes Réservations"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -833,5 +834,26 @@
     "completeAndPay": "Terminer et Payer",
     "phoneNumberPlaceholder": "Numéro de téléphone",
     "pay": "Payer"
+  },
+  "BookingsPage": {
+    "title": "Mes Réservations",
+    "subtitle": "Toutes vos réservations et paiements réels sur Oaziland.",
+    "signInRequired": "Veuillez vous connecter pour voir vos réservations",
+    "noBookingsYet": "Aucune réservation pour le moment.",
+    "bookingType_LAND_RESERVATION": "Réservation de Terrain",
+    "bookingType_HOTEL": "Hôtel",
+    "bookingType_EVENT": "Salle d'Événement",
+    "bookingType_HOSTEL_SEMESTER": "Résidence Étudiante",
+    "bookingType_GUEST_HOUSE": "Maison d'Hôtes",
+    "bookingType_GENERAL_RENTAL": "Location de Propriété",
+    "bookingType_SERVICE_REQUEST": "Taskln Service",
+    "bookingType_MARKETPLACE_ITEM": "Marché",
+    "bookingType_RIDE": "OaziGo",
+    "openDispute": "Ouvrir un Litige",
+    "disputeReasonPlaceholder": "Qu'est-ce qui n'a pas fonctionné avec ce paiement ?",
+    "submitDispute": "Soumettre le Litige",
+    "cancel": "Annuler",
+    "disputeSubmitted": "Litige soumis. Notre équipe l'examinera.",
+    "disputeFailed": "Impossible d'ouvrir un litige. Veuillez réessayer."
   }
 }
