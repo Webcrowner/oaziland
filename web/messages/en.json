@@ -554,7 +554,9 @@
     "roomsAvailable": "{count} room type",
     "roomsAvailableOther": "{count} room types",
     "spacesAvailable": "{count} space",
-    "spacesAvailableOther": "{count} spaces"
+    "spacesAvailableOther": "{count} spaces",
+    "pendingDrivers": "Pending OaziGo Drivers",
+    "licenseLabel": "License"
   },
   "FavoritesPage": {
     "title": "Saved Listings",

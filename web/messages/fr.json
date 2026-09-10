@@ -554,7 +554,9 @@
     "roomsAvailable": "{count} type de chambre",
     "roomsAvailableOther": "{count} types de chambres",
     "spacesAvailable": "{count} espace",
-    "spacesAvailableOther": "{count} espaces"
+    "spacesAvailableOther": "{count} espaces",
+    "pendingDrivers": "Chauffeurs OaziGo en Attente",
+    "licenseLabel": "Permis"
   },
   "FavoritesPage": {
     "title": "Annonces Enregistrées",

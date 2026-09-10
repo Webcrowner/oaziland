@@ -1496,6 +1496,20 @@ export async function registerAsDriver(licenseNumber: string, accessToken: strin
   return data;
 }
 
+export async function listDriversForAdmin(accessToken: string): Promise<PaginatedResponse<DriverProfileItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/drivers/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch pending drivers");
+  return res.json();
+}
+
+export async function verifyDriver(driverId: number, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/admin/drivers/${driverId}/verify/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return res;
+}
+
 export interface VehicleItem {
   id: number;
   vehicle_category: string;

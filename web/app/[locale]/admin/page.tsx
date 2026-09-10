@@ -7,8 +7,9 @@ import {
   listAdminContentReports, resolveContentReport,
   listAdminDisputeCases, respondToDispute, resolveDispute,
   listHotelsForAdmin, verifyHotel, listVenuesForAdmin, verifyVenue,
+  listDriversForAdmin, verifyDriver,
   type AdminConsoleSummary, type AdminVerificationRequest, type AdminContentReport, type AdminDisputeCase,
-  type Hotel, type Venue,
+  type Hotel, type Venue, type DriverProfileItem,
 } from "@/lib/api";
 
 type Tab = "summary" | "verifications" | "reports" | "disputes" | "listings";
@@ -31,6 +32,7 @@ export default function AdminConsolePage() {
   const [disputes, setDisputes] = useState<AdminDisputeCase[]>([]);
   const [pendingHotels, setPendingHotels] = useState<Hotel[]>([]);
   const [pendingVenues, setPendingVenues] = useState<Venue[]>([]);
+  const [pendingDrivers, setPendingDrivers] = useState<DriverProfileItem[]>([]);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
 
@@ -46,14 +48,16 @@ export default function AdminConsolePage() {
       listAdminDisputeCases(token),
       listHotelsForAdmin(token),
       listVenuesForAdmin(token),
+      listDriversForAdmin(token),
     ])
-      .then(([summaryData, verificationsData, reportsData, disputesData, hotelsData, venuesData]) => {
+      .then(([summaryData, verificationsData, reportsData, disputesData, hotelsData, venuesData, driversData]) => {
         setSummary(summaryData);
         setVerifications(verificationsData.results);
         setReports(reportsData.results);
         setDisputes(disputesData.results);
         setPendingHotels(hotelsData.results.filter((h) => !h.verified));
         setPendingVenues(venuesData.results.filter((v) => !v.verified));
+        setPendingDrivers(driversData.results);
         setStatus("ready");
       })
       .catch(() => setStatus("notAdmin"));
@@ -138,6 +142,16 @@ export default function AdminConsolePage() {
     loadAll();
   }
 
+  async function handleVerifyDriver(id: number) {
+    if (!token) return;
+    const res = await verifyDriver(id, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
+    loadAll();
+  }
+
   if (status === "signedOut") {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
@@ -180,7 +194,7 @@ export default function AdminConsolePage() {
             {tabItem.key === "verifications" && verifications.length > 0 && ` (${verifications.length})`}
             {tabItem.key === "reports" && reports.length > 0 && ` (${reports.length})`}
             {tabItem.key === "disputes" && disputes.length > 0 && ` (${disputes.length})`}
-            {tabItem.key === "listings" && (pendingHotels.length + pendingVenues.length) > 0 && ` (${pendingHotels.length + pendingVenues.length})`}
+            {tabItem.key === "listings" && (pendingHotels.length + pendingVenues.length + pendingDrivers.length) > 0 && ` (${pendingHotels.length + pendingVenues.length + pendingDrivers.length})`}
           </button>
         ))}
       </div>
@@ -304,6 +318,22 @@ export default function AdminConsolePage() {
                       </p>
                     </div>
                     <button onClick={() => handleVerifyVenue(venue.id)} className="bg-green-600 text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("verify")}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">{t("pendingDrivers")}</h2>
+            {pendingDrivers.length === 0 ? (
+              <p className="text-gray-500">{t("noItems")}</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {pendingDrivers.map((driver) => (
+                  <div key={driver.id} className="border rounded-lg p-4 bg-white flex items-center justify-between flex-wrap gap-3">
+                    <p className="text-sm text-gray-700">{t("licenseLabel")}: {driver.license_number}</p>
+                    <button onClick={() => handleVerifyDriver(driver.id)} className="bg-green-600 text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("verify")}</button>
                   </div>
                 ))}
               </div>
