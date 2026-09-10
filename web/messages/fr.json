@@ -47,7 +47,8 @@
     "propertyManagement": "Gestion Immobilière",
     "marketplace": "Marché",
     "tasklnService": "Taskln Service",
-    "myBookings": "Mes Réservations"
+    "myBookings": "Mes Réservations",
+    "financialTools": "Outils Financiers"
   },
   "PropertyCard": {
     "noPhotoYet": "Pas encore de photo",
@@ -855,5 +856,25 @@
     "cancel": "Annuler",
     "disputeSubmitted": "Litige soumis. Notre équipe l'examinera.",
     "disputeFailed": "Impossible d'ouvrir un litige. Veuillez réessayer."
+  },
+  "FinancePage": {
+    "title": "Outils Financiers",
+    "subtitle": "Estimez la valeur d'une propriété, ou le loyer que vous pouvez vous permettre — des formules simples et transparentes.",
+    "tabValuation": "Estimation de Propriété",
+    "tabAffordability": "Capacité de Loyer",
+    "propertyTypeHouse": "Maison",
+    "propertyTypeLand": "Terrain",
+    "propertyTypeShop": "Boutique",
+    "getEstimate": "Obtenir une Estimation",
+    "estimating": "Estimation en cours...",
+    "estimateFailed": "Impossible de calculer une estimation. Veuillez réessayer.",
+    "estimatedRangeFor": "Fourchette estimée pour {quarter}",
+    "basedOnComparables": "Basé sur {count} annonce comparable",
+    "basedOnComparablesOther": "Basé sur {count} annonces comparables",
+    "valuationMethodNote": "Il s'agit d'une vraie moyenne des annonces comparables actuellement actives dans le même quartier — pas une expertise professionnelle.",
+    "monthlyIncomePlaceholder": "Revenu mensuel (XAF)",
+    "comfortableRent": "Loyer Confortable (25% du revenu)",
+    "maxRecommendedRent": "Loyer Maximum Recommandé (33% du revenu)",
+    "affordabilityMethodNote": "Une directive de capacité simple et transparente — pas une évaluation de crédit ou de prêt."
   }
 }

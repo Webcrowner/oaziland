@@ -59,6 +59,7 @@ export default function Footer() {
             <li><Link href="/favorites" className="hover:text-[#8A6D14] transition-colors">{t("favorites")}</Link></li>
             <li><Link href="/saved-searches" className="hover:text-[#8A6D14] transition-colors">{t("savedSearches")}</Link></li>
             <li><Link href="/bookings" className="hover:text-[#8A6D14] transition-colors">{t("myBookings")}</Link></li>
+            <li><Link href="/finance" className="hover:text-[#8A6D14] transition-colors">{t("financialTools")}</Link></li>
             <li><Link href="/compare" className="hover:text-[#8A6D14] transition-colors">{t("compare")}</Link></li>
             <li><Link href="/dashboard" className="hover:text-[#8A6D14] transition-colors">{t("dashboard")}</Link></li>
             <li><Link href="/property-management" className="hover:text-[#8A6D14] transition-colors">{t("propertyManagement")}</Link></li>

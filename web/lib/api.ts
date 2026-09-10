@@ -248,6 +248,52 @@ export async function listQuarters(): Promise<Quarter[]> {
   return data.results;
 }
 
+// ---------------------------------------------------------------------------
+// Finance — real property valuation and rent-affordability tools. The
+// real gap this closes: estimate_property_value() and
+// estimate_affordable_rent_range() had real, working logic and even
+// a real model to store valuation results in, but no page anywhere
+// ever exposed either one. Public: neither requires an account,
+// matching how every other browse/search surface on the platform works.
+// ---------------------------------------------------------------------------
+export interface ValuationEstimateResult {
+  id: string;
+  quarter: string;
+  quarter_name: string;
+  property_type: string;
+  estimated_low_xaf: string;
+  estimated_high_xaf: string;
+  comparable_count: number;
+  created_at: string;
+}
+
+export async function estimatePropertyValue(quarterId: string, propertyType: string): Promise<ValuationEstimateResult> {
+  const res = await fetch(`${API_BASE_URL}/api/valuations/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quarter: quarterId, property_type: propertyType }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not estimate value");
+  return data;
+}
+
+export interface AffordabilityResult {
+  comfortable_rent_xaf: string;
+  max_recommended_rent_xaf: string;
+}
+
+export async function estimateAffordability(monthlyIncomeXaf: string): Promise<AffordabilityResult> {
+  const res = await fetch(`${API_BASE_URL}/api/affordability/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ monthly_income_xaf: monthlyIncomeXaf }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not estimate affordability");
+  return data;
+}
+
 export interface RoomTypeSummary {
   id: string;
   category: string;

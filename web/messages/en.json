@@ -47,7 +47,8 @@
     "propertyManagement": "Property Management",
     "marketplace": "Marketplace",
     "tasklnService": "Taskln Service",
-    "myBookings": "My Bookings"
+    "myBookings": "My Bookings",
+    "financialTools": "Financial Tools"
   },
   "PropertyCard": {
     "noPhotoYet": "No photo yet",
@@ -855,5 +856,25 @@
     "cancel": "Cancel",
     "disputeSubmitted": "Dispute submitted. Our team will review it.",
     "disputeFailed": "Could not open a dispute. Please try again."
+  },
+  "FinancePage": {
+    "title": "Financial Tools",
+    "subtitle": "Estimate a property's value, or the rent you can afford — simple, transparent formulas.",
+    "tabValuation": "Property Valuation",
+    "tabAffordability": "Rent Affordability",
+    "propertyTypeHouse": "House",
+    "propertyTypeLand": "Land",
+    "propertyTypeShop": "Shop",
+    "getEstimate": "Get Estimate",
+    "estimating": "Estimating...",
+    "estimateFailed": "Could not calculate an estimate. Please try again.",
+    "estimatedRangeFor": "Estimated range for {quarter}",
+    "basedOnComparables": "Based on {count} comparable listing",
+    "basedOnComparablesOther": "Based on {count} comparable listings",
+    "valuationMethodNote": "This is a real average of currently active comparable listings in the same neighborhood — not a professional appraisal.",
+    "monthlyIncomePlaceholder": "Monthly income (XAF)",
+    "comfortableRent": "Comfortable Rent (25% of income)",
+    "maxRecommendedRent": "Maximum Recommended Rent (33% of income)",
+    "affordabilityMethodNote": "A simple, transparent affordability guideline — not a credit or loan assessment."
   }
 }
