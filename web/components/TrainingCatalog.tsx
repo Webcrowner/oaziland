@@ -48,12 +48,12 @@ export default function TrainingCatalog({ programs }: { programs: TrainingProgra
         const isEnrolled = enrolledIds.has(program.id);
         return (
           <div key={program.id} className="border rounded-lg p-4 bg-white flex flex-col">
-            <p className="text-xs font-semibold uppercase text-[#1B2A4A] bg-gray-100 px-2 py-1 rounded self-start mb-2">
+            <p className="text-xs font-semibold uppercase text-[var(--navy)] bg-gray-100 px-2 py-1 rounded self-start mb-2">
               {program.category.replaceAll("_", " ")}
             </p>
-            <h2 className="font-semibold text-[#1B2A4A] mb-1">{program.title}</h2>
+            <h2 className="font-semibold text-[var(--navy)] mb-1">{program.title}</h2>
             {program.description && <p className="text-sm text-gray-600 mb-2 flex-1">{program.description}</p>}
-            <p className="text-sm font-semibold text-[#C9A227] mb-1">
+            <p className="text-sm font-semibold text-[var(--gold)] mb-1">
               {program.price_xaf ? t("priceLabel", { price: Number(program.price_xaf).toLocaleString() }) : t("free")}
             </p>
             {program.issues_certification && <p className="text-xs text-gray-500 mb-3">🏅 {t("issuesCertificate")}</p>}
@@ -61,7 +61,7 @@ export default function TrainingCatalog({ programs }: { programs: TrainingProgra
             <button
               onClick={() => handleEnroll(program.id)}
               disabled={isEnrolled || enrollingId === program.id}
-              className="mt-auto bg-[#1B2A4A] text-white font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50 text-sm"
+              className="mt-auto bg-[var(--navy)] text-white font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50 text-sm"
             >
               {!loggedIn ? t("signInToEnroll") : isEnrolled ? t("alreadyEnrolled") : enrollingId === program.id ? t("enrolling") : t("enroll")}
             </button>

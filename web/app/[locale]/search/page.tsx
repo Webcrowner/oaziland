@@ -43,7 +43,7 @@ export default async function SearchPage({
   return (
     <main>
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
+        <h1 className="text-2xl font-bold text-[var(--navy)] mb-1">{t("title")}</h1>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <p className="text-gray-600">
             {data.count === 1 ? t("countFoundOne", { count: data.count }) : t("countFoundOther", { count: data.count })}

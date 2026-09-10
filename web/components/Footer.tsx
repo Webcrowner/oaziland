@@ -22,7 +22,7 @@ export default function Footer() {
         </div>
 
         <div>
-          <h3 className="text-sm font-semibold text-[#1B2A4A] mb-3">{t("discover")}</h3>
+          <h3 className="text-sm font-semibold text-[var(--navy)] mb-3">{t("discover")}</h3>
           <ul className="text-sm text-gray-600 flex flex-col gap-2">
             <li><Link href="/search" className="hover:text-[#8A6D14] transition-colors">{t("searchProperties")}</Link></li>
             <li><Link href="/buy" className="hover:text-[#8A6D14] transition-colors">{t("buy")}</Link></li>
@@ -39,7 +39,7 @@ export default function Footer() {
         </div>
 
         <div>
-          <h3 className="text-sm font-semibold text-[#1B2A4A] mb-3">{t("company")}</h3>
+          <h3 className="text-sm font-semibold text-[var(--navy)] mb-3">{t("company")}</h3>
           <ul className="text-sm text-gray-600 flex flex-col gap-2">
             <li><Link href="/about" className="hover:text-[#8A6D14] transition-colors">{t("about")}</Link></li>
             <li><Link href="/agents" className="hover:text-[#8A6D14] transition-colors">{t("agents")}</Link></li>
@@ -50,7 +50,7 @@ export default function Footer() {
         </div>
 
         <div>
-          <h3 className="text-sm font-semibold text-[#1B2A4A] mb-3">{t("account")}</h3>
+          <h3 className="text-sm font-semibold text-[var(--navy)] mb-3">{t("account")}</h3>
           <ul className="text-sm text-gray-600 flex flex-col gap-2">
             <li><Link href="/login" className="hover:text-[#8A6D14] transition-colors">{t("signIn")}</Link></li>
             <li><Link href="/register" className="hover:text-[#8A6D14] transition-colors">{t("register")}</Link></li>
@@ -63,7 +63,7 @@ export default function Footer() {
             <li><Link href="/property-management" className="hover:text-[#8A6D14] transition-colors">{t("propertyManagement")}</Link></li>
             <li><Link href="/referrals" className="hover:text-[#8A6D14] transition-colors">{t("referrals")}</Link></li>
           </ul>
-          <h3 className="text-sm font-semibold text-[#1B2A4A] mb-3 mt-6">{t("brandName")}</h3>
+          <h3 className="text-sm font-semibold text-[var(--navy)] mb-3 mt-6">{t("brandName")}</h3>
           <p className="text-sm text-gray-500">{t("address")}</p>
         </div>
       </div>

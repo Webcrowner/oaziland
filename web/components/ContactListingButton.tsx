@@ -40,7 +40,7 @@ export default function ContactListingButton({ listingId }: { listingId: string 
       <button
         onClick={handleContact}
         disabled={loading}
-        className="bg-[#C9A227] text-[#1B2A4A] font-semibold px-6 py-3 rounded hover:opacity-90 disabled:opacity-50"
+        className="bg-[var(--gold)] text-[var(--navy)] font-semibold px-6 py-3 rounded hover:opacity-90 disabled:opacity-50"
       >
         {loading ? t("contacting") : t("contactOnWhatsApp")}
       </button>

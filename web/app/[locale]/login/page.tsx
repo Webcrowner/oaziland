@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
+import { useRouter, Link } from "@/i18n/navigation";
 import { loginUser } from "@/lib/api";
+import Button from "@/components/ui/Button";
 
 export default function LoginPage() {
   const t = useTranslations("LoginPage");
@@ -34,7 +35,7 @@ export default function LoginPage() {
   return (
     <main>
       <div className="max-w-sm mx-auto px-4 py-12">
-        <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">{t("title")}</h1>
+        <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-6">{t("title")}</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <input
             type="text" placeholder={t("usernamePlaceholder")} required
@@ -47,10 +48,11 @@ export default function LoginPage() {
             value={password} onChange={(e) => setPassword(e.target.value)}
           />
           {error && <p className="text-red-600 text-sm">{error}</p>}
-          <button type="submit" disabled={loading} className="bg-[#1B2A4A] text-white font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
-            {loading ? t("signingIn") : t("signIn")}
-          </button>
+          <Button disabled={loading}>{loading ? t("signingIn") : t("signIn")}</Button>
         </form>
+        <p className="text-sm text-gray-500 mt-4 text-center">
+          {t("noAccountYet")} <Link href="/register" className="text-[var(--navy)] font-semibold hover:text-[var(--gold)]">{t("createAccount")}</Link>
+        </p>
       </div>
     </main>
   );

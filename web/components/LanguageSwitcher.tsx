@@ -23,7 +23,7 @@ export default function LanguageSwitcher() {
           key={loc}
           onClick={() => switchTo(loc)}
           className={`px-2 py-1 rounded transition-colors ${
-            locale === loc ? "bg-[#C9A227] text-[#1B2A4A] font-semibold" : "text-gray-300 hover:text-white"
+            locale === loc ? "bg-[var(--gold)] text-[var(--navy)] font-semibold" : "text-gray-300 hover:text-white"
           }`}
           aria-current={locale === loc}
         >

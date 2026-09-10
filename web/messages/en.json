@@ -166,7 +166,9 @@
     "passwordPlaceholder": "Password",
     "signingIn": "Signing in...",
     "signIn": "Sign In",
-    "loginFailed": "Login failed"
+    "loginFailed": "Login failed",
+    "noAccountYet": "Don't have an account?",
+    "createAccount": "Create one"
   },
   "RegisterPage": {
     "title": "Create your account",
@@ -180,7 +182,9 @@
     "register": "Register",
     "registrationFailed": "Registration failed",
     "mfaNotice": "Multi-factor authentication and identity verification (KYC) will be set up on your next login, per the platform's security requirements.",
-    "referralCodeApplied": "Referral code {code} applied — you'll both earn a reward once your account is verified."
+    "referralCodeApplied": "Referral code {code} applied — you'll both earn a reward once your account is verified.",
+    "alreadyHaveAccount": "Already have an account?",
+    "signInInstead": "Sign in"
   },
   "HotelsPage": {
     "title": "Hotels",

@@ -166,7 +166,7 @@ export default function ListPropertyPage() {
   return (
     <main>
       <div className="max-w-lg mx-auto px-4 py-12">
-        <h1 className="text-2xl font-bold text-[#1B2A4A] mb-2">{t("title")}</h1>
+        <h1 className="text-2xl font-bold text-[var(--navy)] mb-2">{t("title")}</h1>
         <p className="text-gray-600 mb-6 text-sm">{t("description")}</p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -269,12 +269,12 @@ export default function ListPropertyPage() {
             </p>
           )}
           {needsMfa && (
-            <Link href="/mfa-setup" className="text-sm font-semibold text-[#1B2A4A] hover:text-[#C9A227] underline">
+            <Link href="/mfa-setup" className="text-sm font-semibold text-[var(--navy)] hover:text-[var(--gold)] underline">
               {t("completeMfaSetup")} →
             </Link>
           )}
 
-          <button type="submit" disabled={loading} className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
+          <button type="submit" disabled={loading} className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
             {loading ? t("submitting") : t("submit")}
           </button>
         </form>

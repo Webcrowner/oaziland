@@ -63,7 +63,7 @@ export default function CompareButton({ listingId }: { listingId: string }) {
 
   return (
     <div>
-      <button onClick={handleToggle} disabled={saving} className="font-semibold px-4 py-2 rounded border border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50 disabled:opacity-50">
+      <button onClick={handleToggle} disabled={saving} className="font-semibold px-4 py-2 rounded border border-[var(--navy)] text-[var(--navy)] hover:bg-gray-50 disabled:opacity-50">
         {isStaged ? t("removeFromCompare") : t("compare")}
       </button>
       {failed && <p className="text-red-600 text-xs mt-1">{t("saveFailed")}</p>}

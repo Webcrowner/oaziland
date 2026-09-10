@@ -1,9 +1,10 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
+import { useRouter, Link } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
 import { registerUser } from "@/lib/api";
+import Button from "@/components/ui/Button";
 
 /**
  * Registration — Page 4 of Prompt 17. A Client Component (needs
@@ -55,7 +56,7 @@ function RegisterForm() {
   return (
     <main>
       <div className="max-w-sm mx-auto px-4 py-12">
-        <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">{t("title")}</h1>
+        <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-6">{t("title")}</h1>
 
         {referralCode && (
           <p className="text-sm bg-green-50 text-green-800 rounded px-3 py-2 mb-4">
@@ -97,11 +98,12 @@ function RegisterForm() {
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
           {error && <p className="text-red-600 text-sm">{error}</p>}
-          <button type="submit" disabled={loading} className="bg-[#1B2A4A] text-white font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
-            {loading ? t("creatingAccount") : t("register")}
-          </button>
+          <Button disabled={loading}>{loading ? t("creatingAccount") : t("register")}</Button>
         </form>
         <p className="text-sm text-gray-500 mt-4">{t("mfaNotice")}</p>
+        <p className="text-sm text-gray-500 mt-4 text-center">
+          {t("alreadyHaveAccount")} <Link href="/login" className="text-[var(--navy)] font-semibold hover:text-[var(--gold)]">{t("signInInstead")}</Link>
+        </p>
       </div>
     </main>
   );

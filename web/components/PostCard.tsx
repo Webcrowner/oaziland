@@ -67,22 +67,22 @@ export default function PostCard({ post }: { post: SocialPost }) {
     <div className="border rounded-lg bg-white overflow-hidden">
       <div className="p-4">
         <div className="flex items-center gap-2 mb-2 flex-wrap">
-          <span className="font-semibold text-[#1B2A4A] text-sm">{post.author_name}</span>
+          <span className="font-semibold text-[var(--navy)] text-sm">{post.author_name}</span>
           {post.is_verified_creator && (
-            <span className="text-xs bg-[#1B2A4A] text-white px-2 py-0.5 rounded-full">✓ {t("verifiedBadge")}</span>
+            <span className="text-xs bg-[var(--navy)] text-white px-2 py-0.5 rounded-full">✓ {t("verifiedBadge")}</span>
           )}
           {post.is_sponsored && (
             <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{t("sponsoredBadge")}</span>
           )}
           {post.linked_listing_id && (
-            <Link href={`/listing/${post.linked_listing_id}`} className="text-xs bg-[#C9A227]/20 text-[#8A6D14] px-2 py-0.5 rounded font-semibold">
+            <Link href={`/listing/${post.linked_listing_id}`} className="text-xs bg-[var(--gold)]/20 text-[#8A6D14] px-2 py-0.5 rounded font-semibold">
               🏠 {t("realEstateBadge")}
             </Link>
           )}
         </div>
         <p className="text-gray-800 text-sm mb-2">{post.caption}</p>
         {post.tag_names.length > 0 && (
-          <p className="text-xs text-[#1B2A4A] mb-2">{post.tag_names.map((tag) => `#${tag}`).join(" ")}</p>
+          <p className="text-xs text-[var(--navy)] mb-2">{post.tag_names.map((tag) => `#${tag}`).join(" ")}</p>
         )}
       </div>
 
@@ -101,7 +101,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
             </button>
           ))}
         </div>
-        <button onClick={toggleComments} className="text-sm text-gray-500 hover:text-[#1B2A4A]">
+        <button onClick={toggleComments} className="text-sm text-gray-500 hover:text-[var(--navy)]">
           💬 {t("comments", { count: commentCount })}
         </button>
       </div>
@@ -113,7 +113,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
           <div className="flex flex-col gap-2 mb-3">
             {comments.map((c) => (
               <div key={c.id} className="text-sm">
-                <span className="font-semibold text-[#1B2A4A]">{c.author_name}</span>{" "}
+                <span className="font-semibold text-[var(--navy)]">{c.author_name}</span>{" "}
                 <span className="text-gray-700">{c.text}</span>
               </div>
             ))}
@@ -123,7 +123,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
               type="text" value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)}
               className="flex-1 border rounded px-3 py-1 text-sm"
             />
-            <button type="submit" className="bg-[#1B2A4A] text-white text-sm font-semibold px-3 py-1 rounded">→</button>
+            <button type="submit" className="bg-[var(--navy)] text-white text-sm font-semibold px-3 py-1 rounded">→</button>
           </form>
         </div>
       )}

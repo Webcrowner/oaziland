@@ -114,7 +114,7 @@ export default function AdminConsolePage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
+        <Link href="/login" className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("signInRequired")}
         </Link>
       </main>
@@ -138,14 +138,14 @@ export default function AdminConsolePage() {
 
   return (
     <main className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">{t("title")}</h1>
+      <h1 className="text-2xl font-bold text-[var(--navy)] mb-6">{t("title")}</h1>
 
       <div className="flex flex-wrap gap-2 mb-8 border-b pb-4">
         {tabs.map((tabItem) => (
           <button
             key={tabItem.key}
             onClick={() => setTab(tabItem.key)}
-            className={`px-4 py-2 rounded text-sm font-semibold transition-colors ${tab === tabItem.key ? "bg-[#1B2A4A] text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+            className={`px-4 py-2 rounded text-sm font-semibold transition-colors ${tab === tabItem.key ? "bg-[var(--navy)] text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
           >
             {t(tabItem.labelKey)}
             {tabItem.key === "verifications" && verifications.length > 0 && ` (${verifications.length})`}
@@ -159,15 +159,15 @@ export default function AdminConsolePage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="border rounded-lg p-5 bg-white">
             <p className="text-xs text-gray-500 mb-1">{t("pendingVerifications")}</p>
-            <p className="text-2xl font-bold text-[#1B2A4A]">{summary.pending_verification_requests}</p>
+            <p className="text-2xl font-bold text-[var(--navy)]">{summary.pending_verification_requests}</p>
           </div>
           <div className="border rounded-lg p-5 bg-white">
             <p className="text-xs text-gray-500 mb-1">{t("openReports")}</p>
-            <p className="text-2xl font-bold text-[#1B2A4A]">{summary.open_content_reports}</p>
+            <p className="text-2xl font-bold text-[var(--navy)]">{summary.open_content_reports}</p>
           </div>
           <div className="border rounded-lg p-5 bg-white">
             <p className="text-xs text-gray-500 mb-1">{t("openDisputes")}</p>
-            <p className="text-2xl font-bold text-[#1B2A4A]">{summary.open_dispute_cases}</p>
+            <p className="text-2xl font-bold text-[var(--navy)]">{summary.open_dispute_cases}</p>
           </div>
         </div>
       )}
@@ -180,9 +180,9 @@ export default function AdminConsolePage() {
             verifications.map((v) => (
               <div key={v.id} className="border rounded-lg p-4 bg-white flex items-center justify-between flex-wrap gap-3">
                 <div>
-                  <p className="font-semibold text-[#1B2A4A] text-sm">{v.requester_name} — {v.request_type.replaceAll("_", " ")}</p>
+                  <p className="font-semibold text-[var(--navy)] text-sm">{v.requester_name} — {v.request_type.replaceAll("_", " ")}</p>
                   {v.supporting_document_url && (
-                    <a href={v.supporting_document_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[#1B2A4A] underline">
+                    <a href={v.supporting_document_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--navy)] underline">
                       {v.supporting_document_url}
                     </a>
                   )}
@@ -205,11 +205,11 @@ export default function AdminConsolePage() {
             reports.map((r) => (
               <div key={r.id} className="border rounded-lg p-4 bg-white flex items-center justify-between flex-wrap gap-3">
                 <div>
-                  <p className="font-semibold text-[#1B2A4A] text-sm">{r.reason.replaceAll("_", " ")}</p>
+                  <p className="font-semibold text-[var(--navy)] text-sm">{r.reason.replaceAll("_", " ")}</p>
                   <p className="text-xs text-gray-500">{t("tabReports")}: {r.reported_by_name}</p>
                   {r.notes && <p className="text-xs text-gray-600 mt-1">{r.notes}</p>}
                 </div>
-                <button onClick={() => handleResolveReport(r.id)} className="bg-[#1B2A4A] text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("resolve")}</button>
+                <button onClick={() => handleResolveReport(r.id)} className="bg-[var(--navy)] text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("resolve")}</button>
               </div>
             ))
           )}
@@ -223,10 +223,10 @@ export default function AdminConsolePage() {
           ) : (
             disputes.map((d) => (
               <div key={d.id} className="border rounded-lg p-4 bg-white">
-                <p className="font-semibold text-[#1B2A4A] text-sm mb-1">{d.raised_by_name} — {d.status}</p>
+                <p className="font-semibold text-[var(--navy)] text-sm mb-1">{d.raised_by_name} — {d.status}</p>
                 <p className="text-xs text-gray-600 mb-3">{d.reason}</p>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => handleRespondDispute(d.id)} className="border border-[#1B2A4A] text-[#1B2A4A] text-xs font-semibold px-3 py-2 rounded hover:bg-gray-50">{t("respond")}</button>
+                  <button onClick={() => handleRespondDispute(d.id)} className="border border-[var(--navy)] text-[var(--navy)] text-xs font-semibold px-3 py-2 rounded hover:bg-gray-50">{t("respond")}</button>
                   <button onClick={() => handleResolveDispute(d.id, "RELEASE")} className="bg-green-600 text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("resolveRelease")}</button>
                   <button onClick={() => handleResolveDispute(d.id, "REFUND")} className="bg-red-600 text-white text-xs font-semibold px-3 py-2 rounded hover:opacity-90">{t("resolveRefund")}</button>
                 </div>

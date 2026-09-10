@@ -51,7 +51,7 @@ export default function FavoriteButton({ listingId, variant = "card" }: { listin
         onClick={handleToggle}
         disabled={loading}
         className={`absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center text-lg transition-colors ${
-          isFavorited ? "bg-[#C9A227] text-white" : "bg-white/90 text-gray-500 hover:text-[#C9A227]"
+          isFavorited ? "bg-[var(--gold)] text-white" : "bg-white/90 text-gray-500 hover:text-[var(--gold)]"
         }`}
         aria-label={t(isFavorited ? "saved" : "save")}
       >
@@ -66,7 +66,7 @@ export default function FavoriteButton({ listingId, variant = "card" }: { listin
         onClick={handleToggle}
         disabled={loading}
         className={`font-semibold px-4 py-2 rounded border ${
-          isFavorited ? "bg-[#C9A227] text-white border-[#C9A227]" : "border-[#1B2A4A] text-[#1B2A4A] hover:bg-gray-50"
+          isFavorited ? "bg-[var(--gold)] text-white border-[var(--gold)]" : "border-[var(--navy)] text-[var(--navy)] hover:bg-gray-50"
         }`}
       >
         {isFavorited ? "★ " + t("saved") : "☆ " + t("save")}

@@ -29,12 +29,12 @@ export default function Header() {
   ];
 
   const linkClass = (href: string) =>
-    `transition-colors duration-150 hover:text-[#C9A227] ${
-      pathname === href ? "text-[#C9A227] font-semibold" : ""
+    `transition-colors duration-150 hover:text-[var(--gold)] ${
+      pathname === href ? "text-[var(--gold)] font-semibold" : ""
     }`;
 
   return (
-    <header className="bg-[#1B2A4A] text-white sticky top-0 z-50 shadow-md">
+    <header className="bg-[var(--navy)] text-white sticky top-0 z-50 shadow-md">
       <div className="max-w-6xl mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo — a real placeholder asset, swappable for the final
@@ -58,7 +58,7 @@ export default function Header() {
             <Link href="/login" className={linkClass("/login")}>{t("signIn")}</Link>
             <Link
               href="/register"
-              className="bg-[#C9A227] text-[#1B2A4A] px-4 py-2 rounded font-semibold transition-all duration-150 hover:opacity-90 hover:scale-[1.03]"
+              className="bg-[var(--gold)] text-[var(--navy)] px-4 py-2 rounded font-semibold transition-all duration-150 hover:opacity-90 hover:scale-[1.03]"
             >
               {t("register")}
             </Link>

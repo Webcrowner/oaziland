@@ -166,7 +166,9 @@
     "passwordPlaceholder": "Mot de passe",
     "signingIn": "Connexion en cours...",
     "signIn": "Se connecter",
-    "loginFailed": "Échec de la connexion"
+    "loginFailed": "Échec de la connexion",
+    "noAccountYet": "Vous n'avez pas de compte ?",
+    "createAccount": "Créez-en un"
   },
   "RegisterPage": {
     "title": "Créez votre compte",
@@ -180,7 +182,9 @@
     "register": "S'inscrire",
     "registrationFailed": "Échec de l'inscription",
     "mfaNotice": "L'authentification multifacteur et la vérification d'identité (KYC) seront configurées lors de votre prochaine connexion, conformément aux exigences de sécurité de la plateforme.",
-    "referralCodeApplied": "Code de parrainage {code} appliqué — vous gagnerez tous les deux une récompense une fois votre compte vérifié."
+    "referralCodeApplied": "Code de parrainage {code} appliqué — vous gagnerez tous les deux une récompense une fois votre compte vérifié.",
+    "alreadyHaveAccount": "Vous avez déjà un compte ?",
+    "signInInstead": "Connectez-vous"
   },
   "HotelsPage": {
     "title": "Hôtels",

@@ -32,7 +32,7 @@ export default function ComparePage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
+        <Link href="/login" className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("signInRequired")}
         </Link>
       </main>
@@ -41,7 +41,7 @@ export default function ComparePage() {
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-1">{t("title")}</h1>
+      <h1 className="text-2xl font-bold text-[var(--navy)] mb-1">{t("title")}</h1>
       <p className="text-gray-600 mb-8">{t("subtitle")}</p>
 
       {status === "loading" ? (
@@ -56,8 +56,8 @@ export default function ComparePage() {
                 <td className="w-32"></td>
                 {listings.map((listing) => (
                   <td key={listing.id} className="border p-4 text-center bg-white">
-                    <p className="font-bold text-lg text-[#1B2A4A]">{Number(listing.price_xaf).toLocaleString()} XAF</p>
-                    <Link href={`/listing/${listing.id}`} className="text-sm text-[#1B2A4A] underline">{t("viewListing")}</Link>
+                    <p className="font-bold text-lg text-[var(--navy)]">{Number(listing.price_xaf).toLocaleString()} XAF</p>
+                    <Link href={`/listing/${listing.id}`} className="text-sm text-[var(--navy)] underline">{t("viewListing")}</Link>
                   </td>
                 ))}
               </tr>

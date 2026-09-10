@@ -34,7 +34,7 @@ export default function SaveSearchButton({ filters }: { filters: Record<string, 
   }
 
   return (
-    <button onClick={handleSave} disabled={saving} className="text-sm font-semibold text-[#1B2A4A] hover:text-[#C9A227] underline disabled:opacity-50">
+    <button onClick={handleSave} disabled={saving} className="text-sm font-semibold text-[var(--navy)] hover:text-[var(--gold)] underline disabled:opacity-50">
       {t("saveThisSearch")}
     </button>
   );

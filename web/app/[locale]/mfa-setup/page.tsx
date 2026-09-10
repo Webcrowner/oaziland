@@ -73,7 +73,7 @@ export default function MfaSetupPage() {
     return (
       <main className="max-w-sm mx-auto px-4 py-12 text-center">
         <p className="text-green-700 font-semibold mb-4">✓ {t("alreadyEnabled")}</p>
-        <button onClick={() => router.push("/list-property")} className="bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
+        <button onClick={() => router.push("/list-property")} className="bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("continueToListProperty")}
         </button>
       </main>
@@ -84,7 +84,7 @@ export default function MfaSetupPage() {
     return (
       <main className="max-w-sm mx-auto px-4 py-12 text-center">
         <p className="text-green-700 font-semibold mb-4">✓ {t("success")}</p>
-        <button onClick={() => router.push("/list-property")} className="bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
+        <button onClick={() => router.push("/list-property")} className="bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("continueToListProperty")}
         </button>
       </main>
@@ -93,7 +93,7 @@ export default function MfaSetupPage() {
 
   return (
     <main className="max-w-sm mx-auto px-4 py-12">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-2">{t("title")}</h1>
+      <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-2">{t("title")}</h1>
       <p className="text-gray-600 text-sm mb-6">{t("subtitle")}</p>
 
       {!challengeId ? (
@@ -102,13 +102,13 @@ export default function MfaSetupPage() {
           <div className="flex rounded overflow-hidden border border-gray-300">
             <label className="flex-1">
               <input type="radio" name="mfaType" checked={mfaType === "SMS_OTP"} onChange={() => setMfaType("SMS_OTP")} className="peer sr-only" />
-              <span className="block text-center py-2 text-gray-700 peer-checked:bg-[#1B2A4A] peer-checked:text-white cursor-pointer transition-colors">
+              <span className="block text-center py-2 text-gray-700 peer-checked:bg-[var(--navy)] peer-checked:text-white cursor-pointer transition-colors">
                 {t("methodSms")}
               </span>
             </label>
             <label className="flex-1">
               <input type="radio" name="mfaType" checked={mfaType === "EMAIL_OTP"} onChange={() => setMfaType("EMAIL_OTP")} className="peer sr-only" />
-              <span className="block text-center py-2 text-gray-700 peer-checked:bg-[#1B2A4A] peer-checked:text-white cursor-pointer transition-colors">
+              <span className="block text-center py-2 text-gray-700 peer-checked:bg-[var(--navy)] peer-checked:text-white cursor-pointer transition-colors">
                 {t("methodEmail")}
               </span>
             </label>
@@ -125,7 +125,7 @@ export default function MfaSetupPage() {
 
           {error && <p className="text-red-600 text-sm">{error}</p>}
 
-          <button type="submit" disabled={loading} className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
+          <button type="submit" disabled={loading} className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
             {loading ? t("sending") : t("sendCode")}
           </button>
         </form>
@@ -142,10 +142,10 @@ export default function MfaSetupPage() {
 
           {error && <p className="text-red-600 text-sm">{error}</p>}
 
-          <button type="submit" disabled={loading} className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
+          <button type="submit" disabled={loading} className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
             {loading ? t("verifying") : t("verify")}
           </button>
-          <button type="button" onClick={() => setChallengeId(null)} className="text-sm text-gray-500 hover:text-[#1B2A4A]">
+          <button type="button" onClick={() => setChallengeId(null)} className="text-sm text-gray-500 hover:text-[var(--navy)]">
             {t("resendCode")}
           </button>
         </form>

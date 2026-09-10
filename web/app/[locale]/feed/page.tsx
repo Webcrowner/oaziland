@@ -52,8 +52,8 @@ export default function FeedPage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-[#1B2A4A]">{t("title")}</h1>
-        <Link href="/feed/create" className="bg-[#C9A227] text-[#1B2A4A] font-semibold px-4 py-2 rounded text-sm hover:opacity-90">
+        <h1 className="text-2xl font-bold text-[var(--navy)]">{t("title")}</h1>
+        <Link href="/feed/create" className="bg-[var(--gold)] text-[var(--navy)] font-semibold px-4 py-2 rounded text-sm hover:opacity-90">
           {t("createPost")}
         </Link>
       </div>
@@ -68,13 +68,13 @@ export default function FeedPage() {
       <div className="flex gap-2 mb-6 border-b pb-4">
         <button
           onClick={() => setTab("forYou")}
-          className={`px-4 py-2 rounded text-sm font-semibold ${tab === "forYou" ? "bg-[#1B2A4A] text-white" : "bg-gray-100 text-gray-700"}`}
+          className={`px-4 py-2 rounded text-sm font-semibold ${tab === "forYou" ? "bg-[var(--navy)] text-white" : "bg-gray-100 text-gray-700"}`}
         >
           {t("tabForYou")}
         </button>
         <button
           onClick={() => setTab("following")}
-          className={`px-4 py-2 rounded text-sm font-semibold ${tab === "following" ? "bg-[#1B2A4A] text-white" : "bg-gray-100 text-gray-700"}`}
+          className={`px-4 py-2 rounded text-sm font-semibold ${tab === "following" ? "bg-[var(--navy)] text-white" : "bg-gray-100 text-gray-700"}`}
         >
           {t("tabFollowing")}
         </button>

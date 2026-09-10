@@ -35,7 +35,7 @@ export default function DashboardPage() {
     return (
       <main className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
+        <Link href="/login" className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("signInRequired")}
         </Link>
       </main>
@@ -58,20 +58,20 @@ export default function DashboardPage() {
 
   return (
     <main className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-8">{t("title")}</h1>
+      <h1 className="text-2xl font-bold text-[var(--navy)] mb-8">{t("title")}</h1>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
         <div className="border rounded-lg p-5 bg-white">
           <p className="text-xs text-gray-500 mb-1">{t("performanceScore")}</p>
-          <p className="text-2xl font-bold text-[#1B2A4A]">{dashboard.performance_score}</p>
+          <p className="text-2xl font-bold text-[var(--navy)]">{dashboard.performance_score}</p>
         </div>
         <div className="border rounded-lg p-5 bg-white">
           <p className="text-xs text-gray-500 mb-1">{t("openEnquiries")}</p>
-          <p className="text-2xl font-bold text-[#1B2A4A]">{dashboard.open_enquiries}</p>
+          <p className="text-2xl font-bold text-[var(--navy)]">{dashboard.open_enquiries}</p>
         </div>
         <div className="border rounded-lg p-5 bg-white">
           <p className="text-xs text-gray-500 mb-1">{t("commissionTrend")}</p>
-          <p className="text-2xl font-bold text-[#1B2A4A]">{Number(trend.current_period_value).toLocaleString()} XAF</p>
+          <p className="text-2xl font-bold text-[var(--navy)]">{Number(trend.current_period_value).toLocaleString()} XAF</p>
           <p className="text-xs text-gray-400 mt-1">
             {trend.percent_change === null ? t("newNoHistory") : `${trend.percent_change > 0 ? "+" : ""}${trend.percent_change}% ${t("vsLastPeriod")}`}
           </p>
@@ -80,7 +80,7 @@ export default function DashboardPage() {
 
       {dashboard.is_agency_owner && (
         <div>
-          <h2 className="text-lg font-semibold text-[#1B2A4A] mb-4 border-b pb-2">{t("agencySection")}</h2>
+          <h2 className="text-lg font-semibold text-[var(--navy)] mb-4 border-b pb-2">{t("agencySection")}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="border rounded-lg p-5 bg-white">
               <p className="text-xs text-gray-500 mb-2">{t("agencyRoster")}</p>
@@ -92,7 +92,7 @@ export default function DashboardPage() {
             </div>
             <div className="border rounded-lg p-5 bg-white">
               <p className="text-xs text-gray-500 mb-1">{t("agencyCommission")}</p>
-              <p className="text-2xl font-bold text-[#1B2A4A]">
+              <p className="text-2xl font-bold text-[var(--navy)]">
                 {Number(dashboard.agency_aggregated_commission_xaf || 0).toLocaleString()} XAF
               </p>
             </div>

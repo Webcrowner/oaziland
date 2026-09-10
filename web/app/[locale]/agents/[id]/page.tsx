@@ -44,11 +44,11 @@ export default async function AgentProfilePage({ params }: { params: Promise<{ i
     <main className="max-w-2xl mx-auto px-4 py-10">
       <div className="border rounded-lg p-6 bg-white">
         <div className="flex items-center gap-4 mb-4">
-          <div className="w-20 h-20 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-[#1B2A4A]">
+          <div className="w-20 h-20 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-[var(--navy)]">
             {profile.full_name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-[#1B2A4A]">{profile.full_name}</h1>
+            <h1 className="text-2xl font-bold text-[var(--navy)]">{profile.full_name}</h1>
             {profile.agency_name && <p className="text-sm text-gray-500">{t("agencyLabel")}: {profile.agency_name}</p>}
           </div>
         </div>
@@ -62,7 +62,7 @@ export default async function AgentProfilePage({ params }: { params: Promise<{ i
         <div className="flex items-center gap-2 mb-6">
           {profile.average_rating ? (
             <>
-              <span className="text-[#C9A227] font-bold text-lg">★ {profile.average_rating}</span>
+              <span className="text-[var(--gold)] font-bold text-lg">★ {profile.average_rating}</span>
               <span className="text-sm text-gray-500">
                 {profile.rating_count === 1 ? t("ratingCount", { count: profile.rating_count }) : t("ratingCountOther", { count: profile.rating_count })}
               </span>
@@ -82,7 +82,7 @@ export default async function AgentProfilePage({ params }: { params: Promise<{ i
           <RateAndReport subjectUserId={id} />
         </div>
 
-        <Link href="/search" className="inline-block bg-[#1B2A4A] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
+        <Link href="/search" className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
           {t("viewListings")}
         </Link>
       </div>

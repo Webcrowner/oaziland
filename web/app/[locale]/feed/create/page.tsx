@@ -65,10 +65,10 @@ function CreatePostForm() {
 
   return (
     <main className="max-w-lg mx-auto px-4 py-12">
-      <h1 className="text-2xl font-bold text-[#1B2A4A] mb-6">{t("title")}</h1>
+      <h1 className="text-2xl font-bold text-[var(--navy)] mb-6">{t("title")}</h1>
 
       {linkedListingId && (
-        <p className="text-sm bg-[#C9A227]/10 text-[#8A6D14] rounded px-3 py-2 mb-4">{t("linkedToListing")}</p>
+        <p className="text-sm bg-[var(--gold)]/10 text-[#8A6D14] rounded px-3 py-2 mb-4">{t("linkedToListing")}</p>
       )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -87,7 +87,7 @@ function CreatePostForm() {
         {status === "blocked" && <p className="text-red-600 text-sm">{t("blocked")}</p>}
         {status === "posted" && <p className="text-green-700 text-sm">{t("posted")}</p>}
 
-        <button type="submit" disabled={status === "posting"} className="bg-[#C9A227] text-[#1B2A4A] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
+        <button type="submit" disabled={status === "posting"} className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
           {status === "posting" ? t("posting") : t("post")}
         </button>
       </form>
