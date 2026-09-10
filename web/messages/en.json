@@ -196,7 +196,20 @@
     "from": "From",
     "perNight": "/ night",
     "noHotelsYet": "No verified hotels are listed yet.",
-    "capacity": "Sleeps {count}"
+    "capacity": "Sleeps {count}",
+    "listYourHotel": "List Your Hotel",
+    "cancel": "Cancel",
+    "starRatingPlaceholder": "Star rating (1-5, optional)",
+    "firstRoomTypeLabel": "Add at least one room type",
+    "capacityPlaceholder": "Capacity (guests)",
+    "ratePerNightPlaceholder": "Rate per night (XAF)",
+    "addPhotoOrVideo": "Add Photo or Video",
+    "mediaAttached": "{count} file(s) attached",
+    "submitFailed": "Could not create listing. Please check your details and try again.",
+    "verificationNotice": "Your hotel will be reviewed before it appears publicly.",
+    "submitHotel": "Submit Hotel",
+    "submitting": "Submitting...",
+    "pendingReviewBadge": "Pending Review"
   },
   "VenuesPage": {
     "title": "Event Venues",
@@ -207,7 +220,18 @@
     "spacesAvailableOther": "{count} spaces available",
     "theatreCapacity": "Theatre: {count}",
     "banquetCapacity": "Banquet: {count}",
-    "verifiedBadge": "Verified"
+    "verifiedBadge": "Verified",
+    "listYourVenue": "List Your Venue",
+    "cancel": "Cancel",
+    "spaceNamePlaceholder": "Space name (e.g. Main Hall)",
+    "pricePerHourPlaceholder": "Price per hour (XAF)",
+    "addPhotoOrVideo": "Add Photo or Video",
+    "mediaAttached": "{count} file(s) attached",
+    "submitFailed": "Could not create listing. Please check your details and try again.",
+    "verificationNotice": "Your venue will be reviewed before it appears publicly.",
+    "submitVenue": "Submit Venue",
+    "submitting": "Submitting...",
+    "pendingReviewBadge": "Pending Review"
   },
   "GuestHousesPage": {
     "title": "Guest Houses",
@@ -225,14 +249,28 @@
     "amenity_SOLAR_POWER": "Solar",
     "amenity_CCTV": "CCTV",
     "amenity_BALCONY_TERRACE": "Balcony",
-    "amenity_WIFI_READY": "WiFi"
+    "amenity_WIFI_READY": "WiFi",
+    "listYourGuestHouse": "List Your Guest House",
+    "cancel": "Cancel",
+    "addPhotoOrVideo": "Add Photo or Video",
+    "mediaAttached": "{count} file(s) attached",
+    "submitFailed": "Could not create listing. Please check your details and try again.",
+    "submitGuestHouse": "Submit Guest House",
+    "submitting": "Submitting..."
   },
   "StudentHostelsPage": {
     "title": "Student Hostels",
     "subtitle": "Verified student accommodation near your university.",
     "noHostelsYet": "No student hostels are listed yet.",
     "unitsAvailable": "{count} unit available",
-    "unitsAvailableOther": "{count} units available"
+    "unitsAvailableOther": "{count} units available",
+    "listYourHostel": "List Your Hostel",
+    "cancel": "Cancel",
+    "addPhotoOrVideo": "Add Photo or Video",
+    "mediaAttached": "{count} file(s) attached",
+    "submitFailed": "Could not create listing. Please check your details and try again.",
+    "submitHostel": "Submit Hostel",
+    "submitting": "Submitting..."
   },
   "WantedBoardPage": {
     "title": "Looking For...",

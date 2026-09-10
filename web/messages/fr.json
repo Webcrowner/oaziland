@@ -196,7 +196,20 @@
     "from": "À partir de",
     "perNight": "/ nuit",
     "noHotelsYet": "Aucun hôtel vérifié n'est encore répertorié.",
-    "capacity": "Pour {count} personne(s)"
+    "capacity": "Pour {count} personne(s)",
+    "listYourHotel": "Publier Votre Hôtel",
+    "cancel": "Annuler",
+    "starRatingPlaceholder": "Classement étoiles (1-5, optionnel)",
+    "firstRoomTypeLabel": "Ajoutez au moins un type de chambre",
+    "capacityPlaceholder": "Capacité (invités)",
+    "ratePerNightPlaceholder": "Tarif par nuit (XAF)",
+    "addPhotoOrVideo": "Ajouter une Photo ou Vidéo",
+    "mediaAttached": "{count} fichier(s) joint(s)",
+    "submitFailed": "Impossible de créer l'annonce. Vérifiez vos informations et réessayez.",
+    "verificationNotice": "Votre hôtel sera examiné avant d'apparaître publiquement.",
+    "submitHotel": "Publier l'Hôtel",
+    "submitting": "Envoi en cours...",
+    "pendingReviewBadge": "En Attente d'Examen"
   },
   "VenuesPage": {
     "title": "Salles d'Événements",
@@ -207,7 +220,18 @@
     "spacesAvailableOther": "{count} espaces disponibles",
     "theatreCapacity": "Théâtre : {count}",
     "banquetCapacity": "Banquet : {count}",
-    "verifiedBadge": "Vérifié"
+    "verifiedBadge": "Vérifié",
+    "listYourVenue": "Publier Votre Salle",
+    "cancel": "Annuler",
+    "spaceNamePlaceholder": "Nom de l'espace (ex. Salle Principale)",
+    "pricePerHourPlaceholder": "Prix par heure (XAF)",
+    "addPhotoOrVideo": "Ajouter une Photo ou Vidéo",
+    "mediaAttached": "{count} fichier(s) joint(s)",
+    "submitFailed": "Impossible de créer l'annonce. Vérifiez vos informations et réessayez.",
+    "verificationNotice": "Votre salle sera examinée avant d'apparaître publiquement.",
+    "submitVenue": "Publier la Salle",
+    "submitting": "Envoi en cours...",
+    "pendingReviewBadge": "En Attente d'Examen"
   },
   "GuestHousesPage": {
     "title": "Maisons d'Hôtes",
@@ -225,14 +249,28 @@
     "amenity_SOLAR_POWER": "Solaire",
     "amenity_CCTV": "Vidéosurveillance",
     "amenity_BALCONY_TERRACE": "Balcon",
-    "amenity_WIFI_READY": "WiFi"
+    "amenity_WIFI_READY": "WiFi",
+    "listYourGuestHouse": "Publier Votre Maison d'Hôtes",
+    "cancel": "Annuler",
+    "addPhotoOrVideo": "Ajouter une Photo ou Vidéo",
+    "mediaAttached": "{count} fichier(s) joint(s)",
+    "submitFailed": "Impossible de créer l'annonce. Vérifiez vos informations et réessayez.",
+    "submitGuestHouse": "Publier la Maison d'Hôtes",
+    "submitting": "Envoi en cours..."
   },
   "StudentHostelsPage": {
     "title": "Résidences Étudiantes",
     "subtitle": "Des hébergements étudiants vérifiés près de votre université.",
     "noHostelsYet": "Aucune résidence étudiante n'est encore répertoriée.",
     "unitsAvailable": "{count} unité disponible",
-    "unitsAvailableOther": "{count} unités disponibles"
+    "unitsAvailableOther": "{count} unités disponibles",
+    "listYourHostel": "Publier Votre Résidence",
+    "cancel": "Annuler",
+    "addPhotoOrVideo": "Ajouter une Photo ou Vidéo",
+    "mediaAttached": "{count} fichier(s) joint(s)",
+    "submitFailed": "Impossible de créer l'annonce. Vérifiez vos informations et réessayez.",
+    "submitHostel": "Publier la Résidence",
+    "submitting": "Envoi en cours..."
   },
   "WantedBoardPage": {
     "title": "Je Recherche...",

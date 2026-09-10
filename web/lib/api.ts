@@ -263,11 +263,43 @@ export interface Hotel {
   quarter_name: string;
   total_rooms: number;
   room_types: RoomTypeSummary[];
+  photos: PropertyAssetPhotoItem[];
+}
+
+export interface PropertyAssetPhotoItem {
+  id: number;
+  url: string;
+  media_type: "PHOTO" | "VIDEO";
+  is_primary: boolean;
 }
 
 export async function searchHotels(): Promise<PaginatedResponse<Hotel>> {
   const res = await fetch(`${API_BASE_URL}/api/hotels/`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Hotel search failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createHotel(
+  payload: { quarter: string; star_rating?: number; room_types: { category: string; capacity: number; base_rate_xaf: string }[] },
+  accessToken: string
+) {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export async function addHotelPhoto(hotelId: string, url: string, mediaType: "PHOTO" | "VIDEO", accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/${hotelId}/add-photo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach photo");
   return res.json();
 }
 
@@ -285,11 +317,36 @@ export interface Venue {
   quarter: string;
   quarter_name: string;
   spaces: VenueSpaceSummary[];
+  photos: PropertyAssetPhotoItem[];
 }
 
 export async function searchVenues(): Promise<PaginatedResponse<Venue>> {
   const res = await fetch(`${API_BASE_URL}/api/venues/`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Venue search failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createVenue(
+  payload: { quarter: string; spaces: { space_name: string; capacity_theatre?: number; capacity_banquet?: number; base_price_per_hour_xaf?: string }[] },
+  accessToken: string
+) {
+  const res = await fetch(`${API_BASE_URL}/api/venues/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export async function addVenuePhoto(venueId: string, url: string, mediaType: "PHOTO" | "VIDEO", accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/venues/${venueId}/add-photo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach photo");
   return res.json();
 }
 
@@ -308,11 +365,33 @@ export interface StudentHostel {
   quarter: string;
   quarter_name: string;
   units: HostelUnitSummary[];
+  photos: PropertyAssetPhotoItem[];
 }
 
 export async function searchStudentHostels(): Promise<PaginatedResponse<StudentHostel>> {
   const res = await fetch(`${API_BASE_URL}/api/student-hostels/`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Student hostel search failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createStudentHostel(payload: { quarter: string; property_type?: string }, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/student-hostels/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export async function addStudentHostelPhoto(hostelId: string, url: string, mediaType: "PHOTO" | "VIDEO", accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/student-hostels/${hostelId}/add-photo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach photo");
   return res.json();
 }
 
@@ -323,11 +402,33 @@ export interface GuestHouse {
   quarter_name: string;
   finish_level: string;
   amenities: string[];
+  photos: PropertyAssetPhotoItem[];
 }
 
 export async function searchGuestHouses(): Promise<PaginatedResponse<GuestHouse>> {
   const res = await fetch(`${API_BASE_URL}/api/guest-houses/`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Guest house search failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createGuestHouse(payload: { quarter: string; is_coastal_leisure?: boolean; finish_level?: string }, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/guest-houses/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export async function addGuestHousePhoto(guestHouseId: string, url: string, mediaType: "PHOTO" | "VIDEO", accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/guest-houses/${guestHouseId}/add-photo/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach photo");
   return res.json();
 }
 
