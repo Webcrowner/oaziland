@@ -4,6 +4,7 @@ import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { getListing, Listing, contactListing, getMyFavorites, toggleFavoriteListing } from "../lib/api";
+import RateAndReport from "../components/RateAndReport";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ListingDetail">;
 
@@ -157,6 +158,7 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
           </Text>
           <Text style={styles.listerName}>{listing.lister_display_name}</Text>
           {listing.lister_agency_name ? <Text style={styles.listerAgency}>{listing.lister_agency_name}</Text> : null}
+          <RateAndReport subjectUserId={listing.lister_id} />
         </View>
 
         {listing.property_asset.size_sqm ? (

@@ -897,3 +897,82 @@ export async function fileReportAgainstUser(targetUserId: string, reason: string
   if (!res.ok) throw new Error(data.detail || "Could not submit report");
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Property Management — mobile parity with the web app's
+// /property-management page, same session.
+// ---------------------------------------------------------------------------
+export interface MaintenanceRequestItem {
+  id: string;
+  category: string;
+  description: string;
+  cost_estimate_xaf: string | null;
+  status: string;
+}
+
+export async function listMaintenanceRequests(): Promise<PaginatedResponse<MaintenanceRequestItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/maintenance-requests/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch maintenance requests");
+  return res.json();
+}
+
+export async function closeMaintenanceRequest(id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/maintenance-requests/${id}/close/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not close maintenance request");
+  return res.json();
+}
+
+export interface TenantScreeningItem {
+  id: string;
+  prospective_tenant_name: string;
+  status: string;
+  report_summary: { completed_bookings: number; warning_count: number } | null;
+}
+
+export async function listTenantScreenings(): Promise<PaginatedResponse<TenantScreeningItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/tenant-screenings/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch tenant screenings");
+  return res.json();
+}
+
+export async function consentToScreening(id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/tenant-screenings/${id}/consent/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not grant consent");
+  return res.json();
+}
+
+export async function generateScreeningReport(id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/tenant-screenings/${id}/generate-report/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not generate report");
+  return res.json();
+}
+
+export interface SafetyCheckInItem {
+  id: string;
+  emergency_contact_name: string;
+  expected_checkout_at: string;
+  status: string;
+}
+
+export async function listSafetyCheckIns(): Promise<PaginatedResponse<SafetyCheckInItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/safety-check-ins/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch safety check-ins");
+  return res.json();
+}
+
+export async function startSafetyCheckIn(emergencyContactName: string, emergencyContactPhone: string, expectedDurationMinutes: number) {
+  const res = await fetch(`${API_BASE_URL}/api/safety-check-ins/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ emergency_contact_name: emergencyContactName, emergency_contact_phone: emergencyContactPhone, expected_duration_minutes: expectedDurationMinutes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not start check-in");
+  return data;
+}
+
+export async function checkOutSafely(id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/safety-check-ins/${id}/check-out/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not check out");
+  return res.json();
+}

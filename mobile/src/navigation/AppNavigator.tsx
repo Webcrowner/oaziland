@@ -30,6 +30,7 @@ import BusinessesScreen from "../screens/BusinessesScreen";
 import CarsScreen from "../screens/CarsScreen";
 import RidesScreen from "../screens/RidesScreen";
 import TasklnServiceScreen from "../screens/TasklnServiceScreen";
+import PropertyManagementScreen from "../screens/PropertyManagementScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -61,6 +62,7 @@ export type RootStackParamList = {
   Cars: undefined;
   Rides: undefined;
   TasklnService: undefined;
+  PropertyManagement: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -111,6 +113,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Cars" component={CarsScreen} options={{ title: "Cars" }} />
         <Stack.Screen name="Rides" component={RidesScreen} options={{ title: "Rides" }} />
         <Stack.Screen name="TasklnService" component={TasklnServiceScreen} options={{ title: "Taskln Service" }} />
+        <Stack.Screen name="PropertyManagement" component={PropertyManagementScreen} options={{ title: "Property Management" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
