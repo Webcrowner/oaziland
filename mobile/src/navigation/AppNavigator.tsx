@@ -23,6 +23,13 @@ import FeedScreen from "../screens/FeedScreen";
 import CreatePostScreen from "../screens/CreatePostScreen";
 import AdminConsoleScreen from "../screens/AdminConsoleScreen";
 import AgentDashboardScreen from "../screens/AgentDashboardScreen";
+import MarketplaceScreen from "../screens/MarketplaceScreen";
+import WarehousesScreen from "../screens/WarehousesScreen";
+import StoresScreen from "../screens/StoresScreen";
+import BusinessesScreen from "../screens/BusinessesScreen";
+import CarsScreen from "../screens/CarsScreen";
+import RidesScreen from "../screens/RidesScreen";
+import TasklnServiceScreen from "../screens/TasklnServiceScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -47,6 +54,13 @@ export type RootStackParamList = {
   CreatePost: { linkedListingId?: string } | undefined;
   AdminConsole: undefined;
   AgentDashboard: undefined;
+  Marketplace: undefined;
+  Warehouses: undefined;
+  Stores: undefined;
+  Businesses: undefined;
+  Cars: undefined;
+  Rides: undefined;
+  TasklnService: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -90,6 +104,13 @@ export default function AppNavigator() {
         <Stack.Screen name="CreatePost" component={CreatePostScreen} options={{ title: "Create a Post" }} />
         <Stack.Screen name="AdminConsole" component={AdminConsoleScreen} options={{ title: "Admin Console" }} />
         <Stack.Screen name="AgentDashboard" component={AgentDashboardScreen} options={{ title: "My Dashboard" }} />
+        <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: "Marketplace" }} />
+        <Stack.Screen name="Warehouses" component={WarehousesScreen} options={{ title: "Warehouses" }} />
+        <Stack.Screen name="Stores" component={StoresScreen} options={{ title: "Stores" }} />
+        <Stack.Screen name="Businesses" component={BusinessesScreen} options={{ title: "Businesses" }} />
+        <Stack.Screen name="Cars" component={CarsScreen} options={{ title: "Cars" }} />
+        <Stack.Screen name="Rides" component={RidesScreen} options={{ title: "Rides" }} />
+        <Stack.Screen name="TasklnService" component={TasklnServiceScreen} options={{ title: "Taskln Service" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

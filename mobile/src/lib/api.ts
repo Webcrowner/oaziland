@@ -708,3 +708,192 @@ export async function addListingPhoto(listingId: string, url: string, mediaType:
   if (!res.ok) throw new Error((await res.json()).detail || "Could not attach media");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Marketplace — warehouses, stores, businesses, cars, and real ride-
+// hailing. Mobile parity with the web app's Marketplace, built this
+// same session — mirrors the real backend API exactly.
+// ---------------------------------------------------------------------------
+export interface MarketplaceMediaItem {
+  id: number;
+  media_type: "PHOTO" | "VIDEO";
+  file_url: string;
+  order: number;
+}
+
+interface BaseMarketplaceListing {
+  id: string;
+  lister_name: string;
+  lister_role: string;
+  title: string;
+  price_basis: string;
+  price_xaf: string;
+  quarter: string | null;
+  quarter_name: string | null;
+  media: MarketplaceMediaItem[];
+}
+
+export interface WarehouseListing extends BaseMarketplaceListing { size_sqm: string }
+export interface StoreListing extends BaseMarketplaceListing { size_sqm: string; frontage_meters: string | null }
+export interface BusinessListing extends BaseMarketplaceListing {
+  includes_goodwill: boolean; includes_inventory: boolean; annual_revenue_xaf: string | null;
+}
+export interface VehicleSpec { make: string; model: string; year: number; mileage_km: number | null }
+export interface CarListing extends BaseMarketplaceListing { vehicle_spec: VehicleSpec }
+
+const MARKETPLACE_ENDPOINTS = { warehouses: "warehouses", stores: "stores", businesses: "businesses", cars: "cars" } as const;
+export type MarketplaceCategory = keyof typeof MARKETPLACE_ENDPOINTS;
+
+export async function listMarketplaceListings<T>(category: MarketplaceCategory): Promise<PaginatedResponse<T>> {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/`);
+  if (!res.ok) throw new Error(`${category} fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createMarketplaceListing(category: MarketplaceCategory, payload: Record<string, unknown>) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export async function addMarketplaceMedia(category: MarketplaceCategory, listingId: string, url: string, mediaType: "PHOTO" | "VIDEO") {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${listingId}/add-media/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ url, media_type: mediaType }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach media");
+  return res.json();
+}
+
+export interface RideBookingItem {
+  id: string;
+  rider_name: string;
+  driver_name: string | null;
+  pickup_description: string;
+  dropoff_description: string;
+  fare_estimate_xaf: string;
+  status: string;
+}
+
+export async function listMyRides(): Promise<PaginatedResponse<RideBookingItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch rides");
+  return res.json();
+}
+
+export async function requestRide(pickupDescription: string, dropoffDescription: string, distanceKm: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ pickup_description: pickupDescription, dropoff_description: dropoffDescription, distance_km: distanceKm }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not request ride");
+  return data;
+}
+
+export async function acceptRide(rideId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/accept/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not accept ride");
+  return res.json();
+}
+
+export async function startRide(rideId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/start/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not start ride");
+  return res.json();
+}
+
+export async function completeRide(rideId: string, phoneNumber: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/complete/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ phone_number: phoneNumber }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not complete ride");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Taskln Service — real on-demand technician dispatch.
+// ---------------------------------------------------------------------------
+export interface ServiceRequestItem {
+  id: string;
+  requester_name: string;
+  technician_name: string | null;
+  category: string;
+  priority: string;
+  status: string;
+  description: string;
+}
+
+export async function listMyServiceRequests(): Promise<PaginatedResponse<ServiceRequestItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not fetch service requests");
+  return res.json();
+}
+
+export async function createServiceRequest(category: string, description: string, priority: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ category, description, priority }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not create service request");
+  return data;
+}
+
+export async function acceptServiceRequest(id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/accept/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not accept request");
+  return res.json();
+}
+
+export async function startServiceRequest(id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/start/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not start request");
+  return res.json();
+}
+
+export async function completeServiceRequest(id: string, amountXaf: string, phoneNumber: string) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/complete/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ amount_xaf: amountXaf, phone_number: phoneNumber }),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not complete request");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Real ratings and reporting a person directly — mobile parity with
+// the web app's RateAndReport component, same session.
+// ---------------------------------------------------------------------------
+export async function rateUser(subjectUserId: string, score: number) {
+  const res = await fetch(`${API_BASE_URL}/api/ratings/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ subject_user: subjectUserId, score }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit rating");
+  return data;
+}
+
+export async function fileReportAgainstUser(targetUserId: string, reason: string, notes: string) {
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ target_user: targetUserId, reason, notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit report");
+  return data;
+}

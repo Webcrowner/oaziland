@@ -90,6 +90,8 @@ export default function HomeScreen({ navigation }: Props) {
           { label: "Event Venues", screen: "Events" as const },
           { label: "Guest Houses", screen: "GuestHouses" as const },
           { label: "Looking For...", screen: "WantedBoard" as const },
+          { label: "Marketplace", screen: "Marketplace" as const },
+          { label: "Taskln Service", screen: "TasklnService" as const },
           { label: "Saved Listings", screen: "Favorites" as const },
           { label: "Notifications", screen: "Notifications" as const },
           { label: "Saved Searches", screen: "SavedSearches" as const },
