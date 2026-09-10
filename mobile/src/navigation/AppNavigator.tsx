@@ -31,6 +31,12 @@ import CarsScreen from "../screens/CarsScreen";
 import RidesScreen from "../screens/RidesScreen";
 import TasklnServiceScreen from "../screens/TasklnServiceScreen";
 import PropertyManagementScreen from "../screens/PropertyManagementScreen";
+import AgentsScreen from "../screens/AgentsScreen";
+import AgentProfileScreen from "../screens/AgentProfileScreen";
+import AgenciesScreen from "../screens/AgenciesScreen";
+import AgencyProfileScreen from "../screens/AgencyProfileScreen";
+import CareersScreen from "../screens/CareersScreen";
+import TestimonialsScreen from "../screens/TestimonialsScreen";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -63,6 +69,12 @@ export type RootStackParamList = {
   Rides: undefined;
   TasklnService: undefined;
   PropertyManagement: undefined;
+  Agents: undefined;
+  AgentProfile: { agentId: string };
+  Agencies: undefined;
+  AgencyProfile: { agencyId: string };
+  Careers: undefined;
+  Testimonials: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -114,6 +126,12 @@ export default function AppNavigator() {
         <Stack.Screen name="Rides" component={RidesScreen} options={{ title: "Rides" }} />
         <Stack.Screen name="TasklnService" component={TasklnServiceScreen} options={{ title: "Taskln Service" }} />
         <Stack.Screen name="PropertyManagement" component={PropertyManagementScreen} options={{ title: "Property Management" }} />
+        <Stack.Screen name="Agents" component={AgentsScreen} options={{ title: "Agents" }} />
+        <Stack.Screen name="AgentProfile" component={AgentProfileScreen} options={{ title: "Agent Profile" }} />
+        <Stack.Screen name="Agencies" component={AgenciesScreen} options={{ title: "Agencies" }} />
+        <Stack.Screen name="AgencyProfile" component={AgencyProfileScreen} options={{ title: "Agency Profile" }} />
+        <Stack.Screen name="Careers" component={CareersScreen} options={{ title: "Careers" }} />
+        <Stack.Screen name="Testimonials" component={TestimonialsScreen} options={{ title: "Testimonials" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

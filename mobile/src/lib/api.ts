@@ -976,3 +976,105 @@ export async function checkOutSafely(id: string) {
   if (!res.ok) throw new Error("Could not check out");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Agents and Agencies — mobile parity with the web app's directories.
+// ---------------------------------------------------------------------------
+export interface AgentDirectoryEntry {
+  user_id: string;
+  full_name: string;
+  is_kyc_verified: boolean;
+  average_rating: number | null;
+  rating_count: number;
+  active_listing_count: number;
+  agency_name: string | null;
+}
+
+export async function listAgents(): Promise<PaginatedResponse<AgentDirectoryEntry>> {
+  const res = await fetch(`${API_BASE_URL}/api/agents/`);
+  if (!res.ok) throw new Error(`Agent directory fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AgentPublicProfile {
+  full_name: string;
+  is_kyc_verified: boolean;
+  average_rating: number | null;
+  rating_count: number;
+  active_listing_count: number;
+  agency_name: string | null;
+}
+
+export async function getAgentPublicProfile(userId: string): Promise<AgentPublicProfile> {
+  const res = await fetch(`${API_BASE_URL}/api/agents/${userId}/profile/`);
+  if (!res.ok) throw new Error(`Agent profile fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AgencyDirectoryEntry {
+  agency_id: string;
+  agency_name: string;
+  registration_number: string;
+  agent_count: number;
+  average_rating: number | null;
+  rating_count: number;
+  active_listing_count: number;
+}
+
+export async function listAgencies(): Promise<PaginatedResponse<AgencyDirectoryEntry>> {
+  const res = await fetch(`${API_BASE_URL}/api/agencies/`);
+  if (!res.ok) throw new Error(`Agency directory fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getAgencyPublicProfile(agencyId: string): Promise<AgencyDirectoryEntry> {
+  const res = await fetch(`${API_BASE_URL}/api/agencies/${agencyId}/profile/`);
+  if (!res.ok) throw new Error(`Agency profile fetch failed: ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Careers — mobile parity with the web app's /careers page.
+// ---------------------------------------------------------------------------
+export interface JobPosting {
+  id: string;
+  posted_by_name: string;
+  title: string;
+  role_category: string;
+  description: string;
+  quarter_name: string | null;
+  salary_min_xaf: string | null;
+  salary_max_xaf: string | null;
+}
+
+export async function listJobPostings(): Promise<PaginatedResponse<JobPosting>> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/`);
+  if (!res.ok) throw new Error(`Job postings fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function applyToJob(jobId: string, coverMessage: string) {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/apply/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ cover_message: coverMessage }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit application");
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Testimonials — mobile parity with the web app's /testimonials page.
+// ---------------------------------------------------------------------------
+export interface Testimonial {
+  author_name: string;
+  score: number;
+  text: string;
+}
+
+export async function listTestimonials(): Promise<PaginatedResponse<Testimonial>> {
+  const res = await fetch(`${API_BASE_URL}/api/testimonials/`);
+  if (!res.ok) throw new Error(`Testimonials fetch failed: ${res.status}`);
+  return res.json();
+}

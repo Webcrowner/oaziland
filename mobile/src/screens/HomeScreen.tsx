@@ -100,6 +100,10 @@ export default function HomeScreen({ navigation }: Props) {
           { label: "Social Feed", screen: "Feed" as const },
           { label: "My Dashboard", screen: "AgentDashboard" as const },
           { label: "Property Management", screen: "PropertyManagement" as const },
+          { label: "Agents", screen: "Agents" as const },
+          { label: "Agencies", screen: "Agencies" as const },
+          { label: "Careers", screen: "Careers" as const },
+          { label: "Testimonials", screen: "Testimonials" as const },
           { label: "Admin Console", screen: "AdminConsole" as const },
         ]).map((category) => (
           <TouchableOpacity key={category.screen} style={styles.exploreCard} onPress={() => navigation.navigate(category.screen)}>
