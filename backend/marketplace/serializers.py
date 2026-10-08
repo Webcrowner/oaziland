@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, ListingCondition,
+    WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, RideMessage, ListingCondition,
     RideCategory, TransportType, Vehicle, DriverProfile,
 )
 
@@ -26,6 +26,7 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
             "availability_status", "created_at", "media",
         ]
         read_only_fields = ["lister_user", "lister_role", "availability_status", "created_at"]
+        extra_kwargs = {"latitude": {"min_value": -90, "max_value": 90}, "longitude": {"min_value": -180, "max_value": 180}}
 
 
 class WarehouseListingSerializer(BaseMarketplaceListingSerializer):
@@ -114,11 +115,13 @@ class DriverRegistrationSerializer(serializers.Serializer):
     license_number = serializers.CharField()
 
 
-class DriverProfileSerializer(serializers.ModelSerializer):
+class RideMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.CharField(source="sender.full_name", read_only=True)
+
     class Meta:
-        model = DriverProfile
-        fields = ["id", "license_number", "is_verified", "created_at"]
-        read_only_fields = ["is_verified", "created_at"]
+        model = RideMessage
+        fields = ["id", "ride", "sender", "sender_name", "text", "created_at"]
+        read_only_fields = ["ride", "sender", "created_at"]
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -126,6 +129,18 @@ class VehicleSerializer(serializers.ModelSerializer):
         model = Vehicle
         fields = ["id", "vehicle_category", "make", "model", "plate_number", "created_at"]
         read_only_fields = ["created_at"]
+
+
+class DriverProfileSerializer(serializers.ModelSerializer):
+    # The admin driver-verification queue needs to know WHO it's
+    # reviewing and with WHAT vehicles, not just an opaque profile id.
+    user_name = serializers.CharField(source="user.full_name", read_only=True)
+    vehicles = VehicleSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = DriverProfile
+        fields = ["id", "user_name", "license_number", "is_verified", "vehicles", "created_at"]
+        read_only_fields = ["is_verified", "created_at"]
 
 
 class CompleteRideSerializer(serializers.Serializer):

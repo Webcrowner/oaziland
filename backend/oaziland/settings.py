@@ -33,6 +33,13 @@ environ.Env.read_env(BASE_DIR / ".env")
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="django-insecure-dev-only-CHANGE-IN-PRODUCTION")
 
+# The backend's own reachable origin — needed to turn a locally-stored
+# upload's relative path (e.g. "/media/kyc-documents/x.jpg") into a
+# real, absolute URL a frontend on a DIFFERENT origin (localhost:3000)
+# can actually load. Only matters for LocalFileStorageProvider —
+# Cloudinary already returns absolute URLs on its own.
+BACKEND_BASE_URL = env("BACKEND_BASE_URL", default="http://localhost:8000")
+
 # SECURITY WARNING: don't run with debug turned on in production!
 # WHY default=False here specifically: the env schema above already
 # declares DEBUG=(bool, False) — this line previously said
@@ -107,6 +114,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'oaziland.error_translation.FrenchErrorMiddleware',
 ]
 
 # WHY this is gated behind DEBUG: it was previously an unconditional
@@ -263,11 +271,45 @@ REST_FRAMEWORK = {
         # the platform's single most common action and shouldn't be
         # rate-limited as tightly as, say, account creation.
         'search': '600/hour',
+        # A dedicated, tighter bucket for login attempts specifically —
+        # separate from the general anon budget so credential-stuffing
+        # against one account can't also exhaust ordinary anonymous
+        # browsing from the same IP, and vice versa.
+        'login': '20/hour',
+        # Presence heartbeats get their own bucket so a 30s keep-alive
+        # can't exhaust the general per-user budget.
+        'presence': '400/hour',
+        # The inbox polls messages/typing every few seconds while open.
+        'chat': '4000/hour',
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    # Ensures every unhandled exception still comes back as clean JSON
+    # (never a raw Django/Python traceback), while still logging the
+    # real error server-side. See oaziland/exceptions.py.
+    'EXCEPTION_HANDLER': 'oaziland.exceptions.exception_handler',
 }
+
+# ---------------------------------------------------------------------------
+# JWT lifetimes — WHY this exists: simplejwt's own default
+# ACCESS_TOKEN_LIFETIME is a mere 5 minutes, and the frontend has no
+# automatic refresh-on-expiry flow (a real gap of its own) — meaning
+# every authenticated action across the whole app started failing with
+# "Given token not valid for any token type" a few minutes after
+# login, regardless of which feature was being used. A short-lived
+# access token is still the right security posture, just not THIS
+# short for a platform with no silent-refresh UX yet; the refresh
+# token stays valid for a real session's length so re-authenticating
+# via /api/auth/login/refresh/ (already wired) doesn't require a full
+# re-login every few minutes.
+from datetime import timedelta  # noqa: E402
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=14),
+}
+
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Oaziland API',
@@ -282,5 +324,19 @@ SPECTACULAR_SETTINGS = {
     # same underlying choice set.
     'ENUM_NAME_OVERRIDES': {
         'RideCategoryEnum': 'marketplace.models.RideCategory',
+        # ContentReport.reason and WelfareAlert.reason both use a field
+        # named "reason" with different TextChoices — give each an
+        # explicit, distinct component name to avoid an auto-generated
+        # collision (e.g. "ReasonD14Enum").
+        'ReportReasonEnum': 'trust_safety.models.ReportReason',
+        'WelfareAlertReasonEnum': 'student_hostels.models.WelfareAlertReason',
+        # User.verification_status and KYCProfile.kyc_status both use the
+        # SAME identity.models.VerificationStatus choices under different
+        # field names — give the shared enum one explicit component name.
+        'VerificationStatusEnum': 'identity.models.VerificationStatus',
+        # HostelUnit.unit_type and HostelWaitlistJoinSerializer.desired_unit_type
+        # both use the SAME student_hostels.models.HostelUnitType choices
+        # under different field names.
+        'DesiredUnitTypeEnum': 'student_hostels.models.HostelUnitType',
     },
 }

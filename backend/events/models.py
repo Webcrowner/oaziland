@@ -109,6 +109,7 @@ class EventBooking(models.Model):
     total_cost_xaf = models.DecimalField(max_digits=12, decimal_places=2)
     deposit_percent = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("30.00"))
     booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="event_booking")
+    balance_booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="event_booking_balance")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

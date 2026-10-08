@@ -5,6 +5,8 @@ consumer (Post.media_urls, the new ListingPhoto model) already
 expects exactly this shape — a URL — so this endpoint is the missing
 first step, not a new data model to migrate around.
 """
+import re
+
 from rest_framework import permissions, status
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser
@@ -27,6 +29,8 @@ class MediaUploadView(APIView):
             return Response({"detail": "No file was provided."}, status=status.HTTP_400_BAD_REQUEST)
 
         folder = request.data.get("folder", "uploads")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,50}", str(folder)):
+            folder = "uploads"
         try:
             result = upload_media_file(file=file, folder=folder)
         except (UnsupportedMediaTypeError, MediaTooLargeError) as e:

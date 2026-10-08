@@ -81,11 +81,42 @@ def test_create_land_via_the_real_api(quarter, verified_user):
 
 
 @pytest.mark.django_db
-def test_property_creation_requires_mfa_and_kyc(quarter):
+def test_house_creation_no_longer_requires_kyc_or_mfa(quarter):
+    """The deferred-KYC policy change: creating the bare asset itself
+    is now open to any authenticated user — KYC is enforced later, at
+    the actual 'publish' moment (creating the Listing), not here."""
     unverified_user = User.objects.create(username="wizard_unverified_user", phone="+237699111002")
     client = _auth_client(unverified_user)
     response = client.post("/api/houses/", {"quarter": str(quarter.id), "bedrooms": 2})
-    assert response.status_code == 403
+    assert response.status_code == 201
+
+
+@pytest.mark.django_db
+def test_listing_creation_requires_kyc_but_not_mfa(quarter):
+    """The real 'publish' gate: creating a Listing (not the bare
+    House/Shop/Land asset) still requires KYC — but MFA is no longer
+    checked at all anywhere on the platform; a KYC-only user (no MFA
+    method ever set up) must be let through."""
+    user = User.objects.create(username="wizard_kyc_only_user", phone="+237699111003")
+    client = _auth_client(user)
+
+    house_response = client.post("/api/houses/", {"quarter": str(quarter.id), "bedrooms": 2})
+    house_id = house_response.data["id"]
+
+    blocked_response = client.post("/api/listings/", {
+        "property_asset_id": house_id, "listing_type": "RENT", "price_xaf": "75000",
+    })
+    assert blocked_response.status_code == 403
+    assert "identity verification" in blocked_response.data["detail"].lower()
+
+    KYCProfile.objects.create(
+        user=user, legal_full_name="KYC Only User", date_of_birth="1990-01-01",
+        national_id_number="CM-KYCONLY-001", residential_address="Yaoundé", kyc_status=VerificationStatus.VERIFIED,
+    )
+    allowed_response = client.post("/api/listings/", {
+        "property_asset_id": house_id, "listing_type": "RENT", "price_xaf": "75000",
+    })
+    assert allowed_response.status_code == 201  # no MfaMethod ever created for this user, yet still allowed
 
 
 @pytest.mark.django_db
@@ -113,3 +144,21 @@ def test_browsing_property_details_is_public(quarter, verified_user):
     response = APIClient().get(f"/api/houses/{house.id}/")
     assert response.status_code == 200
     assert response.data["bedrooms"] == 4
+
+
+@pytest.mark.django_db
+def test_gps_coordinates_are_optional_and_range_checked(quarter, verified_user):
+    client = _auth_client(verified_user)
+    base = {"quarter": str(quarter.id), "bedrooms": 2}
+
+    without = client.post("/api/houses/", base)
+    assert without.status_code == 201
+    assert House.objects.get(id=without.data["id"]).latitude is None  # no GPS captured, so no map can be drawn
+
+    captured = client.post("/api/houses/", {**base, "latitude": "4.051056", "longitude": "9.767869"})
+    assert captured.status_code == 201
+    assert House.objects.get(id=captured.data["id"]).latitude == Decimal("4.051056")
+
+    impossible = client.post("/api/houses/", {**base, "latitude": "123.4", "longitude": "9.7"})
+    assert impossible.status_code == 400
+    assert "latitude" in impossible.data

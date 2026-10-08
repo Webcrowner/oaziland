@@ -7,8 +7,8 @@ any of them over HTTP — no real inbox was possible).
 """
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import SocialAccountLink, Conversation, Message, Post, Comment, PostMedia, Rating, Review
-from .services import get_message_tick_status, get_post_reaction_counts
+from .models import SocialAccountLink, Conversation, Message, Post, Comment, PostMedia, Rating, Review, Referral
+from .services import get_message_tick_status, get_post_reaction_counts, get_presence_info
 
 
 class SocialAccountLinkSerializer(serializers.ModelSerializer):
@@ -33,12 +33,13 @@ class MessageSerializer(serializers.ModelSerializer):
 
 class ConversationSerializer(serializers.ModelSerializer):
     participant_usernames = serializers.SerializerMethodField()
+    participants_details = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
-        fields = ["id", "participant_usernames", "last_message", "unread_count", "created_at"]
+        fields = ["id", "participant_usernames", "participants_details", "last_message", "unread_count", "created_at"]
 
     def get_participant_usernames(self, conversation) -> list[str]:
         request = self.context.get("request")
@@ -46,6 +47,29 @@ class ConversationSerializer(serializers.ModelSerializer):
         if request:
             others = others.exclude(id=request.user.id)
         return [u.full_name or u.username for u in others]
+
+    def get_participants_details(self, conversation) -> list[dict]:
+        from .models import UserPresence
+        request = self.context.get("request")
+        others = list(conversation.participants.all())
+        if request:
+            others = [u for u in others if u.id != request.user.id]
+        presences = {p.user_id: p for p in UserPresence.objects.filter(user__in=others)}
+        blocked_ids = set()
+        if request:
+            from engagement.models import BlockRelationship
+            blocked_ids = set(BlockRelationship.objects.filter(blocker=request.user).values_list("blocked_id", flat=True))
+        return [
+            {
+                "id": str(u.id),
+                "username": u.username,
+                "full_name": u.full_name or u.username,
+                "profile_image_url": getattr(u, "profile_image_url", None),
+                "is_blocked": u.id in blocked_ids,
+                **get_presence_info(presences.get(u.id)),
+            }
+            for u in others
+        ]
 
     @extend_schema_field(MessageSerializer(allow_null=True))
     def get_last_message(self, conversation):
@@ -132,3 +156,21 @@ class ReviewSerializer(serializers.ModelSerializer):
         model = Review
         fields = ["id", "author", "author_name", "booking", "score", "text", "created_at", "edited_at"]
         read_only_fields = ["author", "created_at", "edited_at"]
+
+
+class ReferralItemSerializer(serializers.ModelSerializer):
+    referred_user_name = serializers.CharField(source="referred_user.full_name", read_only=True)
+    referred_username = serializers.CharField(source="referred_user.username", read_only=True)
+
+    class Meta:
+        model = Referral
+        fields = [
+            "id",
+            "referred_user",
+            "referred_user_name",
+            "referred_username",
+            "status",
+            "reward_earned_xaf",
+            "created_at",
+        ]
+        read_only_fields = fields

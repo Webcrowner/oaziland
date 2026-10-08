@@ -56,6 +56,8 @@ class User(AbstractUser):
     preferred_language = models.CharField(
         max_length=2, choices=Language.choices, default=Language.EN,
     )
+    # URL from the shared /api/media/upload/ pipeline, same convention as KYC image URLs.
+    profile_image_url = models.URLField(max_length=500, blank=True, default="")
     country = models.ForeignKey(
         "geo.Country", on_delete=models.PROTECT, null=True, blank=True,
     )
@@ -168,6 +170,13 @@ class TechnicianProfile(models.Model):
         "geo.Quarter", on_delete=models.SET_NULL, null=True, blank=True,
     )
     avg_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0)
+    # WHY: previously ANY self-registered technician could immediately accept and
+    # get paid for real jobs claiming any specialty — no admin vetting at all,
+    # unlike DriverProfile.is_verified. Mirrors that same admin-review posture.
+    is_verified = models.BooleanField(default=False)
+    # Upload-pipeline URLs: credentials are reviewed by admins before verification; portfolio is shown publicly.
+    credential_urls = models.JSONField(default=list, blank=True)
+    portfolio_urls = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -308,7 +317,19 @@ class KYCProfile(models.Model):
     legal_full_name = models.CharField(max_length=200)
     date_of_birth = models.DateField()
     national_id_number = models.CharField(max_length=100)
-    id_document_image_url = models.URLField(blank=True)
+    # WHY front AND back, not one combined "ID document" image: most
+    # Cameroonian national ID cards carry material data (address,
+    # signature, issuing authority) on the back too — a single-image
+    # upload structurally couldn't capture both sides, matching how
+    # every real KYC provider (Smile Identity, Onfido, Persona, Jumio)
+    # requires both sides of a card-type document.
+    id_document_front_image_url = models.URLField(blank=True)
+    id_document_back_image_url = models.URLField(blank=True)
+    # WHY this is captured live via the device camera (see /kyc's
+    # frontend flow), never a gallery/file upload: a photo picked from
+    # the gallery could be an old photo of someone else entirely — a
+    # live camera capture is the same basic anti-spoofing measure real
+    # KYC providers require for the selfie step specifically.
     selfie_image_url = models.URLField(blank=True)
     residential_address = models.TextField()
     kyc_status = models.CharField(

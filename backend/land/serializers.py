@@ -10,3 +10,4 @@ class LandCreateSerializer(serializers.ModelSerializer):
             "land_use_type", "title_deed_number", "title_type", "bornes_visibles",
         ]
         read_only_fields = ["id"]
+        extra_kwargs = {"latitude": {"min_value": -90, "max_value": 90}, "longitude": {"min_value": -180, "max_value": 180}}

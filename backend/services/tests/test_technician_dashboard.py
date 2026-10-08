@@ -23,14 +23,14 @@ def quarter(db):
 @pytest.mark.django_db
 def test_technician_dashboard_aggregates_real_data(quarter):
     tech_user = User.objects.create(username="dash_tech", phone="+237699993001")
-    profile = TechnicianProfile.objects.create(user=tech_user)
+    profile = TechnicianProfile.objects.create(user=tech_user, is_verified=True)
     set_technician_specialties(profile, [ServiceCategory.ELECTRICAL])
 
     homeowner = User.objects.create(username="dash_homeowner", phone="+237699993002")
     request = create_service_request(requester=homeowner, category=ServiceCategory.ELECTRICAL, description="Fix wiring", quarter=quarter)
     accept_service_request(service_request=request, technician=tech_user)
 
-    PlatformFeePolicy.objects.create(category=TransactionCategory.GIFT_CONVERSION, fee_percent=Decimal("5"))
+    PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.GIFT_CONVERSION, defaults={"fee_percent": Decimal("5")})
     sender = User.objects.create(username="dash_gift_sender", phone="+237699993003")
     send_gift(sender=sender, recipient=tech_user, gift_type=GiftType.ROSE)
     convert_gifts_to_wallet_balance(user=tech_user)

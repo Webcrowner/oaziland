@@ -169,3 +169,15 @@ class DisputeCase(models.Model):
 
     class Meta:
         db_table = "dispute_cases"
+
+
+class DisputeMessage(models.Model):
+    """Private 3-way dispute mediation chat between the complainant, respondent (payee), and admin."""
+    dispute = models.ForeignKey(DisputeCase, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="dispute_messages")
+    text = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "dispute_messages"
+        ordering = ["created_at"]

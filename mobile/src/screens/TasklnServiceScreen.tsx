@@ -1,11 +1,61 @@
 import { useState, useEffect, useCallback } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator } from "react-native";
-import { listMyServiceRequests, createServiceRequest, acceptServiceRequest, startServiceRequest, completeServiceRequest, type ServiceRequestItem } from "../lib/api";
+import { listMyServiceRequests, createServiceRequest, acceptServiceRequest, startServiceRequest, completeServiceRequest, releaseServiceRequest, markServiceRequestEnRoute, proposeServiceQuote, approveServiceQuote, disputeServiceRequest, rateServiceTechnician, getMyUserId, getServiceReceipt, listServiceRequestMessages, sendServiceRequestMessage, type ServiceRequestItem, type ServiceReceipt, type ServiceRequestMessageItem } from "../lib/api";
 
 const CATEGORIES = ["PLUMBING", "ELECTRICAL", "PAINTING", "CLEANING", "MOVING", "SECURITY_INSTALLATION"];
 const STATUS_COLORS: Record<string, string> = {
   REQUESTED: "#C9A227", ACCEPTED: "#1B2A4A", IN_PROGRESS: "#1B2A4A", COMPLETED: "#16A34A", CANCELLED: "#A8502E", DISPUTED: "#A8502E",
 };
+
+/** Private requester/technician chat for one job; refreshes every 10 seconds while open. */
+function ServiceChat({ requestId, myUserId }: { requestId: string; myUserId: string | null }) {
+  const [messages, setMessages] = useState<ServiceRequestMessageItem[]>([]);
+  const [text, setText] = useState("");
+
+  const load = useCallback(() => {
+    listServiceRequestMessages(requestId).then(setMessages).catch(() => {});
+  }, [requestId]);
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 10000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  async function send() {
+    if (!text.trim()) return;
+    await sendServiceRequestMessage(requestId, text.trim()).catch(() => {});
+    setText("");
+    load();
+  }
+
+  return (
+    <View style={{ marginTop: 6 }}>
+      {messages.length === 0 ? <Text style={styles.description}>No messages yet.</Text> : null}
+      {messages.map((m) => (
+        <Text key={m.id} style={[styles.description, m.sender === myUserId && { textAlign: "right", fontWeight: "600" }]}>
+          {m.sender === myUserId ? "" : `${m.sender_name}: `}{m.text}
+        </Text>
+      ))}
+      <View style={styles.payRow}>
+        <TextInput style={styles.payInput} placeholder="Type a message" value={text} onChangeText={setText} />
+        <TouchableOpacity style={styles.payButton} onPress={send}><Text style={styles.payButtonText}>Send</Text></TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function receiptFor(receipt: ServiceReceipt, item: ServiceRequestItem) {
+  if (!receipt.receipt_number || item.status !== "COMPLETED") return null;
+  return (
+    <View style={{ marginVertical: 6 }}>
+      <Text style={styles.category}>Receipt #{receipt.receipt_number.slice(0, 8).toUpperCase()}</Text>
+      {receipt.labor_xaf ? <Text style={styles.description}>Labor: {receipt.labor_xaf} XAF</Text> : null}
+      {receipt.materials_xaf ? <Text style={styles.description}>Materials: {receipt.materials_xaf} XAF</Text> : null}
+      <Text style={styles.description}>Total: {receipt.total_xaf} XAF</Text>
+    </View>
+  );
+}
 
 /**
  * Taskln Service — mobile parity with the web app's /taskln-service
@@ -21,34 +71,62 @@ export default function TasklnServiceScreen() {
   const [priority, setPriority] = useState("SCHEDULED");
   const [requesting, setRequesting] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
-  const [amount, setAmount] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
+  const [materialsInputs, setMaterialsInputs] = useState<Record<string, string>>({});
+  const [receipt, setReceipt] = useState<ServiceReceipt | null>(null);
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [disputeId, setDisputeId] = useState<string | null>(null);
+  const [disputeReason, setDisputeReason] = useState("");
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   const load = useCallback(() => {
+    getMyUserId().then(setMyUserId).catch(() => {});
     listMyServiceRequests().then((data) => setRequests(data.results)).catch(() => setRequests([])).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  async function handleRequest() {
+  // The job site location is required so technicians can find the requester.
+  function handleRequest() {
+    setError("");
     setRequesting(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          await createServiceRequest(category, description, priority, pos.coords.latitude, pos.coords.longitude);
+          setDescription("");
+          load();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Could not create the request");
+        } finally {
+          setRequesting(false);
+        }
+      },
+      () => {
+        setError("Allow location access so technicians can find you.");
+        setRequesting(false);
+      },
+    );
+  }
+
+  async function runAction(fn: () => Promise<unknown>) {
+    setError("");
     try {
-      await createServiceRequest(category, description, priority);
-      setDescription("");
+      await fn();
       load();
-    } finally {
-      setRequesting(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed");
     }
   }
 
-  async function handleAccept(id: string) { await acceptServiceRequest(id); load(); }
-  async function handleStart(id: string) { await startServiceRequest(id); load(); }
   async function handleComplete(id: string) {
-    if (!amount || !phoneNumber) return;
-    await completeServiceRequest(id, amount, phoneNumber);
+    if (!phoneNumber) return;
+    await runAction(() => completeServiceRequest(id, phoneNumber));
     setPayingId(null);
-    setAmount(""); setPhoneNumber("");
-    load();
+    setPhoneNumber("");
   }
 
   if (loading) {
@@ -76,6 +154,7 @@ export default function TasklnServiceScreen() {
           <TouchableOpacity style={styles.requestButton} onPress={handleRequest} disabled={requesting}>
             {requesting ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.requestButtonText}>Request Taskln Service</Text>}
           </TouchableOpacity>
+          {error ? <Text style={styles.empty}>{error}</Text> : null}
         </View>
       }
       ListEmptyComponent={<Text style={styles.empty}>No requests yet.</Text>}
@@ -92,23 +171,84 @@ export default function TasklnServiceScreen() {
           </View>
           <Text style={styles.description}>{item.description}</Text>
 
-          {item.status === "REQUESTED" && (
-            <TouchableOpacity onPress={() => handleAccept(item.id)}><Text style={styles.actionLink}>Accept as Technician</Text></TouchableOpacity>
+          {item.quoted_amount_xaf && (
+            <Text style={styles.description}>Quote: {item.quoted_amount_xaf} XAF {item.quote_approved ? "(approved)" : "(awaiting approval)"}</Text>
           )}
-          {item.status === "ACCEPTED" && (
-            <TouchableOpacity onPress={() => handleStart(item.id)}><Text style={styles.actionLink}>Start Job</Text></TouchableOpacity>
+
+          {item.status === "REQUESTED" && item.requester !== myUserId && (
+            <TouchableOpacity onPress={() => runAction(() => acceptServiceRequest(item.id))}><Text style={styles.actionLink}>Accept as Technician</Text></TouchableOpacity>
           )}
-          {item.status === "IN_PROGRESS" && payingId !== item.id && (
+          {item.technician === myUserId && item.status === "ACCEPTED" && (
+            <TouchableOpacity onPress={() => runAction(() => markServiceRequestEnRoute(item.id))}><Text style={styles.actionLink}>I&apos;m on my way</Text></TouchableOpacity>
+          )}
+          {item.technician === myUserId && (item.status === "ACCEPTED" || item.status === "EN_ROUTE") && (
+            <>
+              <TouchableOpacity onPress={() => runAction(() => startServiceRequest(item.id))} disabled={!item.quote_approved}>
+                <Text style={[styles.actionLink, !item.quote_approved && { opacity: 0.4 }]}>Start Job</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => runAction(() => releaseServiceRequest(item.id))}><Text style={styles.actionLink}>Release job</Text></TouchableOpacity>
+            </>
+          )}
+          {item.technician === myUserId && ["ACCEPTED", "EN_ROUTE", "IN_PROGRESS"].includes(item.status) && (
+            <View style={styles.payRow}>
+              <TextInput style={styles.payInput} placeholder="Labor (XAF)" value={quoteInputs[item.id] || ""} onChangeText={(v) => setQuoteInputs((prev) => ({ ...prev, [item.id]: v }))} keyboardType="numeric" />
+              <TextInput style={styles.payInput} placeholder="Materials (XAF)" value={materialsInputs[item.id] || ""} onChangeText={(v) => setMaterialsInputs((prev) => ({ ...prev, [item.id]: v }))} keyboardType="numeric" />
+              <TouchableOpacity style={styles.payButton} onPress={() => runAction(() => proposeServiceQuote(item.id, quoteInputs[item.id] || "", materialsInputs[item.id]))}>
+                <Text style={styles.payButtonText}>Send quote</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {item.requester === myUserId && item.quoted_amount_xaf && !item.quote_approved && ["ACCEPTED", "EN_ROUTE", "IN_PROGRESS"].includes(item.status) && (
+            <TouchableOpacity onPress={() => runAction(() => approveServiceQuote(item.id))}><Text style={styles.actionLink}>Approve quote</Text></TouchableOpacity>
+          )}
+          {item.requester === myUserId && item.status === "IN_PROGRESS" && item.quote_approved && payingId !== item.id && (
             <TouchableOpacity onPress={() => setPayingId(item.id)}><Text style={styles.actionLink}>Complete & Pay</Text></TouchableOpacity>
           )}
           {payingId === item.id && (
             <View style={styles.payRow}>
-              <TextInput style={styles.payInput} placeholder="Amount (XAF)" value={amount} onChangeText={setAmount} keyboardType="numeric" />
               <TextInput style={styles.payInput} placeholder="Phone number" value={phoneNumber} onChangeText={setPhoneNumber} />
               <TouchableOpacity style={styles.payButton} onPress={() => handleComplete(item.id)}>
-                <Text style={styles.payButtonText}>Pay</Text>
+                <Text style={styles.payButtonText}>Pay {item.quoted_amount_xaf} XAF</Text>
               </TouchableOpacity>
             </View>
+          )}
+
+          {item.status === "DISPUTED" && item.dispute_reason ? <Text style={styles.description}>Disputed: {item.dispute_reason}</Text> : null}
+          {(item.requester === myUserId || item.technician === myUserId) && ["ACCEPTED", "EN_ROUTE", "IN_PROGRESS"].includes(item.status) && disputeId !== item.id && (
+            <TouchableOpacity onPress={() => setDisputeId(item.id)}><Text style={styles.actionLink}>Report a problem</Text></TouchableOpacity>
+          )}
+          {disputeId === item.id && (
+            <View style={styles.payRow}>
+              <TextInput style={styles.payInput} placeholder="What went wrong?" value={disputeReason} onChangeText={setDisputeReason} />
+              <TouchableOpacity
+                style={styles.payButton} disabled={disputeReason.trim().length < 5}
+                onPress={async () => { await runAction(() => disputeServiceRequest(item.id, disputeReason)); setDisputeId(null); setDisputeReason(""); }}
+              >
+                <Text style={styles.payButtonText}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {item.requester === myUserId && item.status === "COMPLETED" && item.technician && (
+            <View style={styles.payRow}>
+              <Text style={styles.description}>Rate your technician:</Text>
+              {[1, 2, 3, 4, 5].map((score) => (
+                <TouchableOpacity key={score} onPress={() => runAction(() => rateServiceTechnician(item.id, score))}>
+                  <Text style={styles.actionLink}>{score}★</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {item.scheduled_for ? <Text style={styles.description}>Scheduled for {new Date(item.scheduled_for).toLocaleString()}</Text> : null}
+          {(item.requester === myUserId || item.technician === myUserId) && item.status === "COMPLETED" && (
+            <TouchableOpacity onPress={() => runAction(async () => { setReceipt(await getServiceReceipt(item.id)); setReceiptId(item.id); })}><Text style={styles.actionLink}>View receipt</Text></TouchableOpacity>
+          )}
+          {receipt && receiptId === item.id && receiptFor(receipt, item)}
+          {item.technician && (item.requester === myUserId || item.technician === myUserId) && item.status !== "CANCELLED" && (
+            <>
+              <TouchableOpacity onPress={() => setChatId(chatId === item.id ? null : item.id)}><Text style={styles.actionLink}>{chatId === item.id ? "Hide chat" : "Chat"}</Text></TouchableOpacity>
+              {chatId === item.id && <ServiceChat requestId={item.id} myUserId={myUserId} />}
+            </>
           )}
         </View>
       )}

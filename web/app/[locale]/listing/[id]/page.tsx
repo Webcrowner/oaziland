@@ -3,10 +3,15 @@ import { getListing, getListingConditions } from "@/lib/api";
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import ContactListingButton from "@/components/ContactListingButton";
+import EscrowBookingButton from "@/components/EscrowBookingButton";
+import JoinWaitlistButton from "@/components/JoinWaitlistButton";
 import FavoriteButton from "@/components/FavoriteButton";
+import WhatsAppShareButton from "@/components/WhatsAppShareButton";
 import CompareButton from "@/components/CompareButton";
 import PropertyMap from "@/components/PropertyMap";
 import PhotoGallery from "@/components/PhotoGallery";
+import OwnerMediaManager from "@/components/OwnerMediaManager";
+import ListingOwnerActions from "@/components/ListingOwnerActions";
 import SimilarListings from "@/components/SimilarListings";
 import RateAndReport from "@/components/RateAndReport";
 import Badge from "@/components/ui/Badge";
@@ -110,6 +115,9 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
               {listing.property_asset.bathrooms !== null && (
                 <span className="flex items-center gap-2">🛁 <strong>{listing.property_asset.bathrooms}</strong> {t("bathrooms")}</span>
               )}
+              {listing.property_asset.living_rooms !== null && listing.property_asset.living_rooms > 0 && (
+                <span className="flex items-center gap-2">🛋 <strong>{listing.property_asset.living_rooms}</strong> {t("livingRooms")}</span>
+              )}
               {listing.property_asset.size_sqm && (
                 <span className="flex items-center gap-2">📐 <strong>{listing.property_asset.size_sqm}</strong> m²</span>
               )}
@@ -117,6 +125,17 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
 
             {listing.property_asset.description && (
               <p className="text-gray-700 mb-6 border-l-4 border-[var(--gold)] pl-4">{listing.property_asset.description}</p>
+            )}
+
+            {listing.property_asset.house_style && (
+              <div className="mb-6">
+                <h2 className="text-sm font-semibold text-gray-700 mb-2">{t("propertyDetails")}</h2>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="neutral"><span className="capitalize">{listing.property_asset.house_style.replace(/_/g, " ").toLowerCase()}</span></Badge>
+                  {listing.property_asset.has_garage && <Badge variant="neutral">{t("garage")}</Badge>}
+                  {listing.property_asset.pets_allowed && <Badge variant="neutral">{t("petsAllowed")}</Badge>}
+                </div>
+              </div>
             )}
 
             {/* Real amenities — data that already existed but was
@@ -176,6 +195,14 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
                 />
               </div>
             )}
+
+            <OwnerMediaManager
+              endpoint="listings"
+              assetId={listing.id}
+              ownerId={listing.lister_id}
+              media={listing.photos || []}
+              folder="listings"
+            />
           </div>
 
           {/* Sticky sidebar — the lister card and real actions stay
@@ -183,6 +210,7 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
               pattern every major listing page uses so the contact
               action is never more than a glance away. */}
           <div className="lg:sticky lg:top-4 lg:self-start">
+            <ListingOwnerActions listingId={listing.id} listerId={listing.lister_id} expiresAt={listing.expires_at} />
             <div className={`rounded-lg p-4 mb-4 ${listing.lister_role === "OWNER" ? "bg-green-50" : "bg-[var(--gold)]/10"}`}>
               <span className={`text-xs font-semibold uppercase px-2 py-1 rounded ${listing.lister_role === "OWNER" ? "bg-green-100 text-green-800" : "bg-[var(--gold)]/30 text-[#8A6D14]"}`}>
                 {t(listerRoleLabelKey(listing.lister_role, listing.listing_type))}
@@ -207,7 +235,22 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
             </div>
 
             <div className="flex flex-col gap-3">
-              <ContactListingButton listingId={listing.id} />
+              <EscrowBookingButton
+                listingId={listing.id}
+                title={`${listing.property_asset.type} in ${listing.property_asset.quarter_name}`}
+                quarterName={listing.property_asset.quarter_name}
+                priceXaf={listing.price_xaf}
+                listingType={listing.listing_type}
+              />
+              <ContactListingButton listingId={listing.id} listerId={listing.lister_id} />
+              <JoinWaitlistButton listingId={listing.id} />
+              <WhatsAppShareButton
+                variant="detail"
+                title={listing.property_asset.type.toLowerCase()}
+                location={listing.property_asset.quarter_name}
+                price={price}
+                path={`/listing/${listing.id}`}
+              />
               <div className="flex gap-3">
                 <FavoriteButton listingId={listing.id} variant="detail" />
                 <CompareButton listingId={listing.id} />

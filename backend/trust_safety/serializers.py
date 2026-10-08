@@ -2,6 +2,59 @@ from rest_framework import serializers
 from .models import ContentReport
 from engagement.models import VerificationRequest
 from property_management.models import DisputeCase
+from identity.models import User
+
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """Real gap this closes: the admin console could suspend/warn ANY
+    user, but had no way to tell what kind of user they even were —
+    a landlord, an agent, an agency owner, a student, a technician, a
+    driver, or a plain renter/buyer with no role at all. Mirrors the
+    exact same role-flag pattern as identity.UserProfileSerializer."""
+    strikes_count = serializers.IntegerField(source="warnings.count", read_only=True)
+    full_name = serializers.CharField(read_only=True)
+    is_admin = serializers.SerializerMethodField()
+    is_agent = serializers.SerializerMethodField()
+    is_landlord = serializers.SerializerMethodField()
+    is_agency = serializers.SerializerMethodField()
+    is_student = serializers.SerializerMethodField()
+    is_technician = serializers.SerializerMethodField()
+    is_driver = serializers.SerializerMethodField()
+    kyc_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "username", "phone", "email", "full_name",
+            "verification_status", "account_status", "suspended_until",
+            "strikes_count", "date_joined",
+            "is_admin", "is_agent", "is_landlord", "is_agency",
+            "is_student", "is_technician", "is_driver", "kyc_status",
+        ]
+
+    def get_is_admin(self, obj) -> bool:
+        return hasattr(obj, "admin_profile") or obj.is_staff or obj.is_superuser
+
+    def get_is_agent(self, obj) -> bool:
+        return hasattr(obj, "agent_profile")
+
+    def get_is_landlord(self, obj) -> bool:
+        return hasattr(obj, "landlord_profile")
+
+    def get_is_agency(self, obj) -> bool:
+        return hasattr(obj, "agency_profile")
+
+    def get_is_student(self, obj) -> bool:
+        return hasattr(obj, "student_profile")
+
+    def get_is_technician(self, obj) -> bool:
+        return hasattr(obj, "technician_profile")
+
+    def get_is_driver(self, obj) -> bool:
+        return hasattr(obj, "driver_profile")
+
+    def get_kyc_status(self, obj) -> str | None:
+        return obj.kyc_profile.kyc_status if hasattr(obj, "kyc_profile") else None
 
 
 class VerificationRequestSerializer(serializers.ModelSerializer):

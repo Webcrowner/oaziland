@@ -3,6 +3,7 @@ import { listJobPostings } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
 import JobApplyButton from "@/components/JobApplyButton";
+import JobPostingManagement from "@/components/JobPostingManagement";
 import type { Metadata } from "next";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -57,6 +58,7 @@ export default async function CareersPage() {
               </div>
               <p className="text-sm text-gray-600 mb-4">{job.description}</p>
               <JobApplyButton jobId={job.id} applyLabel={t("apply")} />
+              <JobPostingManagement jobId={job.id} postedBy={job.posted_by} />
             </div>
           ))}
         </div>

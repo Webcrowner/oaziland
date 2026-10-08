@@ -7,7 +7,7 @@ import pytest
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from identity.models import User
+from identity.models import User, KYCProfile, VerificationStatus, MfaMethod
 from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
 from student_hostels.models import StudentHostel, OwnerProfile
 
@@ -17,6 +17,14 @@ def _auth_client(user):
     token = RefreshToken.for_user(user)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
     return client
+
+
+def _verify(user):
+    """Listing creation now requires real KYC + MFA, same gate as
+    property/hotel/venue listings."""
+    KYCProfile.objects.create(user=user, legal_full_name=user.username, date_of_birth="1990-01-01", national_id_number=f"CM-{user.id}", residential_address="Yaoundé", kyc_status=VerificationStatus.VERIFIED)
+    MfaMethod.objects.create(user=user, mfa_type="SMS_OTP", destination=user.phone, verified=True)
+    return user
 
 
 @pytest.fixture
@@ -34,7 +42,7 @@ def test_creating_a_real_student_hostel_auto_provisions_a_real_owner_profile(qua
     """The exact same real gap already found and fixed for
     marketplace listings — verified directly that a real OwnerProfile
     now exists, not just assumed from reading the view."""
-    owner = User.objects.create(username="sh_create_owner", phone="+237699999901")
+    owner = _verify(User.objects.create(username="sh_create_owner", phone="+237699999901"))
     assert OwnerProfile.objects.filter(account_user=owner).exists() is False
     client = _auth_client(owner)
 
@@ -49,7 +57,7 @@ def test_creating_a_real_student_hostel_auto_provisions_a_real_owner_profile(qua
 
 @pytest.mark.django_db
 def test_a_new_student_hostel_is_immediately_publicly_visible(quarter):
-    owner = User.objects.create(username="sh_visibility_owner", phone="+237699999902")
+    owner = _verify(User.objects.create(username="sh_visibility_owner", phone="+237699999902"))
     _auth_client(owner).post("/api/student-hostels/", {"quarter": str(quarter.id)})
 
     response = APIClient().get("/api/student-hostels/")
@@ -59,7 +67,7 @@ def test_a_new_student_hostel_is_immediately_publicly_visible(quarter):
 
 @pytest.mark.django_db
 def test_adding_a_real_photo_to_a_student_hostel(quarter):
-    owner = User.objects.create(username="sh_photo_owner", phone="+237699999903")
+    owner = _verify(User.objects.create(username="sh_photo_owner", phone="+237699999903"))
     client = _auth_client(owner)
     create_response = client.post("/api/student-hostels/", {"quarter": str(quarter.id)})
     hostel_id = create_response.data["id"]
@@ -73,7 +81,7 @@ def test_adding_a_real_photo_to_a_student_hostel(quarter):
 
 @pytest.mark.django_db
 def test_only_the_hostels_own_owner_can_add_a_photo(quarter):
-    owner = User.objects.create(username="sh_photo_perm_owner", phone="+237699999904")
+    owner = _verify(User.objects.create(username="sh_photo_perm_owner", phone="+237699999904"))
     stranger = User.objects.create(username="sh_photo_perm_stranger", phone="+237699999905")
     create_response = _auth_client(owner).post("/api/student-hostels/", {"quarter": str(quarter.id)})
     hostel_id = create_response.data["id"]

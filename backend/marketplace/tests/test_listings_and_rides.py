@@ -134,7 +134,7 @@ def test_full_ride_booking_settles_through_shared_escrow():
     through the exact same escrow system as everything else."""
     from marketplace.services import register_as_driver, register_vehicle
 
-    PlatformFeePolicy.objects.create(category=TransactionCategory.RIDE_FARE, fee_percent=Decimal("10.0"))
+    PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.RIDE_FARE, defaults={"fee_percent": Decimal("10.0")})
     rider = User.objects.create(username="ride_rider", phone="+237699600005")
     driver = User.objects.create(username="ride_driver", phone="+237699600006")
     driver_profile = register_as_driver(user=driver, license_number="CM-DL-90001")
@@ -170,7 +170,7 @@ def test_full_ride_booking_settles_through_shared_escrow():
     assert ride.status == RideStatus.COMPLETED
     assert ride.booking == booking
     assert booking.booking_type == "RIDE"
-    assert escrow.status == "HELD"
+    assert escrow.status == "RELEASED"  # the driver actually gets paid now, not held forever
     # 10% of 2000 XAF fare — the RIDE_FARE category rate, not a
     # different category's rate.
     assert escrow.platform_fee_xaf == Decimal("200.00")

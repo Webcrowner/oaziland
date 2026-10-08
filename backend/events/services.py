@@ -110,6 +110,58 @@ def confirm_event_booking_deposit(*, event_booking, lock_client, payment_gateway
     return event_booking, escrow
 
 
+def confirm_event_booking_balance(*, event_booking, lock_client, payment_gateway, phone_number: str):
+    """Pays the remaining balance (70% by default) through its OWN real
+    Booking/PaymentEscrow — the real gap this closes: the balance amount
+    was tracked as a computed property but had no actual payment step
+    anywhere, so it could never really be collected."""
+    from transactions.services import reserve_booking, initiate_booking_payment, confirm_payment
+    from transactions.models import BookingType
+
+    balance_booking = reserve_booking(
+        lock_client=lock_client, requester=event_booking.organiser, booking_type=BookingType.EVENT,
+        target_content_type="events.EventBooking", target_id=event_booking.id, amount_xaf=event_booking.balance_amount_xaf,
+    )
+    initiate_booking_payment(booking=balance_booking, payment_gateway=payment_gateway, phone_number=phone_number)
+    escrow = confirm_payment(
+        lock_client=lock_client, booking=balance_booking, provider="MTN_MOMO", provider_reference=balance_booking.idempotency_key,
+        payment_gateway=payment_gateway, raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
+    )
+
+    event_booking.balance_booking = balance_booking
+    event_booking.save(update_fields=["balance_booking"])
+    return event_booking, escrow
+
+
+class EventNotFullyPaidError(Exception):
+    """Raised when an event is marked complete before the balance has
+    actually been paid — the venue must never be settled on the
+    strength of a deposit alone."""
+
+
+def complete_event_booking(*, event_booking, agent=None):
+    """Post-event settlement: releases BOTH the deposit escrow and the
+    balance escrow to the venue owner (computing commission once, off
+    the combined total, if an agent closed the deal) — the real gap
+    this closes: nothing anywhere ever paid a venue owner out for a
+    completed event; both escrows stayed HELD forever."""
+    from transactions.services import complete_booking
+    from .models import EventBookingStatus
+
+    if event_booking.balance_amount_xaf > 0 and event_booking.balance_booking_id is None:
+        raise EventNotFullyPaidError("The remaining balance has not been paid yet.")
+
+    escrows = []
+    if event_booking.booking_id and hasattr(event_booking.booking, "escrow"):
+        escrows.append(complete_booking(booking=event_booking.booking, agent=agent))
+    if event_booking.balance_booking_id and hasattr(event_booking.balance_booking, "escrow"):
+        escrows.append(complete_booking(booking=event_booking.balance_booking, agent=agent))
+
+    event_booking.status = EventBookingStatus.COMPLETED
+    event_booking.save(update_fields=["status"])
+    return event_booking, escrows
+
+
 BALANCE_REMINDER_DAYS_BEFORE = [14, 7, 3]
 
 

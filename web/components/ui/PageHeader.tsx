@@ -12,10 +12,10 @@ export default function PageHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 flex-wrap mb-8">
+    <div className="flex items-start justify-between gap-4 flex-wrap mb-8 pb-6 border-b border-slate-200/80">
       <div>
-        <h1 className="font-[family-name:var(--font-display)] text-2xl md:text-3xl text-[var(--navy)] mb-1">{title}</h1>
-        {subtitle && <p className="text-gray-500">{subtitle}</p>}
+        <h1 className="font-[family-name:var(--font-display)] text-2xl md:text-3xl font-bold text-slate-900 mb-1.5 tracking-tight">{title}</h1>
+        {subtitle && <p className="text-slate-500 text-sm md:text-base max-w-xl leading-relaxed">{subtitle}</p>}
       </div>
       {action}
     </div>

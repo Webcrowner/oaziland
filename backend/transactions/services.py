@@ -49,6 +49,11 @@ class WebhookSignatureError(Exception):
     security event by the caller."""
 
 
+class BookingAlreadySettledError(Exception):
+    """Raised when trying to cancel a booking that's already been paid
+    for, completed, or cancelled."""
+
+
 @dataclass
 class PaymentDetails:
     provider: str          # PaymentProvider choice, e.g. "MTN_MOMO"
@@ -211,16 +216,118 @@ def expire_hold(*, lock_client, booking: Booking):
     lock_client.release(lock_key)
 
 
-def complete_booking(*, booking: Booking, commission=None):
+def cancel_booking(*, lock_client, booking: Booking):
+    """The real gap this closes: a booking could be created and held,
+    but the requester had NO way to ever back out of it — no cancel
+    action existed anywhere, and the generic ModelViewSet's default
+    destroy() would have hard-deleted the row instead of leaving a real
+    CANCELLED audit trail. Only allowed before money has actually
+    changed hands — once CONFIRMED (escrow HELD), backing out needs a
+    real refund, which goes through the existing dispute/resolve_dispute
+    (outcome='REFUND') flow instead, not a silent status flip here."""
+    if booking.status not in (BookingStatus.PENDING, BookingStatus.PAYMENT_PROCESSING, BookingStatus.PAYMENT_FAILED):
+        raise BookingAlreadySettledError(
+            "This booking can no longer be cancelled this way — open a dispute if you already paid."
+        )
+    booking.cancel()
+    lock_key = f"booking-lock:{booking.target_content_type}:{booking.target_id}"
+    lock_client.release(lock_key)
+
+    # A cancelled reservation on a Listing is exactly the "this is
+    # available again" event the platform-wide waitlist exists for.
+    if booking.target_content_type == "property.Listing":
+        from discovery.services import notify_waitlist_on_availability
+        notify_waitlist_on_availability(booking.target_id)
+    return booking
+
+
+def resolve_target_owner(booking: Booking):
+    """Generic bookings (e.g. guest houses, direct property rentals, services, rides)
+    settle through the shared /api/bookings/ endpoint or vertical actions —
+    this resolves 'who gets paid' (payee user) across all target types."""
+    from django.apps import apps
+    try:
+        app_label, model_name = booking.target_content_type.split(".")
+        model = apps.get_model(app_label, model_name)
+        target = model.objects.filter(pk=booking.target_id).first()
+    except (LookupError, ValueError):
+        return None
+    if target is None:
+        return None
+    if hasattr(target, "technician"):
+        return target.technician
+    if hasattr(target, "driver"):
+        return getattr(target.driver, "user", target.driver)
+    if hasattr(target, "hotel"):
+        return getattr(target.hotel, "owner", None)
+    if hasattr(target, "venue"):
+        return getattr(target.venue, "owner", None)
+    if hasattr(target, "property_asset"):
+        return getattr(target.property_asset, "owner", None)
+    return getattr(target, "owner", None)
+
+
+def complete_booking(*, booking: Booking, agent=None, commission=None):
     """Step 9: arrival/check-in/term-end confirmed -> release escrow to the
-    landlord/agent/agency, computing the commission split if one applies."""
+    landlord/agent/agency, computing the commission split if one applies.
+
+    WHY 'agent' is accepted here rather than only a pre-built commission
+    object: this is the ONE function every vertical's real completion
+    action (hotel checkout, ride completion, service completion, event/
+    property booking completion) calls to actually pay out — computing
+    the commission split HERE, from the real agent who closed the deal,
+    is what makes commission genuinely get calculated for a live
+    transaction, instead of the correct math existing but never running
+    outside of a test."""
     with db_transaction.atomic():
         booking.complete()
         escrow = booking.escrow
+        if commission is None and agent is not None:
+            from agency.services import create_commission_for_booking
+            commission = create_commission_for_booking(booking=booking, agent=agent)
         if commission is not None:
             escrow.payee_amount_xaf = (
                 escrow.gross_amount_xaf - escrow.platform_fee_xaf - commission.total_amount_xaf
             )
             escrow.save(update_fields=["payee_amount_xaf"])
         escrow.release()
+
+        # Credit the payee's in-app wallet so they can immediately see their
+        # earnings and disburse/withdraw them to MTN MoMo or Orange Money.
+        payee = resolve_target_owner(booking)
+        if payee:
+            from monetization.services import get_or_create_wallet
+            from monetization.models import WalletTransaction, WalletTransactionType
+            wallet = get_or_create_wallet(payee)
+            wallet.balance_xaf += escrow.payee_amount_xaf
+            wallet.save(update_fields=["balance_xaf"])
+            WalletTransaction.objects.create(
+                wallet=wallet,
+                transaction_type=WalletTransactionType.GIFT_PAYOUT,
+                amount_xaf=escrow.payee_amount_xaf,
+                related_reference=f"Escrow release: booking #{booking.id}",
+            )
+
+        # If an agent was involved and earned commission, credit the agent's wallet too
+        if commission is not None and agent is not None:
+            from monetization.services import get_or_create_wallet
+            from monetization.models import WalletTransaction, WalletTransactionType
+            agent_user = getattr(agent, "user", None)
+            if agent_user and commission.agent_share_xaf > 0:
+                agent_wallet = get_or_create_wallet(agent_user)
+                agent_wallet.balance_xaf += commission.agent_share_xaf
+                agent_wallet.save(update_fields=["balance_xaf"])
+                WalletTransaction.objects.create(
+                    wallet=agent_wallet,
+                    transaction_type=WalletTransactionType.GIFT_PAYOUT,
+                    amount_xaf=commission.agent_share_xaf,
+                    related_reference=f"Commission: booking #{booking.id}",
+                )
+
+        # Real completed deals feed the FIVE_SUCCESSFUL_DEALS badge —
+        # complete_booking() is the ONE function every vertical's real
+        # completion action calls, so this is the correct single place
+        # to re-evaluate it rather than duplicating the check per-app.
+        from engagement.services import evaluate_badges_for_user
+        evaluate_badges_for_user(booking.requester)
     return escrow

@@ -62,6 +62,14 @@ def is_blocked(*, blocker, blocked) -> bool:
     return BlockRelationship.objects.filter(blocker=blocker, blocked=blocked).exists()
 
 
+def is_blocked_either_way(user_a, user_b) -> bool:
+    from django.db.models import Q
+    from .models import BlockRelationship
+    return BlockRelationship.objects.filter(
+        Q(blocker=user_a, blocked=user_b) | Q(blocker=user_b, blocked=user_a)
+    ).exists()
+
+
 def exclude_blocked_users(queryset, viewer, author_field="author"):
     """Filters a queryset (posts, listings, messages...) to remove
     anything authored by someone the viewer has blocked — THE actual
@@ -182,6 +190,70 @@ def process_due_account_deletions(now=None):
 # ---------------------------------------------------------------------------
 # Support — the AI agent first, real human escalation when needed.
 # ---------------------------------------------------------------------------
+def build_platform_context(*, user, message: str, history: list | None = None) -> str:
+    """Lightweight, keyword-triggered retrieval over real platform data,
+    so the AI support agent can recommend/quote REAL listings, hotels,
+    hostels, and technicians instead of ever inventing them — and can
+    answer account-specific questions (wallet balance, recent bookings).
+    Deliberately NOT a vector-search/embeddings pipeline — no such
+    infrastructure exists yet, and a handful of keyword-triggered
+    queries is the right amount of engineering for a first real version
+    of this, matching how every other "provider" in this codebase starts
+    with a working, honestly-scoped implementation."""
+    lowered = message.lower()
+    sections = []
+
+    if user is not None and getattr(user, "is_authenticated", False):
+        from monetization.models import Wallet
+        wallet = Wallet.objects.filter(owner=user).first()
+        if wallet:
+            sections.append(f"This user's wallet balance: {wallet.balance_xaf} XAF.")
+
+        from transactions.models import Booking
+        recent = list(Booking.objects.filter(requester=user).order_by("-created_at")[:3])
+        if recent:
+            lines = [f"- {b.target_content_type} booking, status={b.status}, made {b.created_at:%Y-%m-%d}" for b in recent]
+            sections.append("This user's recent bookings:\n" + "\n".join(lines))
+
+    # Property / hotel / hostel / guest house / venue questions: area- and budget-aware results that
+    # always carry a site link (see chat_retrieval.py), so the user can open what the bot found.
+    from .chat_retrieval import build_discovery_sections
+    sections.extend(build_discovery_sections(message=message, history=history))
+
+    if any(w in lowered for w in ("technician", "plumber", "electrician", "artisan", "repair", "service")):
+        from identity.models import TechnicianProfile
+        techs = list(TechnicianProfile.objects.select_related("user")[:5])
+        lines = [
+            f"- {t.user.get_full_name() or t.user.username}, specialties: {', '.join(t.specialties) or 'unspecified'}"
+            for t in techs
+        ]
+        if lines:
+            sections.append("Available service technicians:\n" + "\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
+def answer_anonymous_chat_message(*, message: str, conversation_history: list):
+    """The stateless counterpart to create_support_ticket()/
+    continue_support_ticket() for a visitor who isn't signed in yet —
+    SupportTicket.submitted_by is a required FK (a ticket is always
+    someone's OWN durable record), so an anonymous chat deliberately
+    never creates one: nothing is persisted server-side, and the caller
+    (the chat widget) is responsible for holding its own conversation_
+    history and re-sending it each turn, same as any stateless chat
+    API. WHY this still gets real platform-grounding: a prospective
+    user comparing options BEFORE ever registering is exactly the
+    'help customers check the best option' case, not a lesser one."""
+    from .support_agent import get_active_support_agent_provider
+
+    platform_context = build_platform_context(user=None, message=message, history=conversation_history)
+    provider = get_active_support_agent_provider()
+    return provider.generate_response(
+        ticket_subject="Anonymous chat", conversation_history=conversation_history,
+        latest_message=message, platform_context=platform_context,
+    )
+
+
 def create_support_ticket(*, user, subject: str, first_message: str):
     """Creates a ticket, logs the user's first message, and immediately
     gets an AI response — escalating to a human automatically if the AI
@@ -192,8 +264,39 @@ def create_support_ticket(*, user, subject: str, first_message: str):
     ticket = SupportTicket.objects.create(submitted_by=user, subject=subject)
     SupportMessage.objects.create(ticket=ticket, sender_type=SupportMessage.SenderType.USER, sender_user=user, text=first_message)
 
+    platform_context = build_platform_context(user=user, message=first_message)
     provider = get_active_support_agent_provider()
-    reply = provider.generate_response(ticket_subject=subject, conversation_history=[], latest_message=first_message)
+    reply = provider.generate_response(
+        ticket_subject=subject, conversation_history=[], latest_message=first_message, platform_context=platform_context,
+    )
+    SupportMessage.objects.create(ticket=ticket, sender_type=SupportMessage.SenderType.AI_AGENT, text=reply.response_text)
+
+    if reply.should_escalate_to_human:
+        escalate_ticket_to_human(ticket)
+
+    return ticket
+
+
+def continue_support_ticket(*, ticket, user, message: str):
+    """Appends the user's next message and, if the ticket hasn't already
+    been escalated to a human, gets another real AI reply grounded in
+    the same live platform data — so a multi-turn conversation stays
+    consistent. Once escalated, further messages are just logged for
+    the human agent; no more auto-replies."""
+    from .models import SupportMessage
+
+    history = [{"sender_type": m.sender_type, "text": m.text} for m in ticket.messages.order_by("sent_at")]
+    SupportMessage.objects.create(ticket=ticket, sender_type=SupportMessage.SenderType.USER, sender_user=user, text=message)
+
+    if not ticket.ai_handled:
+        return ticket
+
+    from .support_agent import get_active_support_agent_provider
+    platform_context = build_platform_context(user=user, message=message, history=history)
+    provider = get_active_support_agent_provider()
+    reply = provider.generate_response(
+        ticket_subject=ticket.subject, conversation_history=history, latest_message=message, platform_context=platform_context,
+    )
     SupportMessage.objects.create(ticket=ticket, sender_type=SupportMessage.SenderType.AI_AGENT, text=reply.response_text)
 
     if reply.should_escalate_to_human:

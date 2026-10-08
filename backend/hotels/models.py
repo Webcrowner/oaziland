@@ -134,6 +134,7 @@ class ReservationSource(models.TextChoices):
 
 
 class ReservationStatus(models.TextChoices):
+    PENDING_PAYMENT = "PENDING_PAYMENT", "Pending Payment"
     CONFIRMED = "CONFIRMED", "Confirmed"
     CHECKED_IN = "CHECKED_IN", "Checked In"
     CHECKED_OUT = "CHECKED_OUT", "Checked Out"
@@ -156,7 +157,7 @@ class Reservation(models.Model):
     children = models.PositiveSmallIntegerField(default=0)
     rate_xaf = models.DecimalField(max_digits=12, decimal_places=2)
     source = models.CharField(max_length=10, choices=ReservationSource.choices, default=ReservationSource.DIRECT)
-    status = models.CharField(max_length=15, choices=ReservationStatus.choices, default=ReservationStatus.CONFIRMED)
+    status = models.CharField(max_length=15, choices=ReservationStatus.choices, default=ReservationStatus.PENDING_PAYMENT)
     special_requests = models.TextField(blank=True)
     # A string reference since GroupBooking is defined later in this
     # file — nullable because most reservations are NOT part of a group.

@@ -16,3 +16,8 @@ mobile/.expo/
 
 # OS
 .DS_Store
+
+# Local junk
+.venv/
+*.log
+~$*

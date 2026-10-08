@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import SearchResultsView from "@/components/SearchResultsView";
 import SaveSearchButton from "@/components/SaveSearchButton";
-import { searchListings } from "@/lib/api";
+import { searchListings, listQuarters } from "@/lib/api";
 import type { Metadata } from "next";
 
 /**
@@ -34,11 +34,14 @@ export const metadata: Metadata = {
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ quarter?: string; property_type?: string; finish_level?: string; listing_type?: string }>;
+  searchParams: Promise<{ quarter?: string; property_type?: string; finish_level?: string; listing_type?: string; ordering?: string; max_price?: string }>;
 }) {
   const t = await getTranslations("SearchPage");
   const params = await searchParams;
-  const data = await searchListings(params).catch(() => ({ count: 0, results: [] as never[] }));
+  const [data, quarters] = await Promise.all([
+    searchListings(params).catch(() => ({ count: 0, next: null, previous: null, results: [] as never[] })),
+    listQuarters().catch(() => []),
+  ]);
 
   return (
     <main>
@@ -53,7 +56,7 @@ export default async function SearchPage({
           )}
         </div>
 
-        <SearchResultsView listings={data.results} />
+        <SearchResultsView listings={data.results} count={data.count} quarters={quarters} />
       </div>
     </main>
   );

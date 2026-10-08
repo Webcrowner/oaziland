@@ -1,11 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { listQuarters, estimatePropertyValue, estimateAffordability, type Quarter, type ValuationEstimateResult, type AffordabilityResult } from "@/lib/api";
+import { listQuarters, estimatePropertyValue, estimateAffordability, convertCurrency, getMyEarningsReport, type Quarter, type ValuationEstimateResult, type AffordabilityResult, type EarningsReportResult } from "@/lib/api";
+import QuarterOptions from "@/components/QuarterOptions";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 
-type Tool = "valuation" | "affordability";
+type Tool = "valuation" | "affordability" | "currency" | "earnings";
 
 /**
  * Finance — the real gap this closes: estimate_property_value() and
@@ -32,10 +33,21 @@ export default function FinancePage() {
   const [affordabilityLoading, setAffordabilityLoading] = useState(false);
   const [affordabilityError, setAffordabilityError] = useState("");
 
+  const [currencyAmount, setCurrencyAmount] = useState("");
+  const [currencyCode, setCurrencyCode] = useState("USD");
+  const [currencyResult, setCurrencyResult] = useState<string | null>(null);
+  const [currencyLoading, setCurrencyLoading] = useState(false);
+  const [currencyError, setCurrencyError] = useState("");
+
+  const [earningsStart, setEarningsStart] = useState("");
+  const [earningsEnd, setEarningsEnd] = useState("");
+  const [earningsResult, setEarningsResult] = useState<EarningsReportResult | null>(null);
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [earningsError, setEarningsError] = useState("");
+
   useEffect(() => {
     listQuarters().then((data) => {
       setQuarters(data);
-      if (data.length > 0) setQuarterId(data[0].id);
     }).catch(() => {});
   }, []);
 
@@ -69,17 +81,49 @@ export default function FinancePage() {
     }
   }
 
+  async function handleConvertCurrency(e: React.FormEvent) {
+    e.preventDefault();
+    setCurrencyLoading(true);
+    setCurrencyError("");
+    setCurrencyResult(null);
+    try {
+      const result = await convertCurrency(currencyAmount, currencyCode);
+      setCurrencyResult(result.converted_amount);
+    } catch (err) {
+      setCurrencyError(err instanceof Error ? err.message : t("estimateFailed"));
+    } finally {
+      setCurrencyLoading(false);
+    }
+  }
+
+  async function handleGenerateEarnings(e: React.FormEvent) {
+    e.preventDefault();
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    setEarningsLoading(true);
+    setEarningsError("");
+    setEarningsResult(null);
+    try {
+      const result = await getMyEarningsReport(earningsStart, earningsEnd, token);
+      setEarningsResult(result);
+    } catch (err) {
+      setEarningsError(err instanceof Error ? err.message : t("estimateFailed"));
+    } finally {
+      setEarningsLoading(false);
+    }
+  }
+
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       <PageHeader title={t("title")} subtitle={t("subtitle")} />
 
-      <div className="flex gap-2 mb-6">
-        {(["valuation", "affordability"] as const).map((key) => (
+      <div className="flex gap-2 mb-6 flex-wrap">
+        {(["valuation", "affordability", "currency", "earnings"] as const).map((key) => (
           <button
             key={key} onClick={() => setTool(key)}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${tool === key ? "bg-[var(--navy)] text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
           >
-            {key === "valuation" ? t("tabValuation") : t("tabAffordability")}
+            {key === "valuation" ? t("tabValuation") : key === "affordability" ? t("tabAffordability") : key === "currency" ? t("tabCurrency") : t("tabEarnings")}
           </button>
         ))}
       </div>
@@ -88,7 +132,8 @@ export default function FinancePage() {
         <div>
           <form onSubmit={handleValuation} className="border border-gray-200 rounded-xl p-6 bg-white mb-6 flex flex-col gap-3">
             <select value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded-lg px-3 py-2" required>
-              {quarters.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+              <option value="" disabled>Choose a neighborhood…</option>
+              <QuarterOptions quarters={quarters} />
             </select>
             <select value={propertyType} onChange={(e) => setPropertyType(e.target.value)} className="border rounded-lg px-3 py-2">
               <option value="HOUSE">{t("propertyTypeHouse")}</option>
@@ -114,7 +159,7 @@ export default function FinancePage() {
           )}
           <p className="text-xs text-gray-400 mt-4">{t("valuationMethodNote")}</p>
         </div>
-      ) : (
+      ) : tool === "affordability" ? (
         <div>
           <form onSubmit={handleAffordability} className="border border-gray-200 rounded-xl p-6 bg-white mb-6 flex flex-col gap-3">
             <input
@@ -138,6 +183,55 @@ export default function FinancePage() {
             </div>
           )}
           <p className="text-xs text-gray-400 mt-4">{t("affordabilityMethodNote")}</p>
+        </div>
+      ) : tool === "currency" ? (
+        <div>
+          <form onSubmit={handleConvertCurrency} className="border border-gray-200 rounded-xl p-6 bg-white mb-6 flex flex-col gap-3">
+            <input
+              required type="number" placeholder={t("currencyAmountPlaceholder")} value={currencyAmount}
+              onChange={(e) => setCurrencyAmount(e.target.value)} className="border rounded-lg px-3 py-2"
+            />
+            <input
+              required placeholder={t("currencyCodePlaceholder")} value={currencyCode}
+              onChange={(e) => setCurrencyCode(e.target.value.toUpperCase())} className="border rounded-lg px-3 py-2"
+            />
+            {currencyError && <p className="text-red-600 text-sm">{currencyError}</p>}
+            <Button size="lg" disabled={currencyLoading}>{currencyLoading ? t("converting") : t("convert")}</Button>
+          </form>
+          {currencyResult && (
+            <div className="border border-[var(--gold)] rounded-xl p-6 bg-white">
+              <p className="text-2xl font-bold text-[var(--navy)]">{t("conversionResult", { amount: Number(currencyResult).toLocaleString(), currency: currencyCode })}</p>
+            </div>
+          )}
+          <p className="text-xs text-gray-400 mt-4">{t("conversionNote")}</p>
+        </div>
+      ) : (
+        <div>
+          <form onSubmit={handleGenerateEarnings} className="border border-gray-200 rounded-xl p-6 bg-white mb-6 flex flex-col gap-3">
+            <p className="text-xs text-gray-500">{t("signInForEarnings")}</p>
+            <div className="grid grid-cols-2 gap-3">
+              <input required type="date" placeholder={t("startDatePlaceholder")} value={earningsStart} onChange={(e) => setEarningsStart(e.target.value)} className="border rounded-lg px-3 py-2" />
+              <input required type="date" placeholder={t("endDatePlaceholder")} value={earningsEnd} onChange={(e) => setEarningsEnd(e.target.value)} className="border rounded-lg px-3 py-2" />
+            </div>
+            {earningsError && <p className="text-red-600 text-sm">{earningsError}</p>}
+            <Button size="lg" disabled={earningsLoading}>{earningsLoading ? t("generatingReport") : t("generateReport")}</Button>
+          </form>
+          {earningsResult && (
+            <div className="border border-[var(--gold)] rounded-xl p-6 bg-white flex flex-col gap-4">
+              <div>
+                <p className="text-sm text-gray-500 mb-1">{t("totalCommissionEarned")}</p>
+                <p className="text-xl font-bold text-[var(--navy)]">{Number(earningsResult.total_commission_earned_xaf).toLocaleString()} XAF</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">{t("totalPayoutsReceived")}</p>
+                <p className="text-xl font-bold text-[var(--navy)]">{Number(earningsResult.total_payouts_received_xaf).toLocaleString()} XAF</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">{t("transactionCount")}</p>
+                <p className="text-xl font-bold text-[var(--navy)]">{earningsResult.transaction_count}</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </main>

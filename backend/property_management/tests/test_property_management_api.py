@@ -217,3 +217,92 @@ def test_creating_a_lease_immediately_schedules_real_renewal_reminders(house):
     assert response.status_code == 201
     from property_management.models import LeaseRenewalReminder
     assert LeaseRenewalReminder.objects.filter(lease_id=response.data["id"]).count() == 3
+
+
+@pytest.mark.django_db
+def test_a_stranger_cannot_create_a_lease_on_someone_elses_booking(house):
+    """The real IDOR this closes: any authenticated user could previously
+    pass ANY booking id to /api/leases/ and create a lease against a
+    booking that wasn't theirs."""
+    landlord, target_house = house
+    guest = User.objects.create(username="pm_lease_guest_idor", phone="+237699666613")
+    stranger = User.objects.create(username="pm_lease_stranger", phone="+237699666614")
+    listing = Listing.objects.create(property_asset=target_house, listed_by=landlord, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("80000"))
+    booking = Booking.objects.create(
+        booking_type=BookingType.GENERAL_RENTAL, target_content_type="property.Listing", target_id=listing.id,
+        requester=guest, status=BookingStatus.COMPLETED, amount_xaf=Decimal("80000"), idempotency_key="lease-api-test-2",
+    )
+
+    response = _auth_client(stranger).post("/api/leases/", {
+        "booking": str(booking.id), "start_date": str(date.today()), "end_date": str(date.today() + timedelta(days=365)),
+    })
+
+    assert response.status_code == 403
+    from property_management.models import Lease
+    assert not Lease.objects.filter(booking=booking).exists()
+
+
+@pytest.mark.django_db
+def test_a_lease_cannot_be_created_for_a_booking_that_isnt_completed(house):
+    landlord, target_house = house
+    guest = User.objects.create(username="pm_lease_guest_notcomplete", phone="+237699666615")
+    listing = Listing.objects.create(property_asset=target_house, listed_by=landlord, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("80000"))
+    booking = Booking.objects.create(
+        booking_type=BookingType.GENERAL_RENTAL, target_content_type="property.Listing", target_id=listing.id,
+        requester=guest, status=BookingStatus.CONFIRMED, amount_xaf=Decimal("80000"), idempotency_key="lease-api-test-3",
+    )
+
+    response = _auth_client(guest).post("/api/leases/", {
+        "booking": str(booking.id), "start_date": str(date.today()), "end_date": str(date.today() + timedelta(days=365)),
+    })
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_dispute_mediation_chat_access_and_posting(house):
+    from property_management.models import DisputeCase, DisputeMessage
+    from transactions.models import PaymentEscrow, EscrowStatus, PaymentProvider
+    from django.utils import timezone
+    from datetime import timedelta
+
+    landlord, target_house = house
+    guest = User.objects.create(username="pm_dispute_chat_guest", phone="+237699666616")
+    stranger = User.objects.create(username="pm_dispute_chat_stranger", phone="+237699666617")
+    admin_user = User.objects.create(username="pm_dispute_chat_admin", phone="+237699666618", is_staff=True)
+    listing = Listing.objects.create(property_asset=target_house, listed_by=landlord, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("80000"))
+    booking = Booking.objects.create(
+        booking_type=BookingType.GENERAL_RENTAL, target_content_type="property.Listing", target_id=listing.id,
+        requester=guest, status=BookingStatus.CONFIRMED, amount_xaf=Decimal("80000"), idempotency_key="dispute-chat-booking",
+    )
+    escrow = PaymentEscrow.objects.create(
+        booking=booking, gross_amount_xaf=Decimal("80000"), platform_fee_xaf=Decimal("8000"), payee_amount_xaf=Decimal("72000"),
+        provider=PaymentProvider.MTN_MOMO, status=EscrowStatus.DISPUTED,
+    )
+    now = timezone.now()
+    dispute = DisputeCase.objects.create(
+        escrow=escrow, raised_by=guest, reason="Plumbing leaking on arrival",
+        created_at=now, response_due_at=now + timedelta(hours=48), resolution_due_at=now + timedelta(days=7),
+    )
+
+    # 1. Complainant (guest) can send a mediation message
+    post_resp = _auth_client(guest).post(f"/api/disputes/{dispute.id}/messages/", {"text": "Water is leaking under the sink."})
+    assert post_resp.status_code == 201
+    assert post_resp.data["text"] == "Water is leaking under the sink."
+
+    # 2. Respondent (landlord) can read and reply
+    landlord_get = _auth_client(landlord).get(f"/api/disputes/{dispute.id}/messages/")
+    assert landlord_get.status_code == 200
+    assert len(landlord_get.data) == 1
+
+    landlord_post = _auth_client(landlord).post(f"/api/disputes/{dispute.id}/messages/", {"text": "I will send a plumber today."})
+    assert landlord_post.status_code == 201
+
+    # 3. Admin can read and reply
+    admin_get = _auth_client(admin_user).get(f"/api/disputes/{dispute.id}/messages/")
+    assert admin_get.status_code == 200
+    assert len(admin_get.data) == 2
+
+    # 4. Unrelated stranger is rejected with 403
+    stranger_resp = _auth_client(stranger).get(f"/api/disputes/{dispute.id}/messages/")
+    assert stranger_resp.status_code == 403

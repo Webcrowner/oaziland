@@ -18,7 +18,7 @@ export default function Card({
   href?: string;
   className?: string;
 }) {
-  const classes = `border border-gray-200 rounded-xl overflow-hidden bg-white transition-all duration-200 hover:shadow-lg hover:-translate-y-1 ${className}`;
+  const classes = `border border-slate-200/80 rounded-2xl overflow-hidden bg-white transition-all duration-200 hover:shadow-xl hover:border-amber-300/60 hover:-translate-y-1 ${className}`;
   if (href) {
     return (
       <Link href={href} className={`block ${classes}`}>
@@ -33,7 +33,7 @@ export default function Card({
  * placeholder treatment until real photos exist for a listing. */
 export function CardMedia({ label, className = "" }: { label: string; className?: string }) {
   return (
-    <div className={`h-40 bg-gray-100 flex items-center justify-center text-gray-500 text-sm ${className}`}>
+    <div className={`h-40 bg-slate-100 flex items-center justify-center text-slate-400 text-sm font-medium ${className}`}>
       {label}
     </div>
   );

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import PropertyCard from "@/components/PropertyCard";
+import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
 import Button from "@/components/ui/Button";
@@ -29,15 +30,17 @@ export default function FavoritesPage() {
 
   if (status === "signedOut") {
     return (
-      <main className="max-w-md mx-auto px-4 py-16 text-center">
-        <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Button href="/login">{t("signInRequired")}</Button>
-      </main>
+      <AccountSidebarLayout activeHref="/favorites">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
+          <Button href="/login">{t("signInRequired")}</Button>
+        </div>
+      </AccountSidebarLayout>
     );
   }
 
   return (
-    <main className="max-w-6xl mx-auto px-4 py-8">
+    <AccountSidebarLayout activeHref="/favorites">
       <PageHeader title={t("title")} subtitle={t("subtitle")} />
 
       {status === "loading" ? (
@@ -51,6 +54,6 @@ export default function FavoritesPage() {
           ))}
         </div>
       )}
-    </main>
+    </AccountSidebarLayout>
   );
 }

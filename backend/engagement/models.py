@@ -274,3 +274,24 @@ class ContactMessage(models.Model):
 
     class Meta:
         db_table = "contact_messages"
+
+
+class Faq(models.Model):
+    """A question shown on the public FAQ page and (optionally) the homepage, managed by admins.
+    French text is optional; readers fall back to English when it is blank."""
+    question_en = models.CharField(max_length=300)
+    answer_en = models.TextField()
+    question_fr = models.CharField(max_length=300, blank=True)
+    answer_fr = models.TextField(blank=True)
+    display_order = models.PositiveIntegerField(default=0)
+    is_published = models.BooleanField(default=True)
+    show_on_homepage = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "faqs"
+        ordering = ["display_order", "id"]
+
+    def __str__(self):
+        return self.question_en

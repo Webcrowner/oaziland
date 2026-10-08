@@ -97,7 +97,7 @@ def test_boost_pricing_scales_with_duration_quantity():
 @pytest.mark.django_db
 def test_purchasing_a_boost_creates_a_correctly_dated_active_campaign():
     BoostPricingTier.objects.create(placement=AdPlacement.QUARTER_FEATURED_LISTING, duration_unit=BoostDurationUnit.DAILY, price_xaf=Decimal("2000"))
-    PlatformFeePolicy.objects.create(category=TransactionCategory.AD_SPEND, fee_percent=Decimal("5.0"))
+    PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.AD_SPEND, defaults={"fee_percent": Decimal("5.0")})
     advertiser = User.objects.create(username="ad_buyer", phone="+237699800002")
     gateway = SandboxGateway()
 
@@ -120,8 +120,8 @@ def test_same_fee_calculation_applies_to_booking_and_ad_purchase(quarter):
     """The acceptance criteria's core claim: booking fees and ad-purchase
     fees must use the exact SAME PlatformFeePolicy mechanism, not two
     separate calculations that happen to look similar."""
-    PlatformFeePolicy.objects.create(category=TransactionCategory.PROPERTY_BOOKING, fee_percent=Decimal("3.0"))
-    PlatformFeePolicy.objects.create(category=TransactionCategory.AD_SPEND, fee_percent=Decimal("3.0"))
+    PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.PROPERTY_BOOKING, defaults={"fee_percent": Decimal("3.0")})
+    PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.AD_SPEND, defaults={"fee_percent": Decimal("3.0")})
     BoostPricingTier.objects.create(placement=AdPlacement.FEED_BOOSTED_POST, duration_unit=BoostDurationUnit.DAILY, price_xaf=Decimal("100000"))
 
     # --- Booking side ---

@@ -9,7 +9,7 @@ from decimal import Decimal
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from identity.models import User
+from identity.models import User, KYCProfile, VerificationStatus, MfaMethod
 from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
 from marketplace.models import WarehouseListing, CarListing, RideStatus
 from student_hostels.models import OwnerProfile
@@ -20,6 +20,15 @@ def _auth_client(user):
     token = RefreshToken.for_user(user)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
     return client
+
+
+def _verify(user):
+    """Listing a marketplace item and requesting a ride are both real
+    checkout/listing commitments now gated by real KYC + MFA, same as
+    property/hotel/venue listings."""
+    KYCProfile.objects.create(user=user, legal_full_name=user.username, date_of_birth="1990-01-01", national_id_number=f"CM-{user.id}", residential_address="Yaoundé", kyc_status=VerificationStatus.VERIFIED)
+    MfaMethod.objects.create(user=user, mfa_type="SMS_OTP", destination=user.phone, verified=True)
+    return user
 
 
 @pytest.fixture
@@ -41,7 +50,7 @@ def test_creating_a_warehouse_listing_auto_provisions_a_real_owner_profile(quart
     """A real gap this closes: every marketplace listing requires an
     OwnerProfile, but nothing ever created one automatically for a
     first-time lister — verified directly that one now really exists."""
-    user = User.objects.create(username="mp_warehouse_user", phone="+237699777701")
+    user = _verify(User.objects.create(username="mp_warehouse_user", phone="+237699777701"))
     assert OwnerProfile.objects.filter(account_user=user).exists() is False
     client = _auth_client(user)
 
@@ -57,7 +66,7 @@ def test_creating_a_warehouse_listing_auto_provisions_a_real_owner_profile(quart
 
 @pytest.mark.django_db
 def test_warehouse_listings_are_publicly_browsable(quarter):
-    user = User.objects.create(username="mp_warehouse_browse_user", phone="+237699777702")
+    user = _verify(User.objects.create(username="mp_warehouse_browse_user", phone="+237699777702"))
     _auth_client(user).post("/api/warehouses/", {
         "title": "A public warehouse", "price_basis": "RENT_MONTHLY", "price_xaf": "300000",
         "quarter": str(quarter.id), "size_sqm": "500",
@@ -71,7 +80,7 @@ def test_warehouse_listings_are_publicly_browsable(quarter):
 
 @pytest.mark.django_db
 def test_warehouse_search_filters_by_real_price_range(quarter):
-    user = User.objects.create(username="mp_warehouse_filter_user", phone="+237699777703")
+    user = _verify(User.objects.create(username="mp_warehouse_filter_user", phone="+237699777703"))
     client = _auth_client(user)
     client.post("/api/warehouses/", {"title": "Cheap", "price_basis": "RENT_MONTHLY", "price_xaf": "100000", "quarter": str(quarter.id), "size_sqm": "200"})
     client.post("/api/warehouses/", {"title": "Expensive", "price_basis": "RENT_MONTHLY", "price_xaf": "900000", "quarter": str(quarter.id), "size_sqm": "900"})
@@ -84,7 +93,7 @@ def test_warehouse_search_filters_by_real_price_range(quarter):
 
 @pytest.mark.django_db
 def test_creating_a_car_listing_with_real_vehicle_spec(quarter):
-    user = User.objects.create(username="mp_car_user", phone="+237699777704")
+    user = _verify(User.objects.create(username="mp_car_user", phone="+237699777704"))
     client = _auth_client(user)
 
     response = client.post("/api/cars/", {
@@ -112,7 +121,7 @@ def test_requesting_a_ride_computes_a_real_fare_server_side():
     """A real gap this closes: the client could otherwise just claim
     any fare — estimate_ride_fare()'s real formula is applied
     server-side from distance, never trusted from the request body."""
-    rider = User.objects.create(username="mp_ride_rider", phone="+237699777705")
+    rider = _verify(User.objects.create(username="mp_ride_rider", phone="+237699777705"))
     client = _auth_client(rider)
 
     response = client.post("/api/rides/", {
@@ -131,7 +140,7 @@ def test_the_full_real_ride_lifecycle_settles_through_the_real_payment_gateway()
     from identity.models import AdminProfile
     PlatformFeePolicy.objects.get_or_create(category=TransactionCategory.RIDE_FARE, defaults={"fee_percent": Decimal("10.0")})
 
-    rider = User.objects.create(username="mp_ride_full_rider", phone="+237699777706")
+    rider = _verify(User.objects.create(username="mp_ride_full_rider", phone="+237699777706"))
     driver = User.objects.create(username="mp_ride_full_driver", phone="+237699777707")
     admin_user = User.objects.create(username="mp_ride_full_admin", phone="+237699777708")
     AdminProfile.objects.create(user=admin_user, permissions=[])
@@ -168,7 +177,7 @@ def test_the_full_real_ride_lifecycle_settles_through_the_real_payment_gateway()
 @pytest.mark.django_db
 def test_only_the_rides_own_driver_can_start_it():
     from identity.models import AdminProfile
-    rider = User.objects.create(username="mp_ride_perm_rider", phone="+237699777708")
+    rider = _verify(User.objects.create(username="mp_ride_perm_rider", phone="+237699777708"))
     driver = User.objects.create(username="mp_ride_perm_driver", phone="+237699777709")
     stranger = User.objects.create(username="mp_ride_perm_stranger", phone="+237699777710")
     admin_user = User.objects.create(username="mp_ride_perm_admin", phone="+237699777718")
@@ -191,7 +200,7 @@ def test_only_the_rides_own_driver_can_start_it():
 @pytest.mark.django_db
 def test_cannot_accept_a_ride_thats_already_accepted():
     from identity.models import AdminProfile
-    rider = User.objects.create(username="mp_ride_double_rider", phone="+237699777711")
+    rider = _verify(User.objects.create(username="mp_ride_double_rider", phone="+237699777711"))
     driver_a = User.objects.create(username="mp_ride_double_driver_a", phone="+237699777712")
     driver_b = User.objects.create(username="mp_ride_double_driver_b", phone="+237699777713")
     admin_user = User.objects.create(username="mp_ride_double_admin", phone="+237699777717")
@@ -214,7 +223,7 @@ def test_cannot_accept_a_ride_thats_already_accepted():
 @pytest.mark.django_db
 def test_only_the_rider_can_complete_and_pay_for_their_own_ride():
     from identity.models import AdminProfile
-    rider = User.objects.create(username="mp_ride_pay_rider", phone="+237699777714")
+    rider = _verify(User.objects.create(username="mp_ride_pay_rider", phone="+237699777714"))
     driver = User.objects.create(username="mp_ride_pay_driver", phone="+237699777715")
     stranger = User.objects.create(username="mp_ride_pay_stranger", phone="+237699777716")
     admin_user = User.objects.create(username="mp_ride_pay_admin", phone="+237699777719")
@@ -232,6 +241,52 @@ def test_only_the_rider_can_complete_and_pay_for_their_own_ride():
     response = _auth_client(stranger).post(f"/api/rides/{ride_id}/complete/", {"phone_number": stranger.phone})
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_ride_private_chat_between_rider_and_driver():
+    from identity.models import AdminProfile
+    rider = _verify(User.objects.create(username="mp_ride_chat_rider", phone="+237699777771"))
+    driver = User.objects.create(username="mp_ride_chat_driver", phone="+237699777772")
+    stranger = User.objects.create(username="mp_ride_chat_stranger", phone="+237699777773")
+    admin_user = User.objects.create(username="mp_ride_chat_admin", phone="+237699777774")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+
+    driver_client = _auth_client(driver)
+    profile_response = driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-33333"})
+    _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
+    vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Toyota", "model": "Yaris", "plate_number": "LT-333-AB"})
+
+    rider_client = _auth_client(rider)
+    create_response = rider_client.post("/api/rides/", {"pickup_description": "Mvan Tropicana", "dropoff_description": "Bastos", "distance_km": "7"})
+    ride_id = create_response.data["id"]
+
+    # Stranger cannot view or send messages
+    assert _auth_client(stranger).get(f"/api/rides/{ride_id}/messages/").status_code == 403
+    assert _auth_client(stranger).post(f"/api/rides/{ride_id}/messages/", {"text": "Can I ride?"}).status_code == 403
+
+    # Accept ride
+    assert driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]}).status_code == 200
+
+    # Rider sends a message
+    send_msg = rider_client.post(f"/api/rides/{ride_id}/messages/", {"text": "I am standing by the blue kiosk."})
+    assert send_msg.status_code == 201
+    assert send_msg.data["text"] == "I am standing by the blue kiosk."
+    assert send_msg.data["sender_name"] == rider.full_name or rider.username
+
+    # Driver receives and replies
+    get_msgs = driver_client.get(f"/api/rides/{ride_id}/messages/")
+    assert get_msgs.status_code == 200
+    assert len(get_msgs.data) == 1
+    assert get_msgs.data[0]["text"] == "I am standing by the blue kiosk."
+
+    reply_msg = driver_client.post(f"/api/rides/{ride_id}/messages/", {"text": "Got it, hazard lights on."})
+    assert reply_msg.status_code == 201
+
+    # Rider sees both messages in order
+    rider_view = rider_client.get(f"/api/rides/{ride_id}/messages/")
+    assert len(rider_view.data) == 2
+    assert rider_view.data[1]["text"] == "Got it, hazard lights on."
 
 
 # ---------------------------------------------------------------------
@@ -294,7 +349,7 @@ def test_attaching_a_condition_to_a_marketplace_listing_too(quarter):
     """Proves the same generic endpoint genuinely works for a
     marketplace listing, not just property.Listing — the whole point
     of the model's own generic (content_type, id) design."""
-    user = User.objects.create(username="mp_cond_car_user", phone="+237699999905")
+    user = _verify(User.objects.create(username="mp_cond_car_user", phone="+237699999905"))
     car_response = _auth_client(user).post("/api/cars/", {
         "title": "Test Car", "price_basis": "SALE", "price_xaf": "3000000", "quarter": str(quarter.id),
         "vehicle_spec": {"make": "Honda", "model": "Civic", "year": 2015},
@@ -333,7 +388,7 @@ def test_attaching_a_condition_requires_authentication():
 # ---------------------------------------------------------------------
 @pytest.mark.django_db
 def test_adding_real_media_to_a_warehouse_listing(quarter):
-    user = User.objects.create(username="mp_media_user", phone="+237699888801")
+    user = _verify(User.objects.create(username="mp_media_user", phone="+237699888801"))
     client = _auth_client(user)
     create_response = client.post("/api/warehouses/", {
         "title": "Media Test Warehouse", "price_basis": "RENT_MONTHLY", "price_xaf": "300000", "quarter": str(quarter.id), "size_sqm": "400",
@@ -349,7 +404,7 @@ def test_adding_real_media_to_a_warehouse_listing(quarter):
 
 @pytest.mark.django_db
 def test_only_the_listings_own_lister_can_add_media(quarter):
-    user = User.objects.create(username="mp_media_owner", phone="+237699888802")
+    user = _verify(User.objects.create(username="mp_media_owner", phone="+237699888802"))
     stranger = User.objects.create(username="mp_media_stranger", phone="+237699888803")
     create_response = _auth_client(user).post("/api/warehouses/", {
         "title": "Media Perm Warehouse", "price_basis": "RENT_MONTHLY", "price_xaf": "300000", "quarter": str(quarter.id), "size_sqm": "400",
@@ -363,7 +418,7 @@ def test_only_the_listings_own_lister_can_add_media(quarter):
 
 @pytest.mark.django_db
 def test_removing_media_from_a_listing(quarter):
-    user = User.objects.create(username="mp_media_remove_user", phone="+237699888804")
+    user = _verify(User.objects.create(username="mp_media_remove_user", phone="+237699888804"))
     client = _auth_client(user)
     create_response = client.post("/api/warehouses/", {
         "title": "Media Remove Warehouse", "price_basis": "RENT_MONTHLY", "price_xaf": "300000", "quarter": str(quarter.id), "size_sqm": "400",
@@ -394,7 +449,7 @@ def test_registering_as_a_driver_starts_unverified():
 
 @pytest.mark.django_db
 def test_an_unverified_driver_cannot_accept_a_ride():
-    rider = User.objects.create(username="ride_gate_rider", phone="+237699888802")
+    rider = _verify(User.objects.create(username="ride_gate_rider", phone="+237699888802"))
     driver = User.objects.create(username="ride_gate_driver", phone="+237699888803")
     driver_client = _auth_client(driver)
     driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-11112"})
@@ -409,7 +464,7 @@ def test_an_unverified_driver_cannot_accept_a_ride():
 
 @pytest.mark.django_db
 def test_a_non_registered_user_cannot_accept_a_ride_at_all():
-    rider = User.objects.create(username="ride_noreg_rider", phone="+237699888804")
+    rider = _verify(User.objects.create(username="ride_noreg_rider", phone="+237699888804"))
     stranger = User.objects.create(username="ride_noreg_stranger", phone="+237699888805")
     create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
     ride_id = create_response.data["id"]
@@ -421,7 +476,7 @@ def test_a_non_registered_user_cannot_accept_a_ride_at_all():
 @pytest.mark.django_db
 def test_a_moto_only_vehicle_cannot_accept_a_ride_requesting_a_standard_car():
     from identity.models import AdminProfile
-    rider = User.objects.create(username="ride_mismatch_rider", phone="+237699888806")
+    rider = _verify(User.objects.create(username="ride_mismatch_rider", phone="+237699888806"))
     driver = User.objects.create(username="ride_mismatch_driver", phone="+237699888807")
     admin_user = User.objects.create(username="ride_mismatch_admin", phone="+237699888808")
     AdminProfile.objects.create(user=admin_user, permissions=[])
@@ -440,7 +495,7 @@ def test_a_moto_only_vehicle_cannot_accept_a_ride_requesting_a_standard_car():
 @pytest.mark.django_db
 def test_a_cargo_ride_requires_a_van_or_truck_not_a_car():
     from identity.models import AdminProfile
-    rider = User.objects.create(username="ride_cargo_rider", phone="+237699888809")
+    rider = _verify(User.objects.create(username="ride_cargo_rider", phone="+237699888809"))
     driver = User.objects.create(username="ride_cargo_driver", phone="+237699888810")
     admin_user = User.objects.create(username="ride_cargo_admin", phone="+237699888811")
     AdminProfile.objects.create(user=admin_user, permissions=[])
@@ -465,7 +520,7 @@ def test_a_cargo_ride_requires_a_van_or_truck_not_a_car():
 
 @pytest.mark.django_db
 def test_a_cargo_ride_without_a_description_is_rejected():
-    rider = User.objects.create(username="ride_cargo_nodesc_rider", phone="+237699888812")
+    rider = _verify(User.objects.create(username="ride_cargo_nodesc_rider", phone="+237699888812"))
     response = _auth_client(rider).post("/api/rides/", {
         "pickup_description": "A", "dropoff_description": "B", "distance_km": "5", "transport_type": "CARGO",
     })
@@ -474,7 +529,7 @@ def test_a_cargo_ride_without_a_description_is_rejected():
 
 @pytest.mark.django_db
 def test_luggage_and_ride_category_are_real_and_reflected_on_the_ride():
-    rider = User.objects.create(username="ride_luggage_rider", phone="+237699888813")
+    rider = _verify(User.objects.create(username="ride_luggage_rider", phone="+237699888813"))
     response = _auth_client(rider).post("/api/rides/", {
         "pickup_description": "Airport", "dropoff_description": "Hotel", "distance_km": "12",
         "ride_category": "COMFORT", "has_luggage": True,
@@ -486,7 +541,7 @@ def test_luggage_and_ride_category_are_real_and_reflected_on_the_ride():
 
 @pytest.mark.django_db
 def test_moto_and_comfort_fares_are_genuinely_different_not_one_formula_for_everyone():
-    rider = User.objects.create(username="ride_fare_rider", phone="+237699888814")
+    rider = _verify(User.objects.create(username="ride_fare_rider", phone="+237699888814"))
     moto_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "10", "ride_category": "MOTO"})
     comfort_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "10", "ride_category": "COMFORT"})
 
@@ -509,3 +564,19 @@ def test_an_admin_sees_and_can_verify_a_pending_driver():
     verify_response = admin_client.post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
     assert verify_response.status_code == 200
     assert verify_response.data["is_verified"] is True
+
+
+@pytest.mark.django_db
+def test_an_agents_marketplace_listing_is_labelled_agent_not_owner(quarter):
+    from identity.models import AgentProfile
+
+    agent = _verify(User.objects.create(username="mp_agent_user", phone="+237699777799"))
+    AgentProfile.objects.create(user=agent, agent_commission_percent=Decimal("10"))
+
+    response = _auth_client(agent).post("/api/warehouses/", {
+        "title": "Agent-listed warehouse", "price_basis": "SALE", "price_xaf": "9000000",
+        "quarter": str(quarter.id), "size_sqm": "400",
+    })
+
+    assert response.status_code == 201
+    assert response.data["lister_role"] == "AGENT"

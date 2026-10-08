@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import MaintenanceRequest, MaintenanceCostEntry, Lease, TenantScreeningRequest, AgentSafetyCheckIn
+from .models import MaintenanceRequest, MaintenanceCostEntry, Lease, TenantScreeningRequest, AgentSafetyCheckIn, DisputeMessage
 
 
 class MaintenanceCostEntrySerializer(serializers.ModelSerializer):
@@ -70,3 +70,12 @@ class OpenDisputeSerializer(serializers.Serializer):
 class AddMaintenanceCostSerializer(serializers.Serializer):
     amount_xaf = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
     note = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class DisputeMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.CharField(source="sender.full_name", read_only=True)
+
+    class Meta:
+        model = DisputeMessage
+        fields = ["id", "dispute", "sender", "sender_name", "text", "created_at"]
+        read_only_fields = ["dispute", "sender", "created_at"]

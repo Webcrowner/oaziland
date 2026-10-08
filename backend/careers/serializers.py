@@ -28,6 +28,15 @@ class JobApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = ["applicant", "status", "applied_at"]
 
 
+class UpdateApplicationStatusSerializer(serializers.Serializer):
+    application_id = serializers.UUIDField()
+    new_status = serializers.ChoiceField(choices=["REVIEWED", "SHORTLISTED", "REJECTED", "HIRED"])
+
+
+class ShareJobPostingSerializer(serializers.Serializer):
+    recipient_phone = serializers.CharField(max_length=50)
+
+
 class JobPostingSerializer(serializers.ModelSerializer):
     quarter_name = serializers.CharField(source="quarter.name", read_only=True, default=None)
     posted_by_name = serializers.CharField(source="posted_by.full_name", read_only=True)

@@ -6,10 +6,41 @@ see their own notification history inside the app itself — no bell
 icon, no list, nothing.
 """
 from rest_framework import viewsets, permissions, status
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Notification
-from .serializers import NotificationSerializer
+from drf_spectacular.utils import extend_schema
+from oaziland.permissions import IsAdminRole
+from .models import Notification, GreetingSettings
+from .serializers import NotificationSerializer, GreetingSettingsSerializer, ListingShareMessageSerializer
+
+
+class AdminGreetingSettingsView(APIView):
+    """Admin endpoint to view and update automated celebratory greeting settings
+    (happy new month and birthday options toggleable on/off, editable message templates)."""
+    permission_classes = [IsAdminRole]
+
+    @extend_schema(responses={200: GreetingSettingsSerializer})
+    def get(self, request):
+        settings_obj = GreetingSettings.get_settings()
+        return Response(GreetingSettingsSerializer(settings_obj).data)
+
+    @extend_schema(request=GreetingSettingsSerializer, responses={200: GreetingSettingsSerializer})
+    def put(self, request):
+        settings_obj = GreetingSettings.get_settings()
+        serializer = GreetingSettingsSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class ListingShareMessageView(APIView):
+    """Public: the admin-editable pre-filled text used by the WhatsApp share button on listing cards."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(responses={200: ListingShareMessageSerializer})
+    def get(self, request):
+        return Response({"listing_share_message": GreetingSettings.get_settings().listing_share_message})
 
 
 class MyNotificationViewSet(viewsets.ReadOnlyModelViewSet):

@@ -13,11 +13,11 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import MaintenanceRequest, TenantScreeningRequest, AgentSafetyCheckIn, Lease
+from .models import MaintenanceRequest, TenantScreeningRequest, AgentSafetyCheckIn, Lease, DisputeCase, DisputeMessage
 from .serializers import (
     MaintenanceRequestSerializer, AddMaintenanceCostSerializer,
     TenantScreeningRequestSerializer, AgentSafetyCheckInSerializer, StartCheckInSerializer,
-    LeaseSerializer, OpenDisputeSerializer,
+    LeaseSerializer, OpenDisputeSerializer, DisputeMessageSerializer,
 )
 from .services import (
     add_maintenance_cost, request_tenant_screening, tenant_grants_consent, generate_screening_report,
@@ -171,6 +171,20 @@ class LeaseViewSet(viewsets.ModelViewSet):
         return Lease.objects.filter(booking__requester=self.request.user).select_related("booking")
 
     def perform_create(self, serializer):
+        """A real gap this closes: nothing here previously checked that
+        the booking being wrapped into a lease actually belonged to the
+        requesting user, or was even completed — any authenticated user
+        could pass ANY booking id and create a lease against someone
+        else's booking (a straightforward IDOR)."""
+        from rest_framework.exceptions import PermissionDenied, ValidationError
+        from transactions.models import BookingStatus
+
+        booking = serializer.validated_data["booking"]
+        if booking.requester_id != self.request.user.id:
+            raise PermissionDenied("Only the booking's own requester can create a lease for it.")
+        if booking.status != BookingStatus.COMPLETED:
+            raise ValidationError({"booking": "A lease can only be created for a completed booking."})
+
         lease = serializer.save()
         schedule_renewal_reminders(lease)
 
@@ -204,3 +218,47 @@ class OpenDisputeView(APIView):
             "id": dispute.id, "status": dispute.status,
             "response_due_at": dispute.response_due_at, "resolution_due_at": dispute.resolution_due_at,
         }, status=status.HTTP_201_CREATED)
+
+
+class DisputeMessagesView(APIView):
+    """3-way private dispute chat between the complainant, respondent (booking target owner), and admin."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_dispute_and_check_access(self, request, dispute_id):
+        from transactions.services import resolve_target_owner
+        try:
+            dispute = DisputeCase.objects.select_related("escrow__booking").get(id=dispute_id)
+        except DisputeCase.DoesNotExist:
+            return None, Response({"detail": "Dispute case not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        booking = dispute.escrow.booking
+        target_owner = resolve_target_owner(booking)
+        allowed_ids = {dispute.raised_by_id, booking.requester_id}
+        if target_owner:
+            allowed_ids.add(target_owner.id)
+
+        is_admin = bool(getattr(request.user, "is_staff", False) or hasattr(request.user, "admin_profile"))
+        if not is_admin and request.user.id not in allowed_ids:
+            return None, Response({"detail": "You are not a party to this dispute mediation."}, status=status.HTTP_403_FORBIDDEN)
+
+        return dispute, None
+
+    @extend_schema(responses={200: DisputeMessageSerializer(many=True), 403: dict, 404: dict})
+    def get(self, request, dispute_id):
+        dispute, error_resp = self._get_dispute_and_check_access(request, dispute_id)
+        if error_resp:
+            return error_resp
+        messages = dispute.messages.select_related("sender").order_by("created_at")
+        return Response(DisputeMessageSerializer(messages, many=True).data)
+
+    @extend_schema(request=DisputeMessageSerializer, responses={201: DisputeMessageSerializer, 403: dict, 404: dict})
+    def post(self, request, dispute_id):
+        dispute, error_resp = self._get_dispute_and_check_access(request, dispute_id)
+        if error_resp:
+            return error_resp
+        text = request.data.get("text", "").strip()
+        if not text:
+            return Response({"detail": "text is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        message = DisputeMessage.objects.create(dispute=dispute, sender=request.user, text=text)
+        return Response(DisputeMessageSerializer(message).data, status=status.HTTP_201_CREATED)

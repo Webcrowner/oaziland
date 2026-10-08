@@ -6,7 +6,22 @@ from datetime import date
 from identity.models import User
 from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
 from hotels.models import Hotel, RoomType, RoomCategory, Room, RoomStatus
-from hotels.services import create_reservation, check_in_guest, get_hotel_financial_dashboard
+from hotels.services import create_reservation, confirm_reservation_payment, check_in_guest, get_hotel_financial_dashboard
+from payments.gateways import SandboxGateway
+
+
+class FakeLock:
+    def __init__(self):
+        self.locked = set()
+
+    def acquire(self, key, ttl_seconds):
+        if key in self.locked:
+            return False
+        self.locked.add(key)
+        return True
+
+    def release(self, key, permanent=False):
+        self.locked.discard(key)
 
 
 @pytest.fixture
@@ -35,6 +50,7 @@ def test_financial_dashboard_reflects_real_bookings_and_top_room_types(hotel):
     Room.objects.create(hotel=hotel, room_type=deluxe, room_number="D1", status=RoomStatus.INSPECTED)
 
     reservation = create_reservation(hotel=hotel, guest=guest, room_type=deluxe, check_in=date(2026, 6, 1), check_out=date(2026, 6, 3))
+    confirm_reservation_payment(reservation=reservation, lock_client=FakeLock(), payment_gateway=SandboxGateway(), phone_number="+237699888199")
     check_in_guest(reservation=reservation, assigned_by=front_desk)
 
     dashboard = get_hotel_financial_dashboard(hotel)

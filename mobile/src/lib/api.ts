@@ -951,12 +951,20 @@ export async function completeRide(rideId: string, phoneNumber: string) {
 // ---------------------------------------------------------------------------
 export interface ServiceRequestItem {
   id: string;
+  requester: string | null;
   requester_name: string;
+  technician: string | null;
   technician_name: string | null;
   category: string;
   priority: string;
   status: string;
   description: string;
+  quoted_amount_xaf: string | null;
+  quoted_labor_xaf: string | null;
+  quoted_materials_xaf: string | null;
+  quote_approved: boolean;
+  dispute_reason: string;
+  scheduled_for: string | null;
 }
 
 export async function listMyServiceRequests(): Promise<PaginatedResponse<ServiceRequestItem>> {
@@ -965,37 +973,86 @@ export async function listMyServiceRequests(): Promise<PaginatedResponse<Service
   return res.json();
 }
 
-export async function createServiceRequest(category: string, description: string, priority: string) {
+export async function createServiceRequest(category: string, description: string, priority: string, latitude: number, longitude: number) {
   const res = await fetch(`${API_BASE_URL}/api/service-requests/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify({ category, description, priority }),
+    body: JSON.stringify({ category, description, priority, latitude: latitude.toFixed(7), longitude: longitude.toFixed(7) }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "Could not create service request");
   return data;
 }
 
-export async function acceptServiceRequest(id: string) {
-  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/accept/`, { method: "POST", headers: await authHeaders() });
-  if (!res.ok) throw new Error((await res.json()).detail || "Could not accept request");
-  return res.json();
-}
-
-export async function startServiceRequest(id: string) {
-  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/start/`, { method: "POST", headers: await authHeaders() });
-  if (!res.ok) throw new Error((await res.json()).detail || "Could not start request");
-  return res.json();
-}
-
-export async function completeServiceRequest(id: string, amountXaf: string, phoneNumber: string) {
-  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/complete/`, {
+async function postServiceRequestAction(id: string, action: string, body: object = {}) {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/${action}/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify({ amount_xaf: amountXaf, phone_number: phoneNumber }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || "Could not complete request");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Action failed");
+  return data;
+}
+
+export const acceptServiceRequest = (id: string) => postServiceRequestAction(id, "accept");
+export const startServiceRequest = (id: string) => postServiceRequestAction(id, "start");
+export const releaseServiceRequest = (id: string) => postServiceRequestAction(id, "release");
+export const markServiceRequestEnRoute = (id: string) => postServiceRequestAction(id, "en-route");
+export const proposeServiceQuote = (id: string, laborXaf: string, materialsXaf?: string) =>
+  postServiceRequestAction(id, "quote", { labor_xaf: laborXaf, ...(materialsXaf ? { materials_xaf: materialsXaf } : {}) });
+export const rescheduleServiceRequest = (id: string, scheduledForIso: string) => postServiceRequestAction(id, "reschedule", { scheduled_for: scheduledForIso });
+export const approveServiceQuote = (id: string) => postServiceRequestAction(id, "approve-quote");
+export const disputeServiceRequest = (id: string, reason: string) => postServiceRequestAction(id, "dispute", { reason });
+export const rateServiceTechnician = (id: string, score: number) => postServiceRequestAction(id, "rate", { score });
+export const completeServiceRequest = (id: string, phoneNumber: string) => postServiceRequestAction(id, "complete", { phone_number: phoneNumber });
+
+export async function getMyUserId(): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/me/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your profile");
+  return (await res.json()).id;
+}
+
+export interface ServiceReceipt {
+  receipt_number: string;
+  category: string;
+  description: string;
+  technician_name: string | null;
+  labor_xaf: string | null;
+  materials_xaf: string | null;
+  total_xaf: string | null;
+  platform_fee_xaf: string | null;
+}
+
+export async function getServiceReceipt(id: string): Promise<ServiceReceipt> {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/receipt/`, { headers: await authHeaders() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not load the receipt");
+  return data;
+}
+
+export interface ServiceRequestMessageItem {
+  id: number;
+  sender: string;
+  sender_name: string;
+  text: string;
+}
+
+export async function listServiceRequestMessages(id: string): Promise<ServiceRequestMessageItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/messages/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load messages");
   return res.json();
+}
+
+export async function sendServiceRequestMessage(id: string, text: string): Promise<ServiceRequestMessageItem> {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/messages/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ text }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not send the message");
+  return data;
 }
 
 // ---------------------------------------------------------------------------

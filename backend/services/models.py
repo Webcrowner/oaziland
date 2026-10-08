@@ -62,14 +62,36 @@ class ServiceRequest(models.Model):
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="service_request")
+    # Price is agreed up front: technician proposes, requester approves, payment settles at exactly this amount.
+    quoted_amount_xaf = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    # Optional breakdown behind the total; null when the technician quoted a single lump sum.
+    quoted_labor_xaf = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    quoted_materials_xaf = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    quote_approved = models.BooleanField(default=False)
+    dispute_reason = models.TextField(blank=True)
+    # When the requester wants the job done; null means as soon as possible.
+    scheduled_for = models.DateTimeField(null=True, blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
+    en_route_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "service_requests"
         indexes = [models.Index(fields=["category", "status"])]
+
+
+class ServiceRequestMessage(models.Model):
+    """In-job chat between the requester and the assigned technician."""
+    service_request = models.ForeignKey(ServiceRequest, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="service_request_messages")
+    text = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "service_request_messages"
+        ordering = ["created_at"]
 
 
 class ServiceRequestPhotoType(models.TextChoices):
@@ -161,3 +183,102 @@ class TasklnWorkerRecord(models.Model):
 
     class Meta:
         db_table = "taskln_worker_records"
+
+
+class FacilityManagementFrequency(models.TextChoices):
+    WEEKLY = "WEEKLY", "Weekly"
+    MONTHLY = "MONTHLY", "Monthly"
+    QUARTERLY = "QUARTERLY", "Quarterly"
+
+
+class FacilityManagementContract(models.Model):
+    """A recurring facility-management arrangement between a property
+    owner and a technician or agency — docs/01 §2.4's
+    'FacilityManagementContract (property, technician/agency, recurring
+    schedule, scope)', previously modeled nowhere at all. Property is a
+    polymorphic reference (target_content_type/target_id) using the same
+    convention Booking/ActionLog already use elsewhere in this codebase,
+    since a facility contract can cover any listed property type, not
+    just one app's model."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="facility_contracts_owned")
+    target_content_type = models.CharField(max_length=50)  # e.g. "property.PropertyAsset"
+    target_id = models.UUIDField()
+    technician = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="facility_contracts_as_technician",
+    )
+    agency = models.ForeignKey("identity.AgencyProfile", on_delete=models.SET_NULL, null=True, blank=True, related_name="facility_contracts")
+    scope = models.TextField()
+    frequency = models.CharField(max_length=10, choices=FacilityManagementFrequency.choices)
+    start_date = models.DateField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "facility_management_contracts"
+        indexes = [models.Index(fields=["target_content_type", "target_id"])]
+
+
+class FacilityVisitLog(models.Model):
+    """The 'routine inspection logs' from Prompt 15's Technician
+    Dashboard requirement — one row per actual visit under a contract,
+    filed by whoever performed it."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contract = models.ForeignKey(FacilityManagementContract, on_delete=models.CASCADE, related_name="visit_logs")
+    logged_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="facility_visit_logs")
+    notes = models.TextField(blank=True)
+    photo_url = models.URLField(blank=True)
+    visited_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "facility_visit_logs"
+        indexes = [models.Index(fields=["contract", "-visited_at"])]
+
+
+class ProjectCaseStatus(models.TextChoices):
+    PLANNING = "PLANNING", "Planning"
+    IN_PROGRESS = "IN_PROGRESS", "In Progress"
+    ON_HOLD = "ON_HOLD", "On Hold"
+    COMPLETED = "COMPLETED", "Completed"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
+class ProjectManagementCase(models.Model):
+    """A larger job — renovation, new build — with milestones, a
+    budget, and linked technicians. docs/01 §2.4's
+    'ProjectManagementCase', previously modeled nowhere at all. The
+    property reference is OPTIONAL: a new build genuinely may not have
+    an existing property record yet."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="project_cases_owned")
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    budget_xaf = models.DecimalField(max_digits=14, decimal_places=2)
+    status = models.CharField(max_length=15, choices=ProjectCaseStatus.choices, default=ProjectCaseStatus.PLANNING)
+    target_content_type = models.CharField(max_length=50, blank=True)
+    target_id = models.UUIDField(null=True, blank=True)
+    technicians = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="project_cases_assigned", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "project_management_cases"
+
+
+class ProjectMilestoneStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending"
+    IN_PROGRESS = "IN_PROGRESS", "In Progress"
+    COMPLETED = "COMPLETED", "Completed"
+
+
+class ProjectMilestone(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    case = models.ForeignKey(ProjectManagementCase, on_delete=models.CASCADE, related_name="milestones")
+    title = models.CharField(max_length=200)
+    budget_allocation_xaf = models.DecimalField(max_digits=14, decimal_places=2)
+    due_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=15, choices=ProjectMilestoneStatus.choices, default=ProjectMilestoneStatus.PENDING)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "project_milestones"
+        indexes = [models.Index(fields=["case"])]

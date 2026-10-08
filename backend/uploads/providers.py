@@ -38,14 +38,22 @@ class LocalFileStorageProvider(MediaStorageProvider):
     (see CloudinaryStorageProvider), but real and testable right now."""
 
     def upload(self, *, file, folder: str) -> UploadResult:
+        from django.conf import settings
         from django.core.files.storage import default_storage
         from .services import detect_media_type
 
         media_type = detect_media_type(file.content_type)
-        extension = file.name.rsplit(".", 1)[-1] if "." in file.name else "bin"
+        # Extension comes from the validated content type, never the client-supplied filename.
+        extension = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "video/mp4": "mp4", "video/quicktime": "mov"}[file.content_type]
         real_filename = f"{folder}/{uuid.uuid4()}.{extension}"
         saved_path = default_storage.save(real_filename, file)
         url = default_storage.url(saved_path)
+        # default_storage.url() returns a relative path ("/media/...")
+        # — real everywhere the frontend shares the backend's own
+        # origin, but broken (404, wrong origin) whenever it's served
+        # from a different one, like the Next.js dev server.
+        if not url.startswith(("http://", "https://")):
+            url = settings.BACKEND_BASE_URL.rstrip("/") + url
         return UploadResult(url=url, media_type=media_type)
 
 

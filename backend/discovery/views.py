@@ -87,3 +87,19 @@ class MyComparisonView(views.APIView):
         except ComparisonLimitError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(PropertyComparisonSerializer(comparison).data, status=status.HTTP_200_OK)
+
+
+class ListingWaitlistView(views.APIView):
+    """The real gap this closes: join_listing_waitlist()/
+    notify_waitlist_on_availability() (Prompt 15's 'NEW — Waitlist')
+    were fully built and unit-tested, but nothing ever let a real user
+    actually join one."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=None, responses={201: dict})
+    def post(self, request, listing_id):
+        from .models import ListingWaitlistEntry
+        from .services import join_listing_waitlist
+        already_joined = ListingWaitlistEntry.objects.filter(user=request.user, listing_id=listing_id).exists()
+        join_listing_waitlist(user=request.user, listing_id=listing_id)
+        return Response({"joined": True, "already_joined": already_joined}, status=status.HTTP_201_CREATED)

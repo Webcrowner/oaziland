@@ -250,3 +250,15 @@ class RideBooking(models.Model):
 
     class Meta:
         db_table = "ride_bookings"
+
+
+class RideMessage(models.Model):
+    """In-trip private chat between the rider and the assigned driver."""
+    ride = models.ForeignKey(RideBooking, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ride_messages")
+    text = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ride_messages"
+        ordering = ["created_at"]

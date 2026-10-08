@@ -24,6 +24,54 @@ class KycNotSubmittedError(Exception):
     APPROVED yet — just submitted)."""
 
 
+def approve_kyc(kyc_profile):
+    """The real gap this closes: a submitted KYCProfile could sit at
+    kyc_status=PENDING forever — nothing anywhere (not even Django
+    admin) could ever move it to VERIFIED, so IsVerifiedAndMfaEnabled
+    could never actually be satisfied by a real user in production."""
+    from django.utils import timezone
+    from .models import VerificationStatus
+    from notifications.services import notify
+
+    kyc_profile.kyc_status = VerificationStatus.VERIFIED
+    kyc_profile.reviewed_at = timezone.now()
+    kyc_profile.save(update_fields=["kyc_status", "reviewed_at"])
+
+    notify(
+        recipient=kyc_profile.user, notification_type="KYC_APPROVED", channel="WHATSAPP",
+        title="Identity Verified", message="Your identity verification (KYC) has been approved.",
+        related_reference=str(kyc_profile.id),
+    )
+    from engagement.services import evaluate_badges_for_user
+    evaluate_badges_for_user(kyc_profile.user)
+
+    # Qualify any referral and award the referral reward to the referrer
+    from social.services import qualify_referral, award_referral_reward
+    referral = qualify_referral(kyc_profile.user)
+    if referral:
+        award_referral_reward(referral)
+
+    return kyc_profile
+
+
+def reject_kyc(kyc_profile, reason: str = ""):
+    from django.utils import timezone
+    from .models import VerificationStatus
+    from notifications.services import notify
+
+    kyc_profile.kyc_status = VerificationStatus.REJECTED
+    kyc_profile.reviewed_at = timezone.now()
+    kyc_profile.save(update_fields=["kyc_status", "reviewed_at"])
+
+    notify(
+        recipient=kyc_profile.user, notification_type="KYC_REJECTED", channel="WHATSAPP",
+        title="Identity Verification Not Approved",
+        message=f"Your KYC submission was not approved.{' Reason: ' + reason if reason else ''}",
+        related_reference=str(kyc_profile.id),
+    )
+    return kyc_profile
+
+
 def user_has_verified_mfa(user) -> bool:
     """True if this user has at least one MFA method that has been set
     up and confirmed working (not just added, but actually verified with
@@ -179,3 +227,238 @@ def get_or_create_referral_code(user) -> str:
             user.referral_code = candidate
             user.save(update_fields=["referral_code"])
             return candidate
+
+
+# ---------------------------------------------------------------------------
+# Public User Role Index / Profile Hub:
+# Surfaces a user's role-specific owned assets (hotels, hostels, apartments,
+# houses, lands, shops, guest houses, venues, listings) and public professional
+# stats for public sharing and QR code discovery.
+# ---------------------------------------------------------------------------
+def get_user_public_index(user):
+    from django.db.models import Avg
+    from social.models import Rating
+    from property.models import Listing, ListingStatus, House, Shop, GuestHouseLodge
+    from hotels.models import Hotel
+    from student_hostels.models import StudentHostel
+    from events.models import Venue
+    from land.models import Land
+
+    # 1. Base User identity & role flags
+    roles = []
+    if hasattr(user, "hotel_set") or Hotel.objects.filter(owner=user).exists():
+        roles.append("hotel_owner")
+    if hasattr(user, "student_hostels") or StudentHostel.objects.filter(owner=user).exists():
+        roles.append("hostel_owner")
+    if hasattr(user, "landlord_profile") or Listing.objects.filter(listed_by=user).exists() or House.objects.filter(owner=user).exists():
+        roles.append("landlord")
+    if hasattr(user, "agent_profile"):
+        roles.append("agent")
+    if hasattr(user, "agency_profile"):
+        roles.append("agency")
+    if hasattr(user, "technician_profile"):
+        roles.append("technician")
+    if hasattr(user, "driver_profile"):
+        roles.append("driver")
+    if hasattr(user, "student_profile"):
+        roles.append("student")
+    if not roles:
+        roles.append("user")
+
+    # Ratings
+    ratings = Rating.objects.filter(subject_user=user)
+    avg_rating = ratings.aggregate(avg=Avg("score"))["avg"]
+    is_kyc = hasattr(user, "kyc_profile") and user.kyc_profile.kyc_status == "VERIFIED"
+
+    # 2. Owned Hotels
+    owned_hotels = []
+    for h in Hotel.objects.filter(owner=user).prefetch_related("room_types", "asset_photos"):
+        primary_photo = h.asset_photos.filter(is_primary=True).first() or h.asset_photos.first()
+        cheapest_rate = min([rt.base_rate_xaf for rt in h.room_types.all()], default=None)
+        owned_hotels.append({
+            "id": str(h.id),
+            "quarter_name": h.quarter.name if h.quarter else "",
+            "star_rating": h.star_rating,
+            "total_rooms": h.total_rooms,
+            "verified": h.verified,
+            "latitude": float(h.latitude) if h.latitude is not None else None,
+            "longitude": float(h.longitude) if h.longitude is not None else None,
+            "cheapest_rate_xaf": float(cheapest_rate) if cheapest_rate is not None else None,
+            "photo_url": primary_photo.url if primary_photo else None,
+            "room_categories": list({rt.category for rt in h.room_types.all()}),
+        })
+
+    # 3. Owned Student Hostels
+    owned_hostels = []
+    for sh in StudentHostel.objects.filter(owner=user).prefetch_related("asset_photos", "units"):
+        primary_photo = sh.asset_photos.filter(is_primary=True).first() or sh.asset_photos.first()
+        from student_hostels.models import HostelUnit
+        units = HostelUnit.objects.filter(building=sh.building_ptr)
+        owned_hostels.append({
+            "id": str(sh.id),
+            "quarter_name": sh.quarter.name if sh.quarter else "",
+            "property_type": sh.property_type,
+            "total_units": units.count(),
+            "latitude": float(sh.latitude) if sh.latitude is not None else None,
+            "longitude": float(sh.longitude) if sh.longitude is not None else None,
+            "photo_url": primary_photo.url if primary_photo else None,
+            "unit_types": list({u.unit_type for u in units}),
+        })
+
+    # 4. Owned Guest Houses & Lodges
+    owned_guest_houses = []
+    for gh in GuestHouseLodge.objects.filter(owner=user).prefetch_related("asset_photos"):
+        primary_photo = gh.asset_photos.filter(is_primary=True).first() or gh.asset_photos.first()
+        owned_guest_houses.append({
+            "id": str(gh.id),
+            "quarter_name": gh.quarter.name if gh.quarter else "",
+            "is_coastal_leisure": gh.is_coastal_leisure,
+            "finish_level": gh.finish_level,
+            "latitude": float(gh.latitude) if gh.latitude is not None else None,
+            "longitude": float(gh.longitude) if gh.longitude is not None else None,
+            "photo_url": primary_photo.url if primary_photo else None,
+        })
+
+    # 5. Owned Event Venues
+    owned_venues = []
+    for v in Venue.objects.filter(owner=user).prefetch_related("asset_photos", "venue_spaces"):
+        primary_photo = v.asset_photos.filter(is_primary=True).first() or v.asset_photos.first()
+        owned_venues.append({
+            "id": str(v.id),
+            "quarter_name": v.quarter.name if v.quarter else "",
+            "verified": v.verified,
+            "total_spaces": v.venue_spaces.count(),
+            "latitude": float(v.latitude) if v.latitude is not None else None,
+            "longitude": float(v.longitude) if v.longitude is not None else None,
+            "photo_url": primary_photo.url if primary_photo else None,
+        })
+
+    # 6. Published Listings (Houses, Apartments, Studios, Lands, Commercials)
+    published_listings = []
+    listings_qs = Listing.objects.filter(
+        listed_by=user,
+        status=ListingStatus.PUBLISHED,
+    ).select_related("property_asset", "property_asset__quarter").prefetch_related("photos").order_by("-published_at")
+
+    apartments_count = 0
+    houses_count = 0
+    lands_count = 0
+
+    for l in listings_qs:
+        asset = l.property_asset
+        primary_photo = l.photos.filter(is_primary=True).first() or l.photos.first()
+        asset_type = asset.type if asset else ""
+        
+        # Check if house is apartment style
+        house_style = ""
+        if hasattr(asset, "house"):
+            house_style = asset.house.house_style
+
+        if asset_type == "HOUSE" and house_style in ("APARTMENT", "STUDIO", "ROOM", "SELF_CONTAIN"):
+            apartments_count += 1
+        elif asset_type == "HOUSE":
+            houses_count += 1
+        elif asset_type == "LAND":
+            lands_count += 1
+
+        published_listings.append({
+            "id": str(l.id),
+            "title": f"{asset.get_type_display()} in {asset.quarter.name}" if asset and asset.quarter else "Property Listing",
+            "property_type": asset_type,
+            "house_style": house_style,
+            "listing_type": l.listing_type,
+            "price_xaf": float(l.price_xaf),
+            "quarter_name": asset.quarter.name if (asset and asset.quarter) else "",
+            "latitude": float(asset.latitude) if (asset and asset.latitude is not None) else None,
+            "longitude": float(asset.longitude) if (asset and asset.longitude is not None) else None,
+            "photo_url": primary_photo.url if primary_photo else None,
+            "published_at": l.published_at.isoformat() if l.published_at else None,
+        })
+
+    agency_name = None
+    if hasattr(user, "agent_profile") and user.agent_profile.agency:
+        agency_name = user.agent_profile.agency.user.full_name or user.agent_profile.agency.user.username
+
+    # 7. Role Profiles: Technician
+    technician_info = None
+    if hasattr(user, "technician_profile"):
+        tp = user.technician_profile
+        from services.models import ServiceRequest, ServiceRequestStatus
+        completed_jobs = ServiceRequest.objects.filter(
+            technician=user,
+            status=ServiceRequestStatus.COMPLETED,
+        ).count()
+        technician_info = {
+            "specialties": tp.specialties,
+            "coverage_quarter_name": tp.coverage_quarter.name if tp.coverage_quarter else None,
+            "is_verified": tp.is_verified,
+            "completed_jobs": completed_jobs,
+        }
+
+    # 8. Role Profiles: Driver (OaziGo)
+    driver_info = None
+    if hasattr(user, "driver_profile"):
+        dp = user.driver_profile
+        from marketplace.models import RideBooking, RideStatus
+        completed_rides = RideBooking.objects.filter(
+            driver=user,
+            status=RideStatus.COMPLETED,
+        ).count()
+        vehicles_data = [
+            {
+                "id": str(v.id),
+                "make": v.make,
+                "model": v.model,
+                "plate_number": v.plate_number,
+                "vehicle_category": v.vehicle_category,
+            }
+            for v in dp.vehicles.all()
+        ]
+        driver_info = {
+            "license_number": dp.license_number,
+            "is_verified": dp.is_verified,
+            "completed_rides": completed_rides,
+            "vehicles": vehicles_data,
+        }
+
+    # 9. Role Profiles: Student Resident
+    student_info = None
+    if hasattr(user, "student_profile"):
+        sp = user.student_profile
+        student_info = {
+            "institution_name": sp.institution_name,
+            "programme_year": sp.programme_year,
+            "is_international_student": sp.is_international_student,
+        }
+
+    return {
+        "user_id": str(user.id),
+        "username": user.username,
+        "full_name": user.full_name or user.username,
+        "profile_image_url": user.profile_image_url,
+        "phone": user.phone,
+        "roles": roles,
+        "is_kyc_verified": is_kyc,
+        "average_rating": round(avg_rating, 2) if avg_rating else None,
+        "rating_count": ratings.count(),
+        "agency_name": agency_name,
+        "technician": technician_info,
+        "driver": driver_info,
+        "student": student_info,
+        "stats": {
+            "hotels_count": len(owned_hotels),
+            "hostels_count": len(owned_hostels),
+            "guest_houses_count": len(owned_guest_houses),
+            "venues_count": len(owned_venues),
+            "listings_count": len(published_listings),
+            "apartments_count": apartments_count,
+            "houses_count": houses_count,
+            "lands_count": lands_count,
+        },
+        "hotels": owned_hotels,
+        "hostels": owned_hostels,
+        "guest_houses": owned_guest_houses,
+        "venues": owned_venues,
+        "listings": published_listings,
+    }
+

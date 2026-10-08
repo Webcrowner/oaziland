@@ -13,9 +13,16 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 
 from .models import ContentReport, ReportStatus
-from .serializers import VerificationRequestSerializer, ContentReportSerializer, FileContentReportSerializer, DisputeCaseSerializer
+from .serializers import (
+    VerificationRequestSerializer,
+    ContentReportSerializer,
+    FileContentReportSerializer,
+    DisputeCaseSerializer,
+    AdminUserSerializer,
+)
 from .services import get_admin_console_summary, resolve_content_report, file_content_report, CannotReportSelfError
 from oaziland.permissions import IsAdminRole
+from identity.models import User, AccountStatus
 from engagement.models import VerificationRequest, VerificationRequestStatus
 from engagement.services import approve_verification_request, reject_verification_request
 from property_management.models import DisputeCase, DisputeStatus
@@ -148,3 +155,145 @@ class FileContentReportView(APIView):
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(ContentReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+class AdminUserManagementViewSet(viewsets.ReadOnlyModelViewSet):
+    """Admin queue for user audit, review of strike accumulations,
+    account suspensions, and manual reinstatement per Trust & Safety spec.
+    Also supports filtering by role (?role=agent/landlord/agency/student/
+    technician/driver/admin/regular) so the admin can actually manage
+    every distinct type of user on the platform, not just a flat list."""
+    serializer_class = AdminUserSerializer
+    permission_classes = [IsAdminRole]
+
+    ROLE_PROFILE_FIELDS = {
+        "landlord": "landlord_profile", "agent": "agent_profile", "agency": "agency_profile",
+        "student": "student_profile", "technician": "technician_profile", "driver": "driver_profile",
+        "admin": "admin_profile",
+    }
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return User.objects.none()
+        qs = User.objects.select_related(
+            "landlord_profile", "agent_profile", "agency_profile", "student_profile",
+            "technician_profile", "driver_profile", "admin_profile", "kyc_profile",
+        ).prefetch_related("warnings").order_by("-date_joined")
+        status_param = self.request.query_params.get("account_status")
+        if status_param:
+            qs = qs.filter(account_status=status_param)
+        role_param = self.request.query_params.get("role")
+        if role_param == "regular":
+            for field in self.ROLE_PROFILE_FIELDS.values():
+                qs = qs.filter(**{f"{field}__isnull": True})
+        elif role_param in self.ROLE_PROFILE_FIELDS:
+            qs = qs.filter(**{f"{self.ROLE_PROFILE_FIELDS[role_param]}__isnull": False})
+        return qs
+
+    @action(detail=True, methods=["post"], url_path="toggle-suspend")
+    def toggle_suspend(self, request, pk=None):
+        from django.utils import timezone
+        user = self.get_object()
+        suspend = bool(request.data.get("suspend", False))
+        if suspend:
+            user.account_status = AccountStatus.SUSPENDED
+            days = int(request.data.get("days", 30))
+            user.suspended_until = timezone.now() + timezone.timedelta(days=days)
+        else:
+            user.account_status = AccountStatus.ACTIVE
+            user.suspended_until = None
+        user.save(update_fields=["account_status", "suspended_until"])
+        return Response(AdminUserSerializer(user).data)
+
+    @action(detail=True, methods=["post"], url_path="issue-strike")
+    def issue_strike(self, request, pk=None):
+        from .services import issue_strike_and_apply_consequences
+        user = self.get_object()
+        reason = request.data.get("reason", "ADMIN_REVIEWED_REPORT")
+        warning = issue_strike_and_apply_consequences(subject=user, reason=reason, issued_by=request.user)
+        return Response({
+            "strike_number": warning.strike_number,
+            "account_status": user.account_status,
+            "user": AdminUserSerializer(user).data,
+        })
+
+    @action(detail=True, methods=["post"], url_path="assign-role")
+    def assign_role(self, request, pk=None):
+        """Grants a user an ADDITIONAL role. Roles are independent
+        OneToOneField profile tables (identity.models' own module
+        docstring: 'a real person can hold several roles simultaneously,
+        e.g. an Agent who is also a Student') — this never replaces or
+        removes any role the user already has, it only ever adds one
+        more on top, so an admin can freely make e.g. an existing Agent
+        also a Landlord, or a Student also a Technician."""
+        from decimal import Decimal
+        import uuid as uuid_module
+        from identity.models import (
+            LandlordProfile, AgentProfile, AgencyProfile, StudentProfile,
+            TechnicianProfile, AdminProfile,
+        )
+        from marketplace.models import DriverProfile
+
+        user = self.get_object()
+        role = request.data.get("role")
+
+        if role == "landlord":
+            LandlordProfile.objects.get_or_create(user=user)
+        elif role == "agent":
+            AgentProfile.objects.get_or_create(
+                user=user,
+                defaults={"agent_commission_percent": Decimal(str(request.data.get("commission_percent", "5.00")))},
+            )
+        elif role == "agency":
+            AgencyProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    "registration_number": request.data.get("registration_number") or f"AGY-{uuid_module.uuid4().hex[:10].upper()}",
+                    "agency_commission_percent": Decimal(str(request.data.get("commission_percent", "10.00"))),
+                },
+            )
+        elif role == "student":
+            StudentProfile.objects.get_or_create(
+                user=user, defaults={"institution_name": request.data.get("institution_name", "Unspecified")},
+            )
+        elif role == "technician":
+            TechnicianProfile.objects.get_or_create(user=user, defaults={"specialties": []})
+        elif role == "driver":
+            DriverProfile.objects.get_or_create(
+                user=user, defaults={"license_number": request.data.get("license_number", "PENDING-ADMIN-ASSIGNED")},
+            )
+        elif role == "admin":
+            AdminProfile.objects.get_or_create(user=user, defaults={"permissions": []})
+            if not user.is_staff:
+                user.is_staff = True
+                user.save(update_fields=["is_staff"])
+        else:
+            return Response({"detail": f"Unknown role '{role}'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(AdminUserSerializer(user).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="remove-role")
+    def remove_role(self, request, pk=None):
+        """The reverse of assign_role — lets an admin correct a
+        mistakenly granted role without needing direct database access.
+        Removing one role never touches any of the user's other roles."""
+        user = self.get_object()
+        role = request.data.get("role")
+        profile_field = self.ROLE_PROFILE_FIELDS.get(role)
+        if not profile_field:
+            return Response({"detail": f"Unknown role '{role}'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        profile = getattr(user, profile_field, None)
+        if profile is not None:
+            profile.delete()
+        if role == "admin" and user.is_staff and not user.is_superuser:
+            user.is_staff = False
+            user.save(update_fields=["is_staff"])
+
+        # WHY refresh_from_db() here: get_object()'s select_related already
+        # cached the (now-deleted) related profile on this instance — Django
+        # doesn't invalidate that cache just because the row was deleted
+        # elsewhere, so without this the serializer below would keep
+        # reporting the just-removed role as still present.
+        user.refresh_from_db()
+        return Response(AdminUserSerializer(user).data, status=status.HTTP_200_OK)

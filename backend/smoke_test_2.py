@@ -52,8 +52,8 @@ except PermissionError as e:
     print(f"Correctly blocked: {e}")
 
 # --- Monetization ---
-PlatformFeePolicy.objects.create(category=TransactionCategory.PROPERTY_BOOKING, fee_percent=Decimal("3.0"))
-PlatformFeePolicy.objects.create(category=TransactionCategory.AD_SPEND, fee_percent=Decimal("5.0"))
+PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.PROPERTY_BOOKING, defaults={"fee_percent": Decimal("3.0")})
+PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.AD_SPEND, defaults={"fee_percent": Decimal("5.0")})
 fee = PlatformFeePolicy.fee_for(TransactionCategory.PROPERTY_BOOKING, Decimal("150000"))
 print(f"Platform fee on a 150,000 XAF booking: {fee} XAF")
 

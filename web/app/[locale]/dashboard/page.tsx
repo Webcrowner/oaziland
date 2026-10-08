@@ -3,15 +3,12 @@ import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { getMyAgentDashboard, type AgentDashboard } from "@/lib/api";
+import DashboardLayout from "@/components/DashboardLayout";
+import Button from "@/components/ui/Button";
+import Panel from "@/components/ui/Panel";
+import StatCard from "@/components/ui/StatCard";
+import { IconChevronRight, IconCheckCircle, IconMessageCircle, IconCreditCard, IconBuilding, IconUsers } from "@/components/Icons";
 
-/**
- * The private agent/agency dashboard — real leads, commission, and
- * performance data. Reuses the exact same backend aggregation
- * (agency.services.get_agent_private_dashboard) the founder's own
- * account would see, since he's an agent and agency owner himself —
- * this is the "well and professionally made" private space he asked
- * for early in this project, finally with a real page behind it.
- */
 export default function DashboardPage() {
   const t = useTranslations("AgentDashboardPage");
   const [dashboard, setDashboard] = useState<AgentDashboard | null>(null);
@@ -33,72 +30,147 @@ export default function DashboardPage() {
 
   if (status === "signedOut") {
     return (
-      <main className="max-w-md mx-auto px-4 py-16 text-center">
-        <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Link href="/login" className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
-          {t("signInRequired")}
-        </Link>
-      </main>
+      <DashboardLayout
+        currentRole="agent"
+        activeHref="/dashboard"
+        title={t("title")}
+        subtitle={t("subtitleSignedOut")}
+      >
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-slate-600 mb-4 font-semibold text-sm">{t("signInRequired")}</p>
+          <Button href="/login">{t("signInRequired")}</Button>
+        </div>
+      </DashboardLayout>
     );
   }
 
   if (status === "notAgent") {
     return (
-      <main className="max-w-md mx-auto px-4 py-16 text-center">
-        <p className="text-gray-600">{t("notAnAgent")}</p>
-      </main>
+      <DashboardLayout
+        currentRole="agent"
+        activeHref="/dashboard"
+        title={t("title")}
+        subtitle={t("subtitleSignedOut")}
+      >
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-slate-600 mb-4">{t("notAnAgent")}</p>
+          <Button href="/how-it-works">{t("learnBecomeAgent")}</Button>
+        </div>
+      </DashboardLayout>
     );
   }
 
   if (status === "loading" || !dashboard) {
-    return <main className="max-w-4xl mx-auto px-4 py-16 text-center text-gray-400">...</main>;
+    return (
+      <DashboardLayout
+        currentRole="agent"
+        activeHref="/dashboard"
+        title={t("title")}
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-28 rounded-3xl bg-slate-100 animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </DashboardLayout>
+    );
   }
 
   const trend = dashboard.commission_trend_xaf;
 
   return (
-    <main className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[var(--navy)] mb-8">{t("title")}</h1>
+    <DashboardLayout
+      currentRole="agent"
+      activeHref="/dashboard"
+      title={t("title")}
+      subtitle={t("subtitleReady")}
+      badge={t("badgeLicensedAgent")}
+      action={
+        <Link
+          href="/agency-dashboard"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs bg-slate-900 text-white hover:bg-slate-800 transition-colors shadow-sm"
+        >
+          <span>{t("viewAgencyDashboard")}</span>
+          <IconChevronRight size={14} />
+        </Link>
+      }
+    >
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatCard
+            icon={IconCheckCircle}
+            label={t("performanceScore")}
+            value={dashboard.performance_score.completed_deals_count}
+            unit={t("dealsClosed")}
+            hint={
+              <>
+                {dashboard.performance_score.avg_response_time_minutes === null
+                  ? t("noResponseData")
+                  : t("avgResponse", { minutes: dashboard.performance_score.avg_response_time_minutes })}
+                {" · "}
+                {dashboard.performance_score.percent_listings_verified === null
+                  ? t("noListingsYet")
+                  : t("listingsVerified", { percent: dashboard.performance_score.percent_listings_verified })}
+              </>
+            }
+          />
+          <StatCard
+            icon={IconMessageCircle}
+            tone="amber"
+            label={t("openEnquiries")}
+            value={dashboard.open_enquiries}
+            hint={t("activeEnquiriesHint")}
+          />
+          <StatCard
+            icon={IconCreditCard}
+            tone={trend.percent_change !== null && trend.percent_change < 0 ? "rose" : "emerald"}
+            label={t("commissionTrend")}
+            value={Number(trend.current_period_value).toLocaleString()}
+            unit="XAF"
+            hint={
+              trend.percent_change === null
+                ? t("newNoHistory")
+                : `${trend.percent_change > 0 ? "+" : ""}${trend.percent_change}% ${t("vsLastPeriod")}`
+            }
+          />
+        </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-        <div className="border rounded-lg p-5 bg-white">
-          <p className="text-xs text-gray-500 mb-1">{t("performanceScore")}</p>
-          <p className="text-2xl font-bold text-[var(--navy)]">{dashboard.performance_score}</p>
-        </div>
-        <div className="border rounded-lg p-5 bg-white">
-          <p className="text-xs text-gray-500 mb-1">{t("openEnquiries")}</p>
-          <p className="text-2xl font-bold text-[var(--navy)]">{dashboard.open_enquiries}</p>
-        </div>
-        <div className="border rounded-lg p-5 bg-white">
-          <p className="text-xs text-gray-500 mb-1">{t("commissionTrend")}</p>
-          <p className="text-2xl font-bold text-[var(--navy)]">{Number(trend.current_period_value).toLocaleString()} XAF</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {trend.percent_change === null ? t("newNoHistory") : `${trend.percent_change > 0 ? "+" : ""}${trend.percent_change}% ${t("vsLastPeriod")}`}
-          </p>
-        </div>
+        {dashboard.is_agency_owner && (
+          <Panel
+            title={t("agencySection")}
+            action={<span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">{t("agencyPrincipal")}</span>}
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+                <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">
+                  <IconUsers size={14} /> {t("agencyRoster")}
+                </p>
+                <ul className="space-y-2">
+                  {dashboard.agency_roster?.map((member) => (
+                    <li key={member.user__username} className="flex items-center gap-2.5 text-sm font-bold text-slate-800">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-xs font-black text-amber-300">
+                        {(member.user__username.charAt(0) || "?").toUpperCase()}
+                      </span>
+                      {member.user__username}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <StatCard
+                icon={IconBuilding}
+                tone="emerald"
+                label={t("agencyCommission")}
+                value={Number(dashboard.agency_aggregated_commission_xaf || 0).toLocaleString()}
+                unit="XAF"
+                hint={t("teamClosingVolume")}
+              />
+            </div>
+          </Panel>
+        )}
       </div>
-
-      {dashboard.is_agency_owner && (
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--navy)] mb-4 border-b pb-2">{t("agencySection")}</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="border rounded-lg p-5 bg-white">
-              <p className="text-xs text-gray-500 mb-2">{t("agencyRoster")}</p>
-              <ul className="text-sm text-gray-700">
-                {dashboard.agency_roster?.map((member) => (
-                  <li key={member.user__username}>{member.user__username}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="border rounded-lg p-5 bg-white">
-              <p className="text-xs text-gray-500 mb-1">{t("agencyCommission")}</p>
-              <p className="text-2xl font-bold text-[var(--navy)]">
-                {Number(dashboard.agency_aggregated_commission_xaf || 0).toLocaleString()} XAF
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-    </main>
+    </DashboardLayout>
   );
 }

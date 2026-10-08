@@ -9,8 +9,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from oaziland.permissions import IsOwnerOrReadOnly
 from .models import TrainingProgram, TrainingEnrollment, JobPosting, JobApplication
-from .serializers import TrainingProgramSerializer, TrainingEnrollmentSerializer, JobPostingSerializer, JobApplicationSerializer
-from .services import enroll_in_training, mark_training_completed, AlreadyEnrolledError, apply_to_job, AlreadyAppliedError
+from .serializers import (
+    TrainingProgramSerializer, TrainingEnrollmentSerializer, JobPostingSerializer, JobApplicationSerializer,
+    UpdateApplicationStatusSerializer, ShareJobPostingSerializer,
+)
+from .services import (
+    enroll_in_training, mark_training_completed, AlreadyEnrolledError, apply_to_job, AlreadyAppliedError,
+    update_application_status, share_job_posting_via_whatsapp, mark_training_in_progress, drop_training,
+)
 
 
 class TrainingProgramViewSet(viewsets.ReadOnlyModelViewSet):
@@ -54,6 +60,22 @@ class MyEnrollmentViewSet(viewsets.ReadOnlyModelViewSet):
         mark_training_completed(enrollment)
         return Response(TrainingEnrollmentSerializer(enrollment).data)
 
+    @action(detail=True, methods=["post"])
+    def start(self, request, pk=None):
+        """The real gap this closes: enrollment could only ever go
+        ENROLLED → COMPLETED, with no way to mark IN_PROGRESS."""
+        enrollment = self.get_object()
+        mark_training_in_progress(enrollment)
+        return Response(TrainingEnrollmentSerializer(enrollment).data)
+
+    @action(detail=True, methods=["post"])
+    def drop(self, request, pk=None):
+        """The real gap this closes: a student had no way to back out
+        of a training they'd enrolled in."""
+        enrollment = self.get_object()
+        drop_training(enrollment)
+        return Response(TrainingEnrollmentSerializer(enrollment).data)
+
 
 class JobPostingViewSet(viewsets.ModelViewSet):
     """The real gap this closes: JobPosting/JobApplication had real
@@ -93,6 +115,37 @@ class JobPostingViewSet(viewsets.ModelViewSet):
         if posting.posted_by_id != request.user.id:
             return Response({"detail": "Only the job's poster can view its applications."}, status=status.HTTP_403_FORBIDDEN)
         return Response(JobApplicationSerializer(posting.applications.select_related("applicant").order_by("-applied_at"), many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="update-application", permission_classes=[permissions.IsAuthenticated])
+    def update_application(self, request, pk=None):
+        """The real gap this closes: update_application_status() existed
+        and was tested, but a poster could only ever VIEW who applied
+        (see 'applications' above) — never actually shortlist, reject,
+        or hire anyone through the app."""
+        posting = self.get_object()
+        if posting.posted_by_id != request.user.id:
+            return Response({"detail": "Only the job's poster can update an application's status."}, status=status.HTTP_403_FORBIDDEN)
+        input_serializer = UpdateApplicationStatusSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        application = posting.applications.filter(id=input_serializer.validated_data["application_id"]).first()
+        if application is None:
+            return Response({"detail": "That application was not found on this job posting."}, status=status.HTTP_404_NOT_FOUND)
+        update_application_status(application=application, new_status=input_serializer.validated_data["new_status"])
+        return Response(JobApplicationSerializer(application).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def share(self, request, pk=None):
+        """The real gap this closes: share_job_posting_via_whatsapp()
+        reused Part B's build_whatsapp_action() exactly as designed,
+        but nothing ever exposed it over HTTP."""
+        posting = self.get_object()
+        input_serializer = ShareJobPostingSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        result = share_job_posting_via_whatsapp(
+            job_posting=posting, shared_by=request.user,
+            recipient_phone=input_serializer.validated_data["recipient_phone"],
+        )
+        return Response({"deep_link": result["deep_link"], "message": result["message"]})
 
 
 class MyJobApplicationViewSet(viewsets.ReadOnlyModelViewSet):

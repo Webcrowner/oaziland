@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from property.models import GuestHouseLodge, PropertyAssetPhoto, FinishLevel
+from property.serializers import OwnerRoleSerializerMixin
 
 
 class PropertyAssetPhotoSerializer(serializers.ModelSerializer):
@@ -8,7 +9,7 @@ class PropertyAssetPhotoSerializer(serializers.ModelSerializer):
         fields = ["id", "url", "media_type", "is_primary", "uploaded_at"]
 
 
-class GuestHouseLodgeSerializer(serializers.ModelSerializer):
+class GuestHouseLodgeSerializer(OwnerRoleSerializerMixin, serializers.ModelSerializer):
     """WHY amenities is added here even though nothing else on this
     serializer changed: GuestHouseLodge already inherits a real
     amenities field from PropertyAsset (the same one property
@@ -16,6 +17,8 @@ class GuestHouseLodgeSerializer(serializers.ModelSerializer):
     field list, so a guest house's real amenities existed in the
     database but could never reach a client."""
     quarter_name = serializers.CharField(source="quarter.name", read_only=True)
+    owner = serializers.PrimaryKeyRelatedField(read_only=True)
+    owner_name = serializers.CharField(source="owner.full_name", read_only=True, default=None)
     photos = serializers.SerializerMethodField()
 
     def get_photos(self, guest_house) -> list[dict]:
@@ -23,7 +26,8 @@ class GuestHouseLodgeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GuestHouseLodge
-        fields = ["id", "is_coastal_leisure", "quarter", "quarter_name", "finish_level", "amenities", "photos"]
+        fields = ["id", "owner", "owner_name", "lister_role", "lister_average_rating", "lister_rating_count", "is_coastal_leisure", "quarter", "quarter_name", "finish_level", "latitude", "longitude", "description", "amenities", "photos"]
+        read_only_fields = ["description"]
 
 
 class GuestHouseLodgeCreateSerializer(serializers.Serializer):
@@ -35,3 +39,5 @@ class GuestHouseLodgeCreateSerializer(serializers.Serializer):
     quarter = serializers.UUIDField()
     is_coastal_leisure = serializers.BooleanField(required=False, default=False)
     finish_level = serializers.ChoiceField(choices=FinishLevel.choices, required=False, default=FinishLevel.STANDARD)
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-180, max_value=180)

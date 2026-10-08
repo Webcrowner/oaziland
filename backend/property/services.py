@@ -7,6 +7,52 @@ from django.db import models
 from geo.services import haversine_distance_km
 
 
+class ListingEditError(Exception):
+    """An edit was rejected (field not applicable to this property type, or blocked by moderation)."""
+
+
+HOUSE_ONLY_FIELDS = ("bedrooms", "bathrooms", "living_rooms", "house_style", "has_garage", "pets_allowed")
+ASSET_FIELDS = ("description", "size_sqm", "finish_level", "latitude", "longitude")
+
+
+def update_listing_details(listing, data: dict):
+    """Applies a lister's edit to the listing and its underlying property. A price or detail change on
+    a live listing deliberately does NOT change its status or go back to admin review; only new
+    description text is screened by content moderation."""
+    from django.db import transaction
+    from trust_safety.models import ModerationAction
+    from trust_safety.services import score_text
+
+    base = listing.property_asset
+    target = next((getattr(base, rel, None) for rel in ("house", "shop", "land") if getattr(base, rel, None) is not None), base)
+
+    for field in HOUSE_ONLY_FIELDS:
+        if field in data and not hasattr(target, field):
+            raise ListingEditError(f"'{field}' does not apply to this type of property.")
+    if "frontage_meters" in data and not hasattr(target, "frontage_meters"):
+        raise ListingEditError("'frontage_meters' does not apply to this type of property.")
+
+    description = data.get("description")
+    if description and description != base.description:
+        results = score_text(description, target_listing_id=listing.id)
+        if any(r.action == ModerationAction.AUTO_REMOVE for r in results):
+            raise ListingEditError("This description was blocked by content moderation. Please reword it.")
+
+    with transaction.atomic():
+        if "amenities" in data:
+            set_property_amenities(target, data["amenities"])
+        for field in ASSET_FIELDS + HOUSE_ONLY_FIELDS + ("frontage_meters",):
+            if field in data:
+                setattr(target, field, data[field])
+        target.save()
+        listing_fields = [f for f in ("price_xaf", "listing_type") if f in data]
+        for field in listing_fields:
+            setattr(listing, field, data[field])
+        if listing_fields:
+            listing.save(update_fields=listing_fields)
+    return listing
+
+
 def properties_near_location(latitude, longitude, radius_km=5, queryset=None):
     """'Properties around me' — Prompt 3's explicit requirement. Returns
     every property within `radius_km` of the given point, sorted nearest

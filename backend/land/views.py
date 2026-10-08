@@ -1,11 +1,13 @@
 """
-land.views — real Land creation, the highest-fraud-risk property type
-on the platform, so create requires the same MFA+KYC gate as
-House/Shop — no lighter-weight path for land specifically."""
+land.views — real Land creation. create only requires being signed in;
+KYC is enforced at the point the property actually goes public
+(property.ListingViewSet.create, the 'publish' step), same deferred-KYC
+policy as House/Shop — no separate, lighter- or heavier-weight path for
+land specifically."""
 from rest_framework import viewsets, permissions
 from .models import Land
 from .serializers import LandCreateSerializer
-from oaziland.permissions import IsOwnerOrReadOnly, IsVerifiedAndMfaEnabled
+from oaziland.permissions import IsOwnerOrReadOnly
 from property.views import PropertyAmenitiesMixin
 
 
@@ -16,7 +18,7 @@ class LandViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
         if self.action in ("list", "retrieve"):
             return [permissions.AllowAny()]
         if self.action == "create":
-            return [IsVerifiedAndMfaEnabled()]
+            return [permissions.IsAuthenticated()]
         return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
 
     def get_queryset(self):

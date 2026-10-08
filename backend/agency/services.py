@@ -265,3 +265,64 @@ def get_agent_private_dashboard(agent_user):
         dashboard["is_agency_owner"] = False
 
     return dashboard
+
+
+def resolve_caller_agency(user):
+    """Which agency (if any) this user is authorized to see team data
+    for — either because they own it, or because they're an agent on
+    its roster. Server-side only; the frontend never gets to say which
+    agency it wants to see."""
+    if hasattr(user, "agency_profile"):
+        return user.agency_profile
+    if hasattr(user, "agent_profile") and user.agent_profile.agency is not None:
+        return user.agent_profile.agency
+    return None
+
+
+def get_agency_private_dashboard(agency):
+    """The PRIVATE, logged-in-only TEAM view for an agency — every
+    authorized member (the owner, or any agent on its roster) sees the
+    same real, aggregated picture: real team listings, real open
+    leads, and real commission earned across every agent under this
+    agency. This previously only existed bolted onto the founder's own
+    agent dashboard (is_agency_owner branch) — team members who are
+    agents but not the owner had no way to see it at all."""
+    from agency.models import Enquiry
+    from property.models import Listing, ListingStatus
+    from transactions.models import Commission
+    from oaziland.analytics import compute_period_over_period
+
+    roster = list(agency_roster(agency).select_related("user"))
+    roster_user_ids = [ap.user_id for ap in roster]
+
+    team_listing_ids = _listing_ids_for_agents(roster_user_ids)
+    active_team_listings = Listing.objects.filter(id__in=team_listing_ids, status=ListingStatus.PUBLISHED).count()
+    open_team_leads = Enquiry.objects.filter(agent_id__in=roster_user_ids, first_response_at__isnull=True).count()
+
+    team_commissions = Commission.objects.filter(
+        booking__target_content_type="property.Listing", booking__target_id__in=team_listing_ids,
+    )
+    commission_trend = compute_period_over_period(
+        queryset=team_commissions, date_field="created_at", aggregate_field="agency_share_xaf"
+    )
+
+    team = []
+    for agent_profile in roster:
+        agent_user = agent_profile.user
+        agent_listing_ids = _listing_ids_for_agents([agent_user.id])
+        team.append({
+            "user_id": str(agent_user.id),
+            "full_name": agent_user.full_name or agent_user.username,
+            "active_listing_count": Listing.objects.filter(id__in=agent_listing_ids, status=ListingStatus.PUBLISHED).count(),
+            "open_enquiries": Enquiry.objects.filter(agent=agent_user, first_response_at__isnull=True).count(),
+        })
+
+    return {
+        "agency_profile": get_agency_public_profile(agency),
+        "team": team,
+        "team_size": len(team),
+        "active_team_listings": active_team_listings,
+        "open_team_leads": open_team_leads,
+        "agency_aggregated_commission_xaf": agency_aggregated_commission(agency),
+        "commission_trend_xaf": commission_trend,
+    }

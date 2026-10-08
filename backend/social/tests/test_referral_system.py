@@ -128,14 +128,34 @@ def test_registration_with_an_invalid_referral_code_still_succeeds():
 
 
 @pytest.mark.django_db
-def test_my_referral_code_api_endpoint():
-    user = User.objects.create(username="referral_api_code_user", phone="+237699888811")
-    client = _auth_client(user)
+def test_my_referrals_list_api_endpoint():
+    referrer = User.objects.create(username="referral_list_api_referrer", phone="+237699888812")
+    code = get_or_create_referral_code(referrer)
+    new_user1 = User.objects.create(username="ref_user_1", phone="+237699888813", first_name="User One")
+    new_user2 = User.objects.create(username="ref_user_2", phone="+237699888814", first_name="User Two")
 
-    response = client.get("/api/auth/my-referral-code/")
-    assert response.status_code == 200
-    assert len(response.data["referral_code"]) > 0
+    ref1 = process_referral_signup(new_user=new_user1, referral_code=code)
+    ref2 = process_referral_signup(new_user=new_user2, referral_code=code)
 
-    # Stable across repeated calls.
-    second_response = client.get("/api/auth/my-referral-code/")
-    assert second_response.data["referral_code"] == response.data["referral_code"]
+    client = _auth_client(referrer)
+    resp = client.get("/api/my-referrals/")
+    assert resp.status_code == 200
+    assert resp.data["total_count"] == 2
+    assert resp.data["qualified_count"] == 0
+    assert resp.data["rewarded_count"] == 0
+    assert resp.data["total_reward_xaf"] == 0
+    assert len(resp.data["results"]) == 2
+    assert resp.data["results"][0]["referred_username"] in ("ref_user_1", "ref_user_2")
+
+    # Now verify KYC approval flow triggers automatic qualification and reward
+    from identity.services import approve_kyc
+    kyc1 = KYCProfile.objects.create(
+        user=new_user1, legal_full_name="User One", date_of_birth="1995-01-01",
+        national_id_number="CM-REF-001", residential_address="Bastos",
+    )
+    approve_kyc(kyc1)
+
+    resp_after = client.get("/api/my-referrals/")
+    assert resp_after.data["qualified_count"] == 1
+    assert resp_after.data["rewarded_count"] == 1
+    assert resp_after.data["total_reward_xaf"] == Decimal("2000")

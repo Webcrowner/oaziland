@@ -2,12 +2,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { listMarketplaceListings, createMarketplaceListing, addMarketplaceMedia, listQuarters, type WarehouseListing, type Quarter, type MediaUploadResult } from "@/lib/api";
+import QuarterOptions from "@/components/QuarterOptions";
+import MissingAreaRequest from "@/components/MissingAreaRequest";
 import PageHeader from "@/components/ui/PageHeader";
 import Card, { CardMedia, CardBody } from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import MediaUploader from "@/components/MediaUploader";
+import MediaThumbs from "@/components/MediaThumbs";
+import LocationCapture, { EMPTY_GPS, type GpsValue } from "@/components/LocationCapture";
+import ListerRoleBadge from "@/components/ListerRoleBadge";
+import WhatsAppShareButton from "@/components/WhatsAppShareButton";
+import { Link } from "@/i18n/navigation";
+import DirectChatButton from "@/components/DirectChatButton";
 
 const PRICE_BASIS_LABELS: Record<string, string> = {
   SALE: "For Sale", RENT_NIGHTLY: "Rent / Night", RENT_WEEKLY: "Rent / Week", RENT_MONTHLY: "Rent / Month", RENT_ANNUAL: "Rent / Year",
@@ -33,6 +41,7 @@ export default function WarehousesMarketplacePage() {
   const [sizeSqm, setSizeSqm] = useState("");
   const [quarterId, setQuarterId] = useState("");
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
+  const [gps, setGps] = useState<GpsValue>(EMPTY_GPS);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
 
   const load = useCallback(() => {
@@ -54,10 +63,10 @@ export default function WarehousesMarketplacePage() {
     }
     setSubmitStatus("submitting");
     try {
-      const listing = await createMarketplaceListing("warehouses", { title, price_basis: priceBasis, price_xaf: price, size_sqm: sizeSqm, quarter: quarterId || null }, token);
-      await Promise.all(media.map((m) => addMarketplaceMedia("warehouses", listing.id, m.url, m.media_type, token)));
+      const listing = await createMarketplaceListing("warehouses", { title, price_basis: priceBasis, price_xaf: price, size_sqm: sizeSqm, quarter: quarterId || null, latitude: gps.latitude, longitude: gps.longitude }, token);
+      for (const m of media) await addMarketplaceMedia("warehouses", listing.id, m.url, m.media_type, token);
       setShowForm(false);
-      setTitle(""); setPrice(""); setSizeSqm(""); setMedia([]);
+      setTitle(""); setPrice(""); setSizeSqm(""); setMedia([]); setGps(EMPTY_GPS);
       load();
     } catch {
       setSubmitStatus("error");
@@ -81,13 +90,16 @@ export default function WarehousesMarketplacePage() {
             {Object.entries(PRICE_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
           <input required type="number" placeholder={t("pricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
-          <select value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded-lg px-3 py-2">
-            <option value="">{t("chooseNeighborhood")}</option>
-            {quarters.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+          <select value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded-lg px-3 py-2" required>
+            <option value="" disabled>{t("chooseNeighborhood")}</option>
+            <QuarterOptions quarters={quarters} />
           </select>
+          <MissingAreaRequest quarters={quarters} className="md:col-span-2" />
+          <LocationCapture className="md:col-span-2" value={gps} onChange={setGps} />
           <div className="md:col-span-2">
             <MediaUploader folder="marketplace" onUploaded={(m) => setMedia((prev) => [...prev, m])} label={t("addPhotoOrVideo")} />
             {media.length > 0 && <p className="text-xs text-gray-500 mt-1">{t("mediaAttached", { count: media.length })}</p>}
+            <MediaThumbs items={media.map((m) => ({ url: m.url, media_type: m.media_type }))} onRemove={(i) => setMedia((prev) => prev.filter((_, idx) => idx !== i))} />
           </div>
           {submitStatus === "error" && <p className="text-red-600 text-sm md:col-span-2">{t("submitFailed")}</p>}
           <Button className="md:col-span-2" size="lg">{submitStatus === "submitting" ? t("submitting") : t("submitListing")}</Button>
@@ -104,19 +116,32 @@ export default function WarehousesMarketplacePage() {
             const photo = listing.media.find((m) => m.media_type === "PHOTO");
             return (
               <Card key={listing.id}>
+                <Link href={`/marketplace/warehouses/${listing.id}`} className="block">
                 {photo ? (
                   <div className="h-40 bg-gray-100"><img src={photo.file_url} alt="" className="w-full h-full object-cover" /></div>
                 ) : (
                   <CardMedia label={t("noPhotoYet")} />
                 )}
+                </Link>
                 <CardBody>
+                  <div className="flex items-center justify-between mb-2">
+                    <ListerRoleBadge role={listing.lister_role} isSale={listing.price_basis === "SALE"} />
+                    <WhatsAppShareButton title="warehouse" location={listing.quarter_name ?? ""} price={Number(listing.price_xaf).toLocaleString()} path={`/marketplace/warehouses/${listing.id}`} />
+                  </div>
                   <p className="font-semibold text-[var(--navy)] mb-1">{listing.title}</p>
                   <p className="text-sm text-gray-500 mb-2">📐 {listing.size_sqm} m²</p>
                   <div className="flex items-center gap-2 mb-2">
                     <Badge variant="gold">{PRICE_BASIS_LABELS[listing.price_basis]}</Badge>
                     {listing.quarter_name && <Badge variant="neutral">{listing.quarter_name}</Badge>}
                   </div>
-                  <p className="text-lg font-bold text-[var(--navy)]">{Number(listing.price_xaf).toLocaleString()} XAF</p>
+                  <p className="text-lg font-bold text-[var(--navy)] mb-3">{Number(listing.price_xaf).toLocaleString()} XAF</p>
+
+                  <DirectChatButton
+                    recipientId={listing.lister_user}
+                    recipientName={listing.lister_name}
+                    label="Chat with Owner / Seller"
+                    className="w-full inline-flex items-center justify-center gap-1.5 bg-[var(--navy)] text-white font-semibold px-3 py-2 rounded-lg text-xs hover:bg-slate-800 transition-colors"
+                  />
                 </CardBody>
               </Card>
             );

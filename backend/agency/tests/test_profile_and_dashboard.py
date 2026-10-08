@@ -178,3 +178,41 @@ def test_rating_an_agent_moves_the_real_agencys_aggregate_rating():
     after = APIClient().get(f"/api/agencies/{agency.id}/profile/")
     assert float(after.data["average_rating"]) == 4.5
     assert after.data["rating_count"] == 1
+
+
+@pytest.mark.django_db
+def test_agency_dashboard_reachable_by_owner_and_by_team_agent_not_just_the_founder(quarter):
+    """The real gap this closes: team-wide agency data (listings,
+    leads, commission across every agent on the roster) previously
+    only existed bolted onto the founder's own personal agent
+    dashboard (is_agency_owner branch) — any OTHER agent on that same
+    agency's roster had no reachable endpoint to see it at all."""
+    owner_user = User.objects.create(username="agency_dash_owner", phone="+237699666701")
+    agency = AgencyProfile.objects.create(user=owner_user, registration_number="RC-TEAMDASH-001", agency_commission_percent=Decimal("20"))
+    AgentProfile.objects.create(user=owner_user, agency=agency, agent_commission_percent=Decimal("10"))
+
+    team_agent = User.objects.create(username="agency_dash_team_agent", phone="+237699666702")
+    AgentProfile.objects.create(user=team_agent, agency=agency, agent_commission_percent=Decimal("10"))
+
+    house = House.objects.create(owner=team_agent, quarter=quarter, type="HOUSE")
+    Listing.objects.create(property_asset=house, listed_by=team_agent, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("90000"))
+
+    # Owner (has agency_profile) can see it.
+    owner_response = _auth_client(owner_user).get("/api/my-agency-dashboard/")
+    assert owner_response.status_code == 200
+    assert owner_response.data["team_size"] == 2
+    assert owner_response.data["active_team_listings"] == 1
+
+    # A plain team agent (no agency_profile, just agent_profile.agency) can ALSO see it.
+    team_response = _auth_client(team_agent).get("/api/my-agency-dashboard/")
+    assert team_response.status_code == 200
+    assert team_response.data["team_size"] == 2
+
+    # Someone with no agency affiliation at all gets a clear 403, not a crash.
+    outsider = User.objects.create(username="agency_dash_outsider", phone="+237699666703")
+    outsider_response = _auth_client(outsider).get("/api/my-agency-dashboard/")
+    assert outsider_response.status_code == 403
+
+    anon_response = APIClient().get("/api/my-agency-dashboard/")
+    assert anon_response.status_code == 401
+

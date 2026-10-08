@@ -195,6 +195,37 @@ def complete_ride_with_payment(*, ride, lock_client, payment_gateway, phone_numb
     ride.status = RideStatus.COMPLETED
     ride.completed_at = timezone.now()
     ride.save(update_fields=["booking", "status", "completed_at"])
-    booking.complete()
+
+    # WHY complete_booking(), not booking.complete(): the earlier version
+    # only flipped the Booking's own status flag — the escrow stayed HELD
+    # forever, meaning the driver was never actually paid. complete_booking()
+    # is the one real function that both completes the booking AND
+    # releases the escrow it's holding.
+    from transactions.services import complete_booking
+    escrow = complete_booking(booking=booking)
 
     return booking, escrow
+
+
+class NotPartyToRideError(Exception):
+    pass
+
+
+def post_ride_message(*, ride, sender, text: str):
+    from .models import RideMessage
+    from notifications.services import notify
+
+    if sender.id not in (ride.rider_id, ride.driver_id):
+        raise NotPartyToRideError("Only the rider or the assigned driver can chat on this ride.")
+
+    message = RideMessage.objects.create(ride=ride, sender=sender, text=text)
+    other = ride.driver if sender.id == ride.rider_id else ride.rider
+    if other is not None:
+        notify(
+            recipient=other,
+            notification_type="RIDE_MESSAGE",
+            title=f"New message from {sender.full_name or sender.username}",
+            message=text[:100],
+            related_reference=str(ride.id),
+        )
+    return message

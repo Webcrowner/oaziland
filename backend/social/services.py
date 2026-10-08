@@ -391,6 +391,18 @@ def get_presence_display(user, viewer=None) -> str:
     return f"Last seen {hours} hour{'s' if hours != 1 else ''} ago"
 
 
+def get_presence_info(presence, viewer_is_self: bool = False) -> dict:
+    """Structured presence for API clients: a hidden status (and a user
+    never seen) reports offline with no last_seen_at, never leaking the
+    real value. `presence` is a UserPresence or None."""
+    if presence is None or (not presence.show_online_status and not viewer_is_self):
+        return {"is_online": False, "last_seen_at": None}
+    return {
+        "is_online": presence.is_currently_online(),
+        "last_seen_at": presence.last_seen_at.isoformat(),
+    }
+
+
 def set_presence_visibility(*, user, visible: bool):
     """Toggles whether OTHER people can see this user's real online
     status. Does NOT affect is_user_online()/is_currently_online() —
@@ -474,6 +486,10 @@ def is_mutual_follow(*, user_a, user_b) -> bool:
     """Both follow each other — the 'get followers' half: shown on a
     profile as 'Follows you' alongside the tap-to-follow button."""
     return is_following(follower=user_a, followee=user_b) and is_following(follower=user_b, followee=user_a)
+
+
+def get_follow_counts(user) -> dict:
+    return {"follower_count": user.followers.count(), "following_count": user.following.count()}
 
 
 # ---------------------------------------------------------------------------

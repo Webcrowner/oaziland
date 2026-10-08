@@ -10,10 +10,25 @@ from identity.models import User
 from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
 from hotels.models import Hotel, RoomType, RoomCategory, Room, RoomStatus, FolioChargeType
 from hotels.services import (
-    create_reservation, check_in_guest, checkout_guest, post_folio_charge,
+    create_reservation, confirm_reservation_payment, check_in_guest, checkout_guest, post_folio_charge,
     run_end_of_day_room_charge_posting, create_group_booking, add_reservation_to_group,
     NoAvailableRoomError,
 )
+from payments.gateways import SandboxGateway
+
+
+class FakeLock:
+    def __init__(self):
+        self.locked = set()
+
+    def acquire(self, key, ttl_seconds):
+        if key in self.locked:
+            return False
+        self.locked.add(key)
+        return True
+
+    def release(self, key, permanent=False):
+        self.locked.discard(key)
 
 
 @pytest.fixture
@@ -46,6 +61,7 @@ def test_check_in_requires_an_inspected_room(hotel, room_type):
 
     dirty_room = Room.objects.create(hotel=hotel, room_type=room_type, room_number="101", status=RoomStatus.DIRTY)
     reservation = create_reservation(hotel=hotel, guest=guest, room_type=room_type, check_in=date(2026, 6, 1), check_out=date(2026, 6, 3))
+    confirm_reservation_payment(reservation=reservation, lock_client=FakeLock(), payment_gateway=SandboxGateway(), phone_number="+237699222099")
 
     with pytest.raises(NoAvailableRoomError):
         check_in_guest(reservation=reservation, assigned_by=front_desk)
@@ -68,6 +84,7 @@ def test_end_of_day_posting_and_checkout_flow(hotel, room_type):
     Room.objects.create(hotel=hotel, room_type=room_type, room_number="102", status=RoomStatus.INSPECTED)
 
     reservation = create_reservation(hotel=hotel, guest=guest, room_type=room_type, check_in=date(2026, 6, 1), check_out=date(2026, 6, 3))
+    confirm_reservation_payment(reservation=reservation, lock_client=FakeLock(), payment_gateway=SandboxGateway(), phone_number="+237699222099")
     folio = check_in_guest(reservation=reservation, assigned_by=front_desk)
 
     # F&B charge posted mid-stay.
@@ -96,6 +113,7 @@ def test_adjustment_charge_requires_a_reason_code(hotel, room_type):
     front_desk = User.objects.create(username="front_desk_agent_3", phone="+237699222008")
     Room.objects.create(hotel=hotel, room_type=room_type, room_number="103", status=RoomStatus.INSPECTED)
     reservation = create_reservation(hotel=hotel, guest=guest, room_type=room_type, check_in=date(2026, 6, 1), check_out=date(2026, 6, 2))
+    confirm_reservation_payment(reservation=reservation, lock_client=FakeLock(), payment_gateway=SandboxGateway(), phone_number="+237699222099")
     folio = check_in_guest(reservation=reservation, assigned_by=front_desk)
 
     with pytest.raises(ValueError):

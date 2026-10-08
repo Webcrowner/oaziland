@@ -12,8 +12,8 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 from .models import Venue, VenueSpace, EventBooking
 from .serializers import VenueSerializer, VenueCreateSerializer, EventBookingSerializer
-from .services import create_event_booking, VenueUnavailableError
-from oaziland.permissions import IsVerifiedAndMfaEnabled, IsAdminRole
+from .services import create_event_booking, VenueUnavailableError, get_venue_financial_dashboard
+from oaziland.permissions import IsKycVerified, IsAdminRole
 
 
 class VenueViewSet(viewsets.ModelViewSet):
@@ -32,13 +32,13 @@ class VenueViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             user = self.request.user
             if user.is_authenticated and hasattr(user, "admin_profile"):
-                return Venue.objects.all().prefetch_related("spaces").order_by("-created_at")
+                return Venue.objects.all().select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos").order_by("-created_at")
             from django.db.models import Q
             base = Q(verified=True)
             if user.is_authenticated:
                 base |= Q(owner=user)
-            return Venue.objects.filter(base).prefetch_related("spaces").order_by("-created_at")
-        return Venue.objects.prefetch_related("spaces")
+            return Venue.objects.filter(base).select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos").order_by("-created_at")
+        return Venue.objects.select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos")
 
     @extend_schema(request=VenueCreateSerializer, responses={201: VenueSerializer})
     def create(self, request, *args, **kwargs):
@@ -46,7 +46,13 @@ class VenueViewSet(viewsets.ModelViewSet):
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data
 
-        venue = Venue.objects.create(owner=request.user, quarter_id=data["quarter"], type="EVENT_CENTER")
+        venue = Venue.objects.create(
+            owner=request.user,
+            quarter_id=data["quarter"],
+            type="EVENT_CENTER",
+            latitude=data.get("latitude"),
+            longitude=data.get("longitude"),
+        )
         for space_data in data["spaces"]:
             VenueSpace.objects.create(
                 venue=venue, space_name=space_data.get("space_name", "Main Hall"),
@@ -54,6 +60,20 @@ class VenueViewSet(viewsets.ModelViewSet):
                 base_price_per_hour_xaf=space_data.get("base_price_per_hour_xaf", 0),
             )
         return Response(VenueSerializer(venue).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="set-location")
+    def set_location(self, request, pk=None):
+        venue = self.get_object()
+        if venue.owner_id != request.user.id and not hasattr(request.user, "admin_profile"):
+            return Response({"detail": "Only the venue owner can set its location."}, status=status.HTTP_403_FORBIDDEN)
+        lat = request.data.get("latitude")
+        lng = request.data.get("longitude")
+        if lat is None or lng is None:
+            return Response({"detail": "latitude and longitude are required."}, status=status.HTTP_400_BAD_REQUEST)
+        venue.latitude = lat
+        venue.longitude = lng
+        venue.save(update_fields=["latitude", "longitude"])
+        return Response({"id": str(venue.id), "latitude": str(venue.latitude), "longitude": str(venue.longitude)})
 
     @action(detail=True, methods=["post"], url_path="add-photo")
     def add_photo(self, request, pk=None):
@@ -95,19 +115,35 @@ class VenueViewSet(viewsets.ModelViewSet):
         venue.save(update_fields=["verified"])
         return Response(VenueSerializer(venue).data)
 
+    @action(detail=True, methods=["get"], url_path="financial-dashboard")
+    def financial_dashboard(self, request, pk=None):
+        """A real gap this closes: get_venue_financial_dashboard()
+        already computed real revenue/bookings trends, outstanding
+        balances, and escrow status, but nothing ever exposed it."""
+        venue = self.get_object()
+        if venue.owner_id != request.user.id and not hasattr(request.user, "admin_profile"):
+            return Response({"detail": "Only the venue's own owner can view its financial dashboard."}, status=status.HTTP_403_FORBIDDEN)
+        return Response(get_venue_financial_dashboard(venue))
+
 
 class EventBookingViewSet(viewsets.ModelViewSet):
     serializer_class = EventBookingSerializer
 
     def get_permissions(self):
         if self.action == "create":
-            return [IsVerifiedAndMfaEnabled()]
+            return [IsKycVerified()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return EventBooking.objects.none()
-        return EventBooking.objects.filter(organiser=self.request.user).order_by("-created_at")
+        # The venue's own owner can also reach their bookings (needed for
+        # the "complete" action below) — not just the organiser who made them.
+        from django.db.models import Q
+        user = self.request.user
+        return EventBooking.objects.filter(
+            Q(organiser=user) | Q(venue_space__venue__owner=user)
+        ).order_by("-created_at")
 
     def create(self, request, *args, **kwargs):
         try:
@@ -122,3 +158,57 @@ class EventBookingViewSet(viewsets.ModelViewSet):
         except VenueUnavailableError as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
         return Response(EventBookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="pay-deposit")
+    def pay_deposit(self, request, pk=None):
+        """The real payment step this booking previously never had —
+        pays the 30% deposit through the shared Booking/PaymentEscrow flow."""
+        from .services import confirm_event_booking_deposit
+        from transactions.views import FakeRedisLock
+        from payments.gateways import get_active_gateway
+
+        event_booking = self.get_object()
+        phone_number = request.data.get("phone_number")
+        if not phone_number:
+            return Response({"detail": "phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        event_booking, _escrow = confirm_event_booking_deposit(
+            event_booking=event_booking, lock_client=FakeRedisLock(),
+            payment_gateway=get_active_gateway(), phone_number=phone_number,
+        )
+        return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="pay-balance")
+    def pay_balance(self, request, pk=None):
+        """Collects the remaining balance — the real gap this closes:
+        the balance amount was computed but had no reachable payment step."""
+        from .services import confirm_event_booking_balance
+        from transactions.views import FakeRedisLock
+        from payments.gateways import get_active_gateway
+
+        event_booking = self.get_object()
+        phone_number = request.data.get("phone_number")
+        if not phone_number:
+            return Response({"detail": "phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        event_booking, _escrow = confirm_event_booking_balance(
+            event_booking=event_booking, lock_client=FakeRedisLock(),
+            payment_gateway=get_active_gateway(), phone_number=phone_number,
+        )
+        return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def complete(self, request, pk=None):
+        """Venue-owner-only — settles the event AND releases both real
+        escrows so the venue actually gets paid."""
+        from .services import complete_event_booking, EventNotFullyPaidError
+
+        event_booking = self.get_object()
+        if event_booking.venue_space.venue.owner_id != request.user.id:
+            return Response({"detail": "Only this venue's own owner can mark an event complete."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            event_booking, _escrows = complete_event_booking(event_booking=event_booking)
+        except EventNotFullyPaidError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)

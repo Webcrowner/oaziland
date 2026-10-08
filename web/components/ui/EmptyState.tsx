@@ -19,10 +19,14 @@ export default function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center text-center py-16 px-4">
-      {icon && <div className="text-4xl mb-4 opacity-60">{icon}</div>}
-      <p className="font-[family-name:var(--font-display)] text-lg text-[var(--navy)] mb-1">{title}</p>
-      {description && <p className="text-sm text-gray-500 max-w-sm mb-5">{description}</p>}
+    <div className="flex flex-col items-center text-center py-16 px-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50/60">
+      {icon && (
+        <div className="w-16 h-16 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center text-3xl mb-5">
+          {icon}
+        </div>
+      )}
+      <p className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900 mb-1.5">{title}</p>
+      {description && <p className="text-sm text-slate-500 max-w-sm mb-5 leading-relaxed">{description}</p>}
       {action}
     </div>
   );

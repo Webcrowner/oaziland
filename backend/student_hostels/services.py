@@ -19,7 +19,7 @@ class NoAvailableUnitError(Exception):
     pass
 
 
-def create_student_hostel(*, owner_profile, quarter, property_type):
+def create_student_hostel(*, owner_profile, quarter, property_type, latitude=None, longitude=None):
     """Creates a StudentHostel, keeping PropertyAsset.owner (inherited,
     a plain User) and owner_profile.account_user in sync — see the
     docstring on StudentHostel for why both exist."""
@@ -27,6 +27,7 @@ def create_student_hostel(*, owner_profile, quarter, property_type):
     return StudentHostel.objects.create(
         owner=owner_profile.account_user, owner_profile=owner_profile,
         quarter=quarter, type="STUDENT_HOSTEL", property_type=property_type,
+        latitude=latitude, longitude=longitude,
     )
 
 
@@ -73,6 +74,29 @@ def route_welfare_alert(alert):
     if consented_grant:
         recipients.append("institution_student_affairs")
     return recipients
+
+
+def grant_parent_guardian_access(*, student, parent_user, also_notify_institution: bool = False):
+    """The other real half of the parent-portal gap: ParentGuardianAccess
+    could only ever be created directly in the database (tests/admin) —
+    the STUDENT is meant to be the one granting a specific parent
+    visibility, but nothing let them actually do that."""
+    from .models import ParentGuardianAccess
+    grant, _ = ParentGuardianAccess.objects.get_or_create(
+        parent_user=parent_user, student=student,
+        defaults={"also_notify_institution": also_notify_institution},
+    )
+    return grant
+
+
+def revoke_parent_guardian_access(*, grant, actor):
+    """Only the student who granted access can revoke it."""
+    from django.utils import timezone
+    if actor.id != grant.student_id:
+        raise AccessDeniedError("Only the student who granted this access can revoke it.")
+    grant.revoked_at = timezone.now()
+    grant.save(update_fields=["revoked_at"])
+    return grant
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +170,7 @@ def process_waitlist_for_freed_unit(unit, semester):
     from .models import Waitlist
     from django.utils import timezone
 
-    ranked = rank_waitlist_for_unit_type(hostel=unit.building_ptr.studenthostel, desired_unit_type=unit.unit_type, semester=semester)
+    ranked = rank_waitlist_for_unit_type(hostel=unit.building.studenthostel, desired_unit_type=unit.unit_type, semester=semester)
     if not ranked:
         return None
 
@@ -154,6 +178,33 @@ def process_waitlist_for_freed_unit(unit, semester):
     allocation = allocate_room(student=top_entry.student, unit=unit, semester=semester)
     top_entry.fulfilled_at = timezone.now()
     top_entry.save(update_fields=["fulfilled_at"])
+    return allocation
+
+
+def join_hostel_waitlist(*, student, hostel, desired_unit_type, semester):
+    """The real gap this closes: rank_waitlist_for_unit_type()/
+    process_waitlist_for_freed_unit() (the 'join a waitlist, get
+    auto-notified or auto-allocated' feature from Prompt 11) were fully
+    built, but nothing ever let a student actually join one."""
+    from .models import Waitlist
+    entry, _ = Waitlist.objects.get_or_create(
+        student=student, hostel=hostel, desired_unit_type=desired_unit_type, semester=semester,
+        defaults={"fulfilled_at": None},
+    )
+    return entry
+
+
+def end_room_allocation(allocation):
+    """Frees a unit at semester-end/early-checkout and immediately runs
+    the auto-reallocation engine against anyone waiting for that exact
+    unit type — closing the loop between 'a unit becomes free' and
+    'the top-priority waitlisted student gets it automatically', per
+    the spec. Warden/admin-initiated, mirroring the rest of room
+    allocation being deliberately not self-service."""
+    from .models import RoomAllocationStatus
+    allocation.status = RoomAllocationStatus.ENDED
+    allocation.save(update_fields=["status"])
+    process_waitlist_for_freed_unit(allocation.unit, allocation.semester)
     return allocation
 
 

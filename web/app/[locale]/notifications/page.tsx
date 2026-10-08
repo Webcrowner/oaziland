@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { listMyNotifications, markNotificationRead, markAllNotificationsRead, type AppNotification } from "@/lib/api";
+import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
 import Button from "@/components/ui/Button";
@@ -46,15 +47,17 @@ export default function NotificationsPage() {
 
   if (status === "signedOut") {
     return (
-      <main className="max-w-md mx-auto px-4 py-16 text-center">
-        <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Button href="/login">{t("signInRequired")}</Button>
-      </main>
+      <AccountSidebarLayout activeHref="/notifications">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
+          <Button href="/login">{t("signInRequired")}</Button>
+        </div>
+      </AccountSidebarLayout>
     );
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-8">
+    <AccountSidebarLayout activeHref="/notifications">
       <PageHeader
         title={t("title")}
         action={notifications.some((n) => !n.read_at) ? (
@@ -81,6 +84,6 @@ export default function NotificationsPage() {
           ))}
         </div>
       )}
-    </main>
+    </AccountSidebarLayout>
   );
 }

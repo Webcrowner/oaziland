@@ -44,13 +44,30 @@ class IsAgencyMemberForOwnAgencyData(permissions.BasePermission):
         return agency is not None and user.agent_profile.agency_id == getattr(agency, "id", agency)
 
 
-class IsVerifiedAndMfaEnabled(permissions.BasePermission):
-    """Gates sensitive actions (listing a property, making a payment)
-    behind the same MFA/KYC rules already enforced at the service layer
-    (identity.services) — this is the API-layer mirror of that
-    enforcement, so a request never reaches the service layer at all if
-    it would just be rejected there."""
+class IsKycVerified(permissions.BasePermission):
+    """Gates sensitive actions (making a booking, publishing a listing)
+    behind KYC — identity verification must at least be SUBMITTED
+    (not necessarily approved yet). WHY MFA is no longer part of this
+    check: MFA is now a purely OPTIONAL security feature a user can
+    turn on for themselves from their account/dashboard settings
+    (/mfa-setup), not a mandatory gate blocking sensitive actions — a
+    deliberate platform-wide policy change (previously MFA+KYC were
+    both required here). Sets a specific, actionable self.message
+    (rather than DRF's generic 403 text) so the frontend can tell a
+    customer EXACTLY what's missing, instead of a dead-end "permission
+    denied" at the exact moment they're trying to convert (list
+    something or check out)."""
     def has_permission(self, request, view):
-        from identity.services import user_has_verified_mfa, user_has_submitted_kyc
+        from identity.services import user_has_submitted_kyc
         user = request.user
-        return bool(user and user.is_authenticated and user_has_verified_mfa(user) and user_has_submitted_kyc(user))
+        if not (user and user.is_authenticated):
+            return False
+        if not user_has_submitted_kyc(user):
+            self.message = "Please complete identity verification (KYC) before continuing."
+            return False
+        return True
+
+
+# Backward-compatible alias — every other app still imports this exact
+# name; keeping it means those 8+ files don't each need a rename too.
+IsVerifiedAndMfaEnabled = IsKycVerified

@@ -151,7 +151,9 @@ class InvalidRoomStatusError(Exception):
 
 def create_reservation(*, hotel, guest, room_type, check_in: date, check_out: date, adults=1, children=0, source="DIRECT", special_requests="", occupancy_rate: Decimal = Decimal("0.5")):
     """Locks in the total rate from compute_dynamic_rate() at booking
-    time — see Reservation.rate_xaf's own docstring for why."""
+    time — see Reservation.rate_xaf's own docstring for why. Starts in
+    PENDING_PAYMENT — see confirm_reservation_payment() for the real
+    payment step that actually confirms it."""
     from .models import Reservation
 
     pricing = compute_dynamic_rate(room_type=room_type, check_in=check_in, check_out=check_out, occupancy_rate=occupancy_rate)
@@ -159,6 +161,40 @@ def create_reservation(*, hotel, guest, room_type, check_in: date, check_out: da
         hotel=hotel, guest=guest, room_type=room_type, check_in=check_in, check_out=check_out,
         adults=adults, children=children, rate_xaf=pricing["total_xaf"], source=source, special_requests=special_requests,
     )
+
+
+def confirm_reservation_payment(*, reservation, lock_client, payment_gateway, phone_number: str):
+    """Pays the full room rate through the SAME Booking/PaymentEscrow
+    flow every other transaction type uses — hotels don't split a
+    deposit like events do, per the spec. WHY this was a real gap
+    before this fix: Reservation previously had no payment step
+    reachable at all — a guest's reservation went straight to
+    CONFIRMED with no Booking, no escrow, no money ever changing
+    hands."""
+    from transactions.services import reserve_booking, initiate_booking_payment, confirm_payment
+    from transactions.models import BookingType
+    from .models import ReservationStatus
+
+    booking = reserve_booking(
+        lock_client=lock_client, requester=reservation.guest, booking_type=BookingType.HOTEL,
+        target_content_type="hotels.Reservation", target_id=reservation.id, amount_xaf=reservation.rate_xaf,
+    )
+    initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
+    escrow = confirm_payment(
+        lock_client=lock_client, booking=booking, provider="MTN_MOMO", provider_reference=booking.idempotency_key,
+        payment_gateway=payment_gateway, raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
+    )
+
+    reservation.booking = booking
+    reservation.status = ReservationStatus.CONFIRMED
+    reservation.save(update_fields=["booking", "status"])
+    return reservation, escrow
+
+
+class ReservationNotPaidError(Exception):
+    """Raised when check-in is attempted before real payment has confirmed
+    the reservation — a room key must never be handed over on the strength
+    of a frontend claim alone."""
 
 
 def check_in_guest(*, reservation, assigned_by):
@@ -169,6 +205,9 @@ def check_in_guest(*, reservation, assigned_by):
     a guest needs a room."""
     from django.utils import timezone
     from .models import Room, RoomStatus, RoomAssignment, ReservationStatus, GuestFolio
+
+    if reservation.status == ReservationStatus.PENDING_PAYMENT:
+        raise ReservationNotPaidError("This reservation has not been paid for yet.")
 
     available_room = Room.objects.filter(
         hotel=reservation.hotel, room_type=reservation.room_type, status=RoomStatus.INSPECTED,
@@ -221,7 +260,10 @@ def run_end_of_day_room_charge_posting(hotel, night_date: date = None):
 def checkout_guest(reservation):
     """Settles the stay: closes the folio, frees the room (into DIRTY —
     the actual trigger for a housekeeping alert, per the spec), and
-    returns the final balance for the front desk to collect."""
+    releases the real escrow held for this reservation so the hotel
+    actually gets paid — the real gap this closes: checkout previously
+    never touched Booking/PaymentEscrow at all, so a stay could complete
+    with the guest's payment held in escrow forever."""
     from django.utils import timezone
     from .models import ReservationStatus, RoomStatus, FolioStatus
 
@@ -236,6 +278,10 @@ def checkout_guest(reservation):
     room = reservation.room_assignment.room
     room.status = RoomStatus.DIRTY
     room.save(update_fields=["status"])
+
+    if reservation.booking_id and hasattr(reservation.booking, "escrow"):
+        from transactions.services import complete_booking
+        complete_booking(booking=reservation.booking)
 
     return folio.balance_xaf
 

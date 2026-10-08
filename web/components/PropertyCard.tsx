@@ -2,20 +2,11 @@
 import { useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import FavoriteButton from "@/components/FavoriteButton";
+import ListerRoleBadge from "@/components/ListerRoleBadge";
+import ListerRatingChip from "@/components/ListerRatingChip";
+import WhatsAppShareButton from "@/components/WhatsAppShareButton";
 import type { Listing } from "@/lib/api";
-
-const LISTER_ROLE_LABEL_KEYS: Record<string, string> = {
-  AGENT: "listerAgent",
-  AGENCY: "listerAgency",
-};
-
-function listerRoleLabelKey(role: string, listingType: string): string {
-  if (role === "OWNER") {
-    return listingType === "SALE" ? "listerOwnerSale" : "listerOwner";
-  }
-  return LISTER_ROLE_LABEL_KEYS[role] || "listerOwner";
-}
+import { IconBed, IconBath, IconArea, IconMapPin } from "./Icons";
 
 /**
  * PropertyCard — redesigned in the photo-forward, icon-scannable
@@ -45,6 +36,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
 
   const photos = listing.photos?.filter((p) => p.media_type === "PHOTO") ?? [];
   const hasMultiplePhotos = photos.length > 1;
+  const hasVideo = listing.photos?.some((p) => p.media_type === "VIDEO") ?? false;
 
   function showPhoto(index: number, e: React.MouseEvent) {
     e.preventDefault();
@@ -64,7 +56,20 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
           <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">{t("noPhotoYet")}</div>
         )}
 
-        <FavoriteButton listingId={listing.id} variant="card" />
+        <ListerRoleBadge role={listing.lister_role} isSale={listing.listing_type === "SALE"} variant="overlay" />
+        <WhatsAppShareButton
+          variant="overlay"
+          title={listing.property_asset.type.toLowerCase()}
+          location={listing.property_asset.quarter_name}
+          price={price}
+          path={`/listing/${listing.id}`}
+        />
+
+        {hasVideo && (
+          <span className="absolute top-12 left-2 text-[10px] font-semibold uppercase bg-black/70 text-white px-2 py-0.5 rounded">
+            {t("video")}
+          </span>
+        )}
 
         {/* Real dot navigation — appears only when there's genuinely
             more than one photo to cycle through, never decoration on
@@ -100,31 +105,36 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
               {finish}
             </span>
           )}
-          <span
-            className={`text-xs font-semibold uppercase px-2 py-1 rounded ${
-              listing.lister_role === "OWNER" ? "bg-green-100 text-green-800" : "bg-[var(--gold)]/20 text-[#8A6D14]"
-            }`}
-          >
-            {t(listerRoleLabelKey(listing.lister_role, listing.listing_type))}
-          </span>
+          <ListerRatingChip average={listing.lister_average_rating} count={listing.lister_rating_count} />
         </div>
 
         {/* The real icon stat row — bed/bath/size in one scannable
-            line, shown only for the fields that actually apply (Land
-            has no bedrooms; this never fakes a stat that isn't real). */}
-        <div className="flex items-center gap-3 text-sm text-gray-700 mb-2">
+            line, shown only for the fields that actually apply. */}
+        <div className="flex items-center gap-4 text-xs font-medium text-slate-600 mb-2.5">
           {listing.property_asset.bedrooms !== null && (
-            <span className="flex items-center gap-1">🛏 {listing.property_asset.bedrooms}</span>
+            <span className="flex items-center gap-1.5">
+              <IconBed size={15} className="text-slate-400" />
+              <span>{listing.property_asset.bedrooms} {listing.property_asset.bedrooms === 1 ? "bed" : "beds"}</span>
+            </span>
           )}
           {listing.property_asset.bathrooms !== null && (
-            <span className="flex items-center gap-1">🛁 {listing.property_asset.bathrooms}</span>
+            <span className="flex items-center gap-1.5">
+              <IconBath size={15} className="text-slate-400" />
+              <span>{listing.property_asset.bathrooms} {listing.property_asset.bathrooms === 1 ? "bath" : "baths"}</span>
+            </span>
           )}
           {listing.property_asset.size_sqm && (
-            <span className="flex items-center gap-1">📐 {listing.property_asset.size_sqm}m²</span>
+            <span className="flex items-center gap-1.5">
+              <IconArea size={15} className="text-slate-400" />
+              <span>{listing.property_asset.size_sqm} m²</span>
+            </span>
           )}
         </div>
 
-        <p className="text-sm text-gray-600 mb-1">📍 {listing.property_asset.quarter_name}</p>
+        <p className="text-xs text-slate-500 mb-1 flex items-center gap-1 font-medium">
+          <IconMapPin size={13} className="text-amber-500 shrink-0" />
+          <span className="truncate">{listing.property_asset.quarter_name}</span>
+        </p>
         {postedDate && <p className="text-xs text-gray-400">{t("postedOn", { date: postedDate })}</p>}
       </div>
     </Link>

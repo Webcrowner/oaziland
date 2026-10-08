@@ -117,3 +117,49 @@ def test_platform_anniversary_only_matches_the_correct_day():
 
     sent = send_platform_anniversary_greetings(today=date(2026, 3, 10))
     assert len(sent) == 0
+
+
+@pytest.mark.django_db
+def test_greeting_settings_toggle_and_custom_message():
+    from notifications.models import GreetingSettings
+    from rest_framework.test import APIClient
+    from identity.models import AdminProfile
+
+    # 1. Customize settings via GreetingSettings
+    settings = GreetingSettings.get_settings()
+    settings.birthday_enabled = False
+    settings.new_month_title = "Greetings from Oaziland for {month}"
+    settings.new_month_message = "Hello {name}, enjoy this wonderful {month}!"
+    settings.save()
+
+    # Birthday should now be skipped because it is toggled off
+    today = date(2026, 6, 15)
+    _make_user_with_birthday("bday_custom_user", "+237699999510", 6, 15, "Chloe Doe")
+    sent_bday = send_birthday_greetings(today=today)
+    assert len(sent_bday) == 0
+
+    # New month should use custom title and message
+    month_user = User.objects.create(username="month_custom_user", phone="+237699999511", first_name="Chloe")
+    send_happy_new_month_greetings(today=date(2026, 6, 1))
+    notification = Notification.objects.get(recipient=month_user, notification_type="HAPPY_NEW_MONTH")
+    assert notification.title == "Greetings from Oaziland for June"
+    assert notification.message == "Hello Chloe, enjoy this wonderful June!"
+
+    # 2. Verify admin endpoint access
+    admin_user = User.objects.create(username="greetings_admin", phone="+237699999512", is_staff=True)
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    client = APIClient()
+    client.force_authenticate(user=admin_user)
+
+    get_resp = client.get("/api/admin/greeting-settings/")
+    assert get_resp.status_code == 200
+    assert get_resp.data["birthday_enabled"] is False
+
+    put_resp = client.put("/api/admin/greeting-settings/", {
+        "birthday_enabled": True,
+        "birthday_title": "Happy Birthday {name}!",
+        "birthday_message": "Have a great birthday, {name}!",
+    }, format="json")
+    assert put_resp.status_code == 200
+    assert put_resp.data["birthday_enabled"] is True
+    assert put_resp.data["birthday_title"] == "Happy Birthday {name}!"

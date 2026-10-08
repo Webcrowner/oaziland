@@ -4,6 +4,7 @@ Subdivision -> Village/District -> Quarter. This is what turns "search houses
 in Bastos" into a fast, indexed query instead of free-text matching.
 """
 import uuid
+from django.conf import settings
 from django.db import models
 
 
@@ -79,6 +80,34 @@ class Quarter(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class AreaSuggestionStatus(models.TextChoices):
+    PENDING = "PENDING", "Pending review"
+    APPROVED = "APPROVED", "Approved"
+    REJECTED = "REJECTED", "Rejected"
+
+
+class AreaSuggestion(models.Model):
+    """A lister's request to add a neighbourhood missing from the dropdown. Listers can never
+    type a free-text area onto a listing; an admin reviews the request and creates the Quarter."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    suggested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="area_suggestions",
+    )
+    region = models.ForeignKey(Region, on_delete=models.CASCADE, related_name="area_suggestions")
+    city_name = models.CharField(max_length=100)
+    area_name = models.CharField(max_length=100)
+    status = models.CharField(max_length=10, choices=AreaSuggestionStatus.choices, default=AreaSuggestionStatus.PENDING)
+    created_quarter = models.ForeignKey(Quarter, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "area_suggestions"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.area_name} ({self.city_name}, {self.region.name}) — {self.status}"
 
 
 class QuarterPriceTrend(models.Model):

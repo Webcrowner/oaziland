@@ -9,11 +9,18 @@ from decimal import Decimal
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from identity.models import User, TechnicianProfile
+from identity.models import User, TechnicianProfile, KYCProfile, VerificationStatus, MfaMethod
 from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
-from services.models import ServiceCategory
+from services.models import ServiceCategory, ServiceRequest
 from services.services import set_technician_specialties
 from monetization.models import PlatformFeePolicy, TransactionCategory
+
+LOC = {"latitude": "3.848", "longitude": "11.502"}
+
+
+def _approved_quote(request_id, requester, technician, amount):
+    _auth_client(technician).post(f"/api/service-requests/{request_id}/quote/", {"amount_xaf": amount})
+    _auth_client(requester).post(f"/api/service-requests/{request_id}/approve-quote/")
 
 
 def _auth_client(user):
@@ -21,6 +28,14 @@ def _auth_client(user):
     token = RefreshToken.for_user(user)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
     return client
+
+
+def _verify(user):
+    """Requesting a paid technician job is a real checkout, gated by
+    real KYC + MFA same as any other booking."""
+    KYCProfile.objects.create(user=user, legal_full_name=user.username, date_of_birth="1990-01-01", national_id_number=f"CM-{user.id}", residential_address="Bastos", kyc_status=VerificationStatus.VERIFIED)
+    MfaMethod.objects.create(user=user, mfa_type="SMS_OTP", destination=user.phone, verified=True)
+    return user
 
 
 @pytest.fixture
@@ -35,7 +50,7 @@ def quarter(db):
 
 @pytest.mark.django_db
 def test_creating_a_service_request(quarter):
-    requester = User.objects.create(username="svc_requester", phone="+237699888801")
+    requester = _verify(User.objects.create(username="svc_requester", phone="+237699888801"))
     client = _auth_client(requester)
 
     response = client.post("/api/service-requests/", {
@@ -53,9 +68,10 @@ def test_a_technician_can_discover_and_accept_an_open_request(quarter):
     hailing ViewSet, deliberately avoided here from the start: a
     technician must be able to SEE an open request before they've
     accepted it, or they could never discover work to accept."""
-    requester = User.objects.create(username="svc_accept_requester", phone="+237699888802")
+    requester = _verify(User.objects.create(username="svc_accept_requester", phone="+237699888802"))
     technician = User.objects.create(username="svc_accept_technician", phone="+237699888803")
-    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.ELECTRICAL, "description": "Rewiring needed."})
+    TechnicianProfile.objects.create(user=technician, is_verified=True, specialties=[ServiceCategory.ELECTRICAL])
+    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.ELECTRICAL, "description": "Rewiring needed.", **LOC})
     request_id = create_response.data["id"]
 
     technician_view = _auth_client(technician).get("/api/service-requests/")
@@ -68,10 +84,12 @@ def test_a_technician_can_discover_and_accept_an_open_request(quarter):
 
 @pytest.mark.django_db
 def test_cannot_accept_a_request_thats_already_accepted():
-    requester = User.objects.create(username="svc_double_requester", phone="+237699888804")
+    requester = _verify(User.objects.create(username="svc_double_requester", phone="+237699888804"))
     tech_a = User.objects.create(username="svc_double_tech_a", phone="+237699888805")
     tech_b = User.objects.create(username="svc_double_tech_b", phone="+237699888806")
-    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.PAINTING, "description": "Paint the fence."})
+    TechnicianProfile.objects.create(user=tech_a, is_verified=True, specialties=[ServiceCategory.PAINTING])
+    TechnicianProfile.objects.create(user=tech_b, is_verified=True, specialties=[ServiceCategory.PAINTING])
+    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.PAINTING, "description": "Paint the fence.", **LOC})
     request_id = create_response.data["id"]
     _auth_client(tech_a).post(f"/api/service-requests/{request_id}/accept/")
 
@@ -82,12 +100,14 @@ def test_cannot_accept_a_request_thats_already_accepted():
 
 @pytest.mark.django_db
 def test_only_the_assigned_technician_can_start_the_job():
-    requester = User.objects.create(username="svc_start_requester", phone="+237699888807")
+    requester = _verify(User.objects.create(username="svc_start_requester", phone="+237699888807"))
     technician = User.objects.create(username="svc_start_technician", phone="+237699888808")
     stranger = User.objects.create(username="svc_start_stranger", phone="+237699888809")
-    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.CLEANING, "description": "Deep clean."})
+    TechnicianProfile.objects.create(user=technician, is_verified=True, specialties=[ServiceCategory.CLEANING])
+    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.CLEANING, "description": "Deep clean.", **LOC})
     request_id = create_response.data["id"]
     _auth_client(technician).post(f"/api/service-requests/{request_id}/accept/")
+    _approved_quote(request_id, requester, technician, "8000")
 
     stranger_response = _auth_client(stranger).post(f"/api/service-requests/{request_id}/start/")
     assert stranger_response.status_code == 403
@@ -100,30 +120,36 @@ def test_only_the_assigned_technician_can_start_the_job():
 @pytest.mark.django_db
 def test_the_full_real_service_lifecycle_settles_through_the_real_payment_gateway():
     PlatformFeePolicy.objects.get_or_create(category=TransactionCategory.SERVICE_PAYMENT, defaults={"fee_percent": Decimal("4.0")})
-    requester = User.objects.create(username="svc_full_requester", phone="+237699888810")
+    requester = _verify(User.objects.create(username="svc_full_requester", phone="+237699888810"))
     technician = User.objects.create(username="svc_full_technician", phone="+237699888811")
-    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.MOVING, "description": "Move furniture."})
+    TechnicianProfile.objects.create(user=technician, is_verified=True, specialties=[ServiceCategory.MOVING])
+    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.MOVING, "description": "Move furniture.", **LOC})
     request_id = create_response.data["id"]
     _auth_client(technician).post(f"/api/service-requests/{request_id}/accept/")
+    _approved_quote(request_id, requester, technician, "25000")
     _auth_client(technician).post(f"/api/service-requests/{request_id}/start/")
 
-    complete_response = _auth_client(requester).post(f"/api/service-requests/{request_id}/complete/", {"amount_xaf": "25000", "phone_number": requester.phone})
+    complete_response = _auth_client(requester).post(f"/api/service-requests/{request_id}/complete/", {"phone_number": requester.phone})
 
     assert complete_response.status_code == 200
     assert complete_response.data["status"] == "COMPLETED"
+    booking = ServiceRequest.objects.get(id=request_id).booking
+    assert booking.amount_xaf == Decimal("25000")  # the approved quote, not a figure typed at payment time
 
 
 @pytest.mark.django_db
 def test_only_the_requester_can_complete_and_pay():
-    requester = User.objects.create(username="svc_pay_requester", phone="+237699888812")
+    requester = _verify(User.objects.create(username="svc_pay_requester", phone="+237699888812"))
     technician = User.objects.create(username="svc_pay_technician", phone="+237699888813")
     stranger = User.objects.create(username="svc_pay_stranger", phone="+237699888814")
-    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.SECURITY_INSTALLATION, "description": "Install cameras."})
+    TechnicianProfile.objects.create(user=technician, is_verified=True, specialties=[ServiceCategory.SECURITY_INSTALLATION])
+    create_response = _auth_client(requester).post("/api/service-requests/", {"category": ServiceCategory.SECURITY_INSTALLATION, "description": "Install cameras.", **LOC})
     request_id = create_response.data["id"]
     _auth_client(technician).post(f"/api/service-requests/{request_id}/accept/")
+    _approved_quote(request_id, requester, technician, "10000")
     _auth_client(technician).post(f"/api/service-requests/{request_id}/start/")
 
-    response = _auth_client(stranger).post(f"/api/service-requests/{request_id}/complete/", {"amount_xaf": "10000", "phone_number": stranger.phone})
+    response = _auth_client(stranger).post(f"/api/service-requests/{request_id}/complete/", {"phone_number": stranger.phone})
 
     assert response.status_code == 403
 

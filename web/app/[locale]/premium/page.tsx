@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { getMyCreatorPremiumStatus, subscribeCreatorPremium, cancelCreatorPremium } from "@/lib/api";
+import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import Button from "@/components/ui/Button";
 
 export default function PremiumPage() {
@@ -51,15 +52,18 @@ export default function PremiumPage() {
 
   if (!loggedIn) {
     return (
-      <main className="max-w-md mx-auto px-4 py-16 text-center">
-        <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-        <Button href="/login">{t("signInRequired")}</Button>
-      </main>
+      <AccountSidebarLayout activeHref="/premium">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
+          <Button href="/login">{t("signInRequired")}</Button>
+        </div>
+      </AccountSidebarLayout>
     );
   }
 
   return (
-    <main className="max-w-md mx-auto px-4 py-16 text-center">
+    <AccountSidebarLayout activeHref="/premium">
+      <div className="max-w-md mx-auto text-center">
       <h1 className="text-2xl font-bold text-[var(--navy)] mb-2">{t("title")}</h1>
       <p className="text-gray-600 mb-1">{t("subtitle")}</p>
       <p className="text-3xl font-bold text-[var(--gold)] mb-6">{t("priceLabel")}</p>
@@ -92,6 +96,7 @@ export default function PremiumPage() {
           </button>
         </form>
       )}
-    </main>
+      </div>
+    </AccountSidebarLayout>
   );
 }

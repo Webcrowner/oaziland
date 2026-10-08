@@ -174,9 +174,15 @@ def send_birthday_greetings(today=None):
     """Finds every active user whose KYCProfile.date_of_birth matches
     today's month and day, and sends a personalized birthday message —
     skipping anyone with no KYC/birthdate on file entirely (never
-    guesses or defaults a birthdate) and anyone already greeted today."""
+    guesses or defaults a birthdate) and anyone already greeted today.
+    Respects admin toggle and editable message template in GreetingSettings."""
     from django.utils import timezone
     from identity.models import KYCProfile
+    from .models import GreetingSettings
+
+    settings = GreetingSettings.get_settings()
+    if not settings.birthday_enabled:
+        return []
 
     today = today or timezone.now().date()
     birthday_profiles = KYCProfile.objects.filter(
@@ -190,10 +196,12 @@ def send_birthday_greetings(today=None):
         if _already_greeted_today(user, "BIRTHDAY_GREETING"):
             continue
         name = user.full_name or user.username
+        title = settings.birthday_title.replace("{name}", name)
+        msg = settings.birthday_message.replace("{name}", name)
         notification = notify(
             recipient=user, notification_type="BIRTHDAY_GREETING",
-            title="Happy Birthday! 🎉",
-            message=f"Happy Birthday, {name}! Wishing you a wonderful year ahead, from all of us at Oaziland.",
+            title=title,
+            message=msg,
             channel="WHATSAPP",
         )
         sent.append(notification)
@@ -202,9 +210,15 @@ def send_birthday_greetings(today=None):
 
 def send_happy_new_month_greetings(today=None):
     """Sends to every active user on the 1st of each calendar month —
-    per the founder's explicit request, personalized with their name."""
+    per the founder's explicit request, personalized with their name.
+    Respects admin toggle and editable message template in GreetingSettings."""
     from django.utils import timezone
+    from .models import GreetingSettings
     import calendar
+
+    settings = GreetingSettings.get_settings()
+    if not settings.new_month_enabled:
+        return []
 
     today = today or timezone.now().date()
     if today.day != 1:
@@ -216,10 +230,12 @@ def send_happy_new_month_greetings(today=None):
         if _already_greeted_today(user, "HAPPY_NEW_MONTH"):
             continue
         name = user.full_name or user.username
+        title = settings.new_month_title.replace("{name}", name).replace("{month}", month_name)
+        msg = settings.new_month_message.replace("{name}", name).replace("{month}", month_name)
         notification = notify(
             recipient=user, notification_type="HAPPY_NEW_MONTH",
-            title=f"Happy New Month, {name}!",
-            message=f"Happy {month_name}, {name}! Wishing you a productive and successful month ahead, from Oaziland.",
+            title=title,
+            message=msg,
             channel="WHATSAPP",
         )
         sent.append(notification)

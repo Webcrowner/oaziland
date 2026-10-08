@@ -3,13 +3,16 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import {
   listMyRides, requestRide, acceptRide, startRide, completeRide,
-  getMyDriverProfile, registerAsDriver, listMyVehicles, registerVehicle,
+  getMyDriverProfile, registerAsDriver, listMyVehicles, registerVehicle, getMyProfile,
   type RideBookingItem, type DriverProfileItem, type VehicleItem,
 } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
+import GpsCaptureButton from "@/components/GpsCaptureButton";
+import RideChat from "@/components/RideChat";
+import { IconMapPin, IconCompass } from "@/components/Icons";
 
 const STATUS_VARIANT: Record<string, "navy" | "gold" | "green" | "clay"> = {
   REQUESTED: "gold", ACCEPTED: "navy", IN_PROGRESS: "navy", COMPLETED: "green", CANCELLED: "clay",
@@ -39,11 +42,21 @@ export default function OaziGoPage() {
   const [status, setStatus] = useState<"loading" | "signedOut" | "ready">("loading");
   const [driverProfile, setDriverProfile] = useState<DriverProfileItem | null>(null);
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [activeChatRideId, setActiveChatRideId] = useState<string | null>(null);
 
   // Request form
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
   const [distance, setDistance] = useState("");
+  const [pickupGps, setPickupGps] = useState<{ latitude: number | null; longitude: number | null }>({
+    latitude: null,
+    longitude: null,
+  });
+  const [dropoffGps, setDropoffGps] = useState<{ latitude: number | null; longitude: number | null }>({
+    latitude: null,
+    longitude: null,
+  });
   const [rideCategory, setRideCategory] = useState<string>("STANDARD");
   const [transportType, setTransportType] = useState<"PASSENGER" | "CARGO">("PASSENGER");
   const [hasLuggage, setHasLuggage] = useState(false);
@@ -76,10 +89,12 @@ export default function OaziGoPage() {
       listMyRides(token),
       getMyDriverProfile(token).catch(() => null),
       listMyVehicles(token).catch(() => ({ results: [] })),
-    ]).then(([ridesData, driverData, vehiclesData]) => {
+      getMyProfile(token).catch(() => null),
+    ]).then(([ridesData, driverData, vehiclesData, profileData]) => {
       setRides(ridesData.results);
       setDriverProfile(driverData);
       setVehicles(vehiclesData.results);
+      if (profileData) setMyUserId(profileData.id);
       setStatus("ready");
     }).catch(() => setStatus("ready"));
   }, []);
@@ -94,11 +109,25 @@ export default function OaziGoPage() {
     setRequestError("");
     try {
       await requestRide({
-        pickup_description: pickup, dropoff_description: dropoff, distance_km: distance,
-        ride_category: rideCategory, transport_type: transportType, has_luggage: hasLuggage,
+        pickup_description: pickup,
+        dropoff_description: dropoff,
+        distance_km: distance,
+        pickup_latitude: pickupGps.latitude,
+        pickup_longitude: pickupGps.longitude,
+        dropoff_latitude: dropoffGps.latitude,
+        dropoff_longitude: dropoffGps.longitude,
+        ride_category: rideCategory,
+        transport_type: transportType,
+        has_luggage: hasLuggage,
         cargo_description: transportType === "CARGO" ? cargoDescription : undefined,
       }, token);
-      setPickup(""); setDropoff(""); setDistance(""); setHasLuggage(false); setCargoDescription("");
+      setPickup("");
+      setDropoff("");
+      setDistance("");
+      setHasLuggage(false);
+      setCargoDescription("");
+      setPickupGps({ latitude: null, longitude: null });
+      setDropoffGps({ latitude: null, longitude: null });
       load();
     } catch (err) {
       setRequestError(err instanceof Error ? err.message : t("requestFailed"));
@@ -169,9 +198,40 @@ export default function OaziGoPage() {
 
       {/* Real ride request form */}
       <form onSubmit={handleRequest} className="border border-gray-200 rounded-xl p-6 bg-white mb-6 flex flex-col gap-3">
-        <input required placeholder={t("pickupPlaceholder")} value={pickup} onChange={(e) => setPickup(e.target.value)} className="border rounded-lg px-3 py-2" />
-        <input required placeholder={t("dropoffPlaceholder")} value={dropoff} onChange={(e) => setDropoff(e.target.value)} className="border rounded-lg px-3 py-2" />
-        <input required type="number" step="0.1" placeholder={t("distancePlaceholder")} value={distance} onChange={(e) => setDistance(e.target.value)} className="border rounded-lg px-3 py-2" />
+        <div>
+          <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+            Pickup Location
+          </label>
+          <input required placeholder={t("pickupPlaceholder")} value={pickup} onChange={(e) => setPickup(e.target.value)} className="border rounded-lg px-3 py-2 w-full" />
+          <div className="mt-1.5">
+            <GpsCaptureButton
+              onCapture={(coords) => setPickupGps(coords)}
+              currentCoords={pickupGps}
+              label="Capture My Current Pickup GPS"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+            Destination / Dropoff
+          </label>
+          <input required placeholder={t("dropoffPlaceholder")} value={dropoff} onChange={(e) => setDropoff(e.target.value)} className="border rounded-lg px-3 py-2 w-full" />
+          <div className="mt-1.5">
+            <GpsCaptureButton
+              onCapture={(coords) => setDropoffGps(coords)}
+              currentCoords={dropoffGps}
+              label="Capture Dropoff Location GPS (Optional)"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+            Estimated Distance (km)
+          </label>
+          <input required type="number" step="0.1" placeholder={t("distancePlaceholder")} value={distance} onChange={(e) => setDistance(e.target.value)} className="border rounded-lg px-3 py-2 w-full" />
+        </div>
 
         <p className="text-sm font-semibold text-[var(--navy)] mt-1">{t("vehicleCategoryLabel")}</p>
         <div className="flex flex-wrap gap-2">
@@ -271,6 +331,37 @@ export default function OaziGoPage() {
               {ride.cargo_description && <p className="text-xs text-gray-500 mb-2">{ride.cargo_description}</p>}
               <p className="text-sm text-gray-600 mb-3">{Number(ride.fare_estimate_xaf).toLocaleString()} XAF</p>
 
+              {/* Both-ends GPS navigation for Rider and Driver */}
+              {(ride.pickup_latitude && ride.pickup_longitude) || (ride.dropoff_latitude && ride.dropoff_longitude) ? (
+                <div className="flex flex-wrap items-center gap-2 mb-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80">
+                  {ride.pickup_latitude && ride.pickup_longitude && (
+                    <a
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${ride.pickup_latitude},${ride.pickup_longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-400 text-slate-950 hover:bg-amber-300 transition-colors shadow-2xs"
+                      title="Follow GPS coordinates to rider pickup spot"
+                    >
+                      <IconMapPin size={13} />
+                      <span>Follow to Pickup (Google Maps ↗)</span>
+                    </a>
+                  )}
+
+                  {ride.dropoff_latitude && ride.dropoff_longitude && (
+                    <a
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${ride.dropoff_latitude},${ride.dropoff_longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 transition-colors shadow-2xs"
+                      title="Follow GPS coordinates to dropoff destination"
+                    >
+                      <IconCompass size={13} />
+                      <span>Follow to Dropoff (Google Maps ↗)</span>
+                    </a>
+                  )}
+                </div>
+              ) : null}
+
               {ride.status === "REQUESTED" && canDrive && acceptingRideId !== ride.id && (
                 <button onClick={() => setAcceptingRideId(ride.id)} className="text-xs text-[var(--navy)] underline">{t("acceptAsDriver")}</button>
               )}
@@ -293,6 +384,22 @@ export default function OaziGoPage() {
                 <div className="flex gap-2 mt-2">
                   <input placeholder={t("phoneNumberPlaceholder")} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className="border rounded px-3 py-1.5 text-sm flex-1" />
                   <button onClick={() => handleComplete(ride.id)} className="bg-[var(--gold)] text-[var(--navy)] font-semibold px-3 py-1.5 rounded text-sm">{t("pay")}</button>
+                </div>
+              )}
+
+              {/* Private In-Trip Chat between Rider & Driver */}
+              {ride.driver && (ride.status === "ACCEPTED" || ride.status === "IN_PROGRESS") && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <button
+                    onClick={() => setActiveChatRideId(activeChatRideId === ride.id ? null : ride.id)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--navy)] hover:underline"
+                  >
+                    <span>💬 {activeChatRideId === ride.id ? t("hideChat") || "Hide Chat" : t("openChat") || "Chat with Driver/Rider"}</span>
+                  </button>
+
+                  {activeChatRideId === ride.id && (
+                    <RideChat rideId={ride.id} myUserId={myUserId} />
+                  )}
                 </div>
               )}
             </div>

@@ -2,8 +2,10 @@
 Tests for the real MFA setup/verify HTTP endpoints — closing a
 previously critical gap where issue_mfa_challenge() and MfaChallenge.
 verify() existed and were tested at the service layer, but NO API
-endpoint ever exposed them, meaning no real user could ever actually
-satisfy IsVerifiedAndMfaEnabled, enforced everywhere sensitive.
+endpoint ever exposed them. MFA is now a purely OPTIONAL feature (not
+a gate on sensitive actions — see IsKycVerified, which checks KYC
+only), but the setup/verify flow itself still needs to actually work
+for anyone who chooses to turn it on.
 """
 import pytest
 from rest_framework.test import APIClient
@@ -80,10 +82,11 @@ def test_a_used_code_cannot_be_replayed():
 
 
 @pytest.mark.django_db
-def test_completing_mfa_actually_unblocks_the_sensitive_action():
-    """The real proof this closes the gap: before MFA, listing a
-    property is genuinely blocked; after completing the real flow
-    above, it genuinely isn't."""
+def test_mfa_status_is_independent_of_sensitive_actions():
+    """MFA is a purely optional feature now, not a gate: a KYC-verified
+    user can list a property whether or not they've ever touched MFA
+    at all — IsKycVerified only checks KYC, matching the platform-wide
+    policy change that dropped the mandatory MFA requirement."""
     from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
     from identity.models import KYCProfile, VerificationStatus
     from property.models import House
@@ -100,16 +103,18 @@ def test_completing_mfa_actually_unblocks_the_sensitive_action():
     house = House.objects.create(owner=user, quarter=quarter, type="HOUSE")
     client = _auth_client(user)
 
+    # Already allowed before ever touching MFA — KYC alone is enough.
     before_response = client.post("/api/listings/", {"property_asset_id": str(house.id), "listing_type": "RENT", "price_xaf": "50000"})
-    assert before_response.status_code == 403
+    assert before_response.status_code == 201
 
     setup_response = client.post("/api/auth/mfa/setup/", {"mfa_type": "SMS_OTP", "destination": "+237699666604"})
     real_code = MfaChallenge.objects.get(id=setup_response.data["challenge_id"]).code
     client.post("/api/auth/mfa/verify/", {"challenge_id": setup_response.data["challenge_id"], "code": real_code})
 
-    after_response = client.post("/api/listings/", {"property_asset_id": str(house.id), "listing_type": "RENT", "price_xaf": "50000"})
+    # Still allowed after completing MFA — it changes nothing here.
+    house2 = House.objects.create(owner=user, quarter=quarter, type="HOUSE")
+    after_response = client.post("/api/listings/", {"property_asset_id": str(house2.id), "listing_type": "RENT", "price_xaf": "50000"})
     assert after_response.status_code == 201
-    assert after_response.data["lister_display_name"] == "MFA Test User" or after_response.data["lister_role"] == "OWNER"
 
 
 @pytest.mark.django_db

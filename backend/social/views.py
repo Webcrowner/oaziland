@@ -9,10 +9,15 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema
 from .models import SocialAccountLink, Conversation, Post, Comment, ContentStatus, Rating, Review
 from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer, PostSerializer, CommentSerializer, RatingSerializer, ReviewSerializer
-from .services import link_social_account, create_or_update_rating, create_review, CannotRateSelfError, ReviewRequiresCompletedBookingError, AlreadyReviewedError
+from .services import (
+    link_social_account, create_or_update_rating, create_review, CannotRateSelfError,
+    ReviewRequiresCompletedBookingError, AlreadyReviewedError, is_following, is_mutual_follow,
+    toggle_follow, get_follow_counts,
+)
 
 
 class SocialAccountLinkViewSet(viewsets.ModelViewSet):
@@ -61,6 +66,14 @@ class TestimonialsView(APIView):
         return Response({"count": len(results), "results": results})
 
 
+class ChatThrottle(UserRateThrottle):
+    scope = "chat"
+
+
+# Deliberately identical whichever side blocked, so a block never reveals itself.
+BLOCKED_MESSAGE_DETAIL = "You can't message this user."
+
+
 class ConversationViewSet(viewsets.ModelViewSet):
     """A real inbox — list/retrieve/create all scoped to conversations
     the requester is actually a participant in. WHY create looks for
@@ -70,6 +83,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
     conversations instead of keeping one real thread."""
     serializer_class = ConversationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ChatThrottle]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -88,6 +102,12 @@ class ConversationViewSet(viewsets.ModelViewSet):
         if existing:
             return Response(ConversationSerializer(existing, context={"request": request}).data, status=status.HTTP_200_OK)
 
+        from engagement.services import is_blocked_either_way
+        from identity.models import User
+        target = User.objects.filter(pk=participant_id).first()
+        if target is not None and is_blocked_either_way(request.user, target):
+            return Response({"detail": BLOCKED_MESSAGE_DETAIL}, status=status.HTTP_403_FORBIDDEN)
+
         conversation = Conversation.objects.create()
         conversation.participants.add(request.user, participant_id)
         return Response(ConversationSerializer(conversation, context={"request": request}).data, status=status.HTTP_201_CREATED)
@@ -104,7 +124,11 @@ class ConversationViewSet(viewsets.ModelViewSet):
         its client_message_id-based offline-safe retry handling — the
         API layer never duplicates that logic."""
         from .services import send_message_now
+        from engagement.services import is_blocked_either_way
         conversation = self.get_object()
+        for other in conversation.participants.exclude(id=request.user.id):
+            if is_blocked_either_way(request.user, other):
+                return Response({"detail": BLOCKED_MESSAGE_DETAIL}, status=status.HTTP_403_FORBIDDEN)
         text = request.data.get("text", "")
         client_message_id = request.data.get("client_message_id")
         message = send_message_now(conversation=conversation, sender=request.user, text=text, client_message_id=client_message_id)
@@ -195,6 +219,37 @@ class MyPresenceSettingsView(APIView):
         })
 
 
+class PresenceThrottle(UserRateThrottle):
+    scope = "presence"
+
+
+class PresenceHeartbeatView(APIView):
+    """Called by the signed-in web/mobile client every ~30s. This is the
+    only thing that moves a user to ONLINE; last_seen_at (auto_now) is
+    what makes 'last seen X ago' real."""
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [PresenceThrottle]
+
+    @extend_schema(request=None, responses={204: None})
+    def post(self, request):
+        from .services import record_heartbeat
+        record_heartbeat(request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PresenceOfflineView(APIView):
+    """Explicit clean-exit signal (tab closed / logout); a crash still
+    falls back to the heartbeat timeout."""
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [PresenceThrottle]
+
+    @extend_schema(request=None, responses={204: None})
+    def post(self, request):
+        from .services import set_explicitly_offline
+        set_explicitly_offline(request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class MyFavoriteListingsView(APIView):
     """A real gap this closes: the Favorite model existed and was even
     USED internally (feeding get_recommended_feed's interest-tag
@@ -254,8 +309,9 @@ class PostViewSet(viewsets.ModelViewSet):
             # back to real-estate-priority + recency only (no
             # interest-tag boost), never a broken/empty feed.
             if self.request.user.is_authenticated:
+                from engagement.services import exclude_blocked_users
                 feed = get_recommended_feed(self.request.user, limit=50)
-                return Post.objects.filter(id__in=[p.id for p in feed])
+                return exclude_blocked_users(Post.objects.filter(id__in=[p.id for p in feed]), self.request.user)
             return Post.objects.filter(status=ContentStatus.PUBLISHED).order_by("-created_at")[:50]
         return Post.objects.all()
 
@@ -407,6 +463,27 @@ class RateUserView(APIView):
         return Response(RatingSerializer(rating).data, status=status.HTTP_201_CREATED)
 
 
+class MyRatingsView(APIView):
+    """The real gap this closes: average_rating/rating_count were
+    aggregated and shown on public agent/agency profiles, but a plain
+    user had no page of their own listing every rating they'd received
+    or given — the numbers existed, the underlying list never did."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from django.db.models import Avg, Count
+        received = Rating.objects.filter(subject_user=request.user).select_related("author").order_by("-created_at")
+        given = Rating.objects.filter(author=request.user).order_by("-created_at")
+        aggregate = received.aggregate(average=Avg("score"), count=Count("id"))
+        return Response({
+            "average_rating": aggregate["average"],
+            "rating_count": aggregate["count"],
+            "ratings_received": RatingSerializer(received, many=True).data,
+            "ratings_given": RatingSerializer(given, many=True).data,
+        })
+
+
 class ReviewViewSet(viewsets.ModelViewSet):
     """The real gap this closes: Review had a real model — TestimonialsView
     already reads FROM it — but zero way for a real user to actually
@@ -436,4 +513,67 @@ class ReviewViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
         except (ReviewRequiresCompletedBookingError, AlreadyReviewedError) as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        from engagement.services import evaluate_badges_for_user
+        evaluate_badges_for_user(request.user)
         return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
+
+
+class FollowView(APIView):
+    """The real gap this closes: follow_user/unfollow_user/toggle_follow/
+    is_mutual_follow were fully built and unit-tested (UC13 in docs/01's
+    use-case diagram), but nothing ever exposed any of it over HTTP — no
+    real 'Follow' button was possible anywhere in the app."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _status_payload(self, request, target_user):
+        return {
+            "is_following": is_following(follower=request.user, followee=target_user),
+            "is_mutual": is_mutual_follow(user_a=request.user, user_b=target_user),
+            **get_follow_counts(target_user),
+        }
+
+    @extend_schema(responses={200: dict, 404: dict})
+    def get(self, request, user_id):
+        from identity.models import User
+        target_user = User.objects.filter(id=user_id).first()
+        if target_user is None:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self._status_payload(request, target_user))
+
+    @extend_schema(request=None, responses={200: dict, 400: dict, 404: dict})
+    def post(self, request, user_id):
+        from identity.models import User
+        target_user = User.objects.filter(id=user_id).first()
+        if target_user is None:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            toggle_follow(follower=request.user, followee=target_user)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._status_payload(request, target_user))
+
+
+class MyReferralsView(APIView):
+    """Returns the list of referrals made by the authenticated user along with
+    summary metrics (total referred, qualified, rewarded, and total rewards earned)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .models import Referral, ReferralStatus
+        from .serializers import ReferralItemSerializer
+        from django.db.models import Sum
+
+        referrals = Referral.objects.filter(referrer=request.user).select_related("referred_user").order_by("-created_at")
+        total_count = referrals.count()
+        qualified_count = referrals.filter(status__in=[ReferralStatus.QUALIFIED, ReferralStatus.REWARDED]).count()
+        rewarded_count = referrals.filter(status=ReferralStatus.REWARDED).count()
+        total_reward = referrals.aggregate(total=Sum("reward_earned_xaf"))["total"] or 0
+
+        return Response({
+            "total_count": total_count,
+            "qualified_count": qualified_count,
+            "rewarded_count": rewarded_count,
+            "total_reward_xaf": total_reward,
+            "results": ReferralItemSerializer(referrals, many=True).data,
+        })

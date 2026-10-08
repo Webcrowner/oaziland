@@ -1,0 +1,26 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Django Backend",
+			"type": "shell",
+			"command": "cd backend ; py -3.13 manage.py runserver 8000",
+			"isBackground": true,
+			"group": "none"
+		},
+		{
+			"label": "Next.js Frontend",
+			"type": "shell",
+			"command": "cd web ; npm run dev",
+			"isBackground": true,
+			"group": "none"
+		},
+		{
+			"label": "Test Echo",
+			"type": "shell",
+			"command": "echo hello-world",
+			"isBackground": false,
+			"group": "none"
+		}
+	]
+}

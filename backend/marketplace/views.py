@@ -14,15 +14,16 @@ from drf_spectacular.utils import extend_schema
 from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile
 from .serializers import (
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer,
-    RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer,
+    RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer,
     ListingConditionSerializer, AttachConditionSerializer,
     DriverProfileSerializer, DriverRegistrationSerializer, VehicleSerializer,
 )
 from .services import (
     search_marketplace_listings, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition,
     register_as_driver, register_vehicle, NotARegisteredDriverError, DriverNotVerifiedError, VehicleCategoryMismatchError,
+    post_ride_message, NotPartyToRideError,
 )
-from oaziland.permissions import IsAdminRole
+from oaziland.permissions import IsAdminRole, IsKycVerified
 
 
 def _get_or_create_owner_profile(user):
@@ -40,10 +41,17 @@ def _get_or_create_owner_profile(user):
 class BaseMarketplaceViewSet(viewsets.ModelViewSet):
     """Shared behavior for all four category ViewSets below — list/
     retrieve public (browsing shouldn't require an account, matching
-    every other browse surface on the platform); create requires
-    login. Reuses search_marketplace_listings() for filtering rather
-    than reimplementing it."""
+    every other browse surface on the platform); create requires real
+    identity verification (a marketplace listing is a real financial
+    commitment, same as any property listing). Reuses
+    search_marketplace_listings() for filtering rather than
+    reimplementing it."""
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [IsKycVerified()]
+        return super().get_permissions()
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -58,7 +66,12 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         owner_profile = _get_or_create_owner_profile(self.request.user)
-        serializer.save(owner=owner_profile, lister_user=self.request.user, lister_role="OWNER")
+        agent_profile = getattr(self.request.user, "agent_profile", None)
+        if agent_profile is None:
+            lister_role = "OWNER"
+        else:
+            lister_role = "AGENCY" if agent_profile.agency_id else "AGENT"
+        serializer.save(owner=owner_profile, lister_user=self.request.user, lister_role=lister_role)
 
     @action(detail=True, methods=["post"], url_path="add-media")
     def add_media(self, request, pk=None):
@@ -124,6 +137,14 @@ class RideViewSet(viewsets.ModelViewSet):
     serializer_class = RideBookingSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "post", "head", "options"]
+
+    def get_permissions(self):
+        # Requesting a ride is a real checkout — a fare gets charged
+        # against the rider's own payment method — so it needs the
+        # same identity verification gate as any other checkout flow.
+        if self.action == "create":
+            return [IsKycVerified()]
+        return super().get_permissions()
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -241,6 +262,25 @@ class RideViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(RideBookingSerializer(ride).data)
+
+    @extend_schema(methods=["GET"], responses={200: RideMessageSerializer(many=True), 403: dict, 404: dict})
+    @extend_schema(methods=["POST"], request=RideMessageSerializer, responses={201: RideMessageSerializer, 403: dict, 404: dict})
+    @action(detail=True, methods=["get", "post"])
+    def messages(self, request, pk=None):
+        """In-trip private chat, visible to rider and driver only."""
+        ride = self.get_object()
+        if request.user.id not in (ride.rider_id, ride.driver_id):
+            return Response({"detail": "Only the rider or assigned driver can view or send messages for this ride."}, status=status.HTTP_403_FORBIDDEN)
+        if request.method == "GET":
+            thread = ride.messages.select_related("sender")
+            return Response(RideMessageSerializer(thread, many=True).data)
+        input_serializer = RideMessageSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        try:
+            message = post_ride_message(ride=ride, sender=request.user, text=input_serializer.validated_data["text"])
+        except NotPartyToRideError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        return Response(RideMessageSerializer(message).data, status=status.HTTP_201_CREATED)
 
 
 class ListingConditionView(APIView):

@@ -45,13 +45,28 @@ def estimate_affordable_rent_range(*, monthly_income_xaf: Decimal):
 def generate_earnings_report(*, user, start_date, end_date):
     """Pulls real Commission and PaymentEscrow records for a landlord or
     agent over a date range — the actual data an exportable PDF/CSV
-    report would be built from."""
+    report would be built from. WHY this filters by `user` at all (a
+    real bug fixed here, not just a wiring gap): the original version
+    accepted `user` but never actually used it, meaning every caller
+    would have seen EVERY user's commissions/payouts platform-wide.
+    Scopes commissions the same way agency.services already does
+    (Commission on a Listing the user is the listed_by agent for), and
+    payouts via the same resolve_target_owner() every payee wallet
+    credit already uses."""
+    from property.models import Listing
     from transactions.models import Commission, PaymentEscrow
+    from transactions.services import resolve_target_owner
 
-    commissions = Commission.objects.filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
-    payouts = PaymentEscrow.objects.filter(
-        status="RELEASED", released_at__date__gte=start_date, released_at__date__lte=end_date,
+    agent_listing_ids = list(Listing.objects.filter(listed_by=user).values_list("id", flat=True))
+    commissions = Commission.objects.filter(
+        booking__target_content_type="property.Listing", booking__target_id__in=agent_listing_ids,
+        created_at__date__gte=start_date, created_at__date__lte=end_date,
     )
+    released_payouts = PaymentEscrow.objects.filter(
+        status="RELEASED", released_at__date__gte=start_date, released_at__date__lte=end_date,
+    ).select_related("booking")
+    payouts = [p for p in released_payouts if getattr(resolve_target_owner(p.booking), "id", None) == user.id]
+
     total_commission = sum((c.agent_share_xaf for c in commissions), Decimal("0"))
     total_payouts = sum((p.payee_amount_xaf for p in payouts), Decimal("0"))
 
@@ -59,7 +74,7 @@ def generate_earnings_report(*, user, start_date, end_date):
         "period": {"start": start_date, "end": end_date},
         "total_commission_earned_xaf": total_commission,
         "total_payouts_received_xaf": total_payouts,
-        "transaction_count": commissions.count() + payouts.count(),
+        "transaction_count": commissions.count() + len(payouts),
     }
 
 

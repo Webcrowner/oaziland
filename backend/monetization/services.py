@@ -139,6 +139,34 @@ def approve_withdrawal(*, withdrawal_request: WithdrawalRequest):
     return fee
 
 
+def process_withdrawal_payout(*, withdrawal_request: WithdrawalRequest, phone_number: str = "", payment_gateway=None):
+    """Transfers funds to the payee's Mobile Money (MTN MoMo / Orange Money)
+    account using the payment gateway's disbursement rails, and marks the
+    withdrawal PAID_OUT."""
+    from payments.gateways import get_active_gateway
+    from django.utils import timezone
+
+    if payment_gateway is None:
+        payment_gateway = get_active_gateway()
+
+    if withdrawal_request.status == WithdrawalStatus.PENDING:
+        approve_withdrawal(withdrawal_request=withdrawal_request)
+
+    dest_phone = phone_number or getattr(withdrawal_request.wallet.owner, "phone", "")
+    disburse_result = payment_gateway.initiate_disbursement(
+        phone_number=dest_phone,
+        amount_xaf=withdrawal_request.amount_xaf,
+        idempotency_key=str(withdrawal_request.id),
+    )
+    if not disburse_result.success:
+        raise ValueError("Disbursement failed via payment gateway.")
+
+    withdrawal_request.status = WithdrawalStatus.PAID_OUT
+    withdrawal_request.resolved_at = timezone.now()
+    withdrawal_request.save(update_fields=["status", "resolved_at"])
+    return withdrawal_request
+
+
 def get_boost_price(*, placement: str, duration_unit: str, duration_quantity: int) -> Decimal:
     """Looks up the per-unit price for a placement/duration combination
     and multiplies by how many units were purchased — e.g. DAILY at

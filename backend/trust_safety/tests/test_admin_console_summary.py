@@ -45,3 +45,24 @@ def test_admin_console_summary_aggregates_all_queues(quarter):
     assert summary["open_content_reports"] == 1
     assert summary["pending_verification_requests"] == 1
     assert summary["open_dispute_cases"] == 1
+
+
+@pytest.mark.django_db
+def test_flagged_users_count_reflects_real_suspended_and_warned_users(quarter):
+    """Real gap this closes: the admin console's 'users needing
+    attention' badge was previously just a client-side count over
+    whichever single page of users happened to be loaded — wrong the
+    moment there were more users than fit on one page. This is a real
+    DB aggregate instead."""
+    from identity.models import AccountStatus
+    from trust_safety.services import issue_strike_and_apply_consequences
+
+    User.objects.create(username="flagged_summary_active", phone="+237699993008")
+    suspended = User.objects.create(username="flagged_summary_suspended", phone="+237699993009", account_status=AccountStatus.SUSPENDED)
+    warned = User.objects.create(username="flagged_summary_warned", phone="+237699993010")
+    admin = User.objects.create(username="flagged_summary_admin", phone="+237699993011")
+    issue_strike_and_apply_consequences(subject=warned, reason="TEST", issued_by=admin)
+
+    summary = get_admin_console_summary()
+    assert summary["flagged_users_count"] == 2
+    assert suspended.account_status == AccountStatus.SUSPENDED

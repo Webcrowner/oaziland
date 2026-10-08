@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { getAgencyPublicProfile } from "@/lib/api";
+import AgentShareButton from "@/components/AgentShareButton";
 import type { Metadata } from "next";
 
 /**
@@ -46,6 +47,9 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
           <div>
             <h1 className="text-2xl font-bold text-[var(--navy)]">{profile.agency_name}</h1>
             <p className="text-sm text-gray-500">{t("registrationLabel")}: {profile.registration_number}</p>
+            <div className="mt-2">
+              <AgentShareButton customUrl={`/agencies/${id}`} name={profile.agency_name} />
+            </div>
           </div>
         </div>
 

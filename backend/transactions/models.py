@@ -101,7 +101,10 @@ class PaymentProvider(models.TextChoices):
 
 class PaymentEscrow(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name="escrow")
+    # PROTECT, not CASCADE — an escrow record is the platform's real
+    # financial audit trail; a Booking should never be deletable in a
+    # way that silently destroys it.
+    booking = models.OneToOneField(Booking, on_delete=models.PROTECT, related_name="escrow")
     gross_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
     platform_fee_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     payee_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
@@ -139,7 +142,9 @@ class Commission(models.Model):
     """Only generated when an Agent or Agency is involved — a direct
     landlord deal produces no Commission row unless separately arranged."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name="commission")
+    # PROTECT for the same reason as PaymentEscrow.booking above — a
+    # paid commission record must never silently vanish with its Booking.
+    booking = models.OneToOneField(Booking, on_delete=models.PROTECT, related_name="commission")
     total_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
     agency_share_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     agent_share_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
@@ -166,7 +171,9 @@ class Contract(models.Model):
     sale always does) — keeping it a separate, optional table means
     Booking doesn't carry contract fields that are usually empty."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name="contract")
+    # PROTECT — a signed contract is a legal record; it must not be
+    # silently destroyed by deleting the Booking it's attached to.
+    booking = models.OneToOneField(Booking, on_delete=models.PROTECT, related_name="contract")
     contract_type = models.CharField(max_length=20, choices=ContractType.choices)
     digital_signature_hash = models.CharField(max_length=128, blank=True)
     signed_at = models.DateTimeField(null=True, blank=True)

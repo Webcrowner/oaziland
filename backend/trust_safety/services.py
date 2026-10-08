@@ -137,14 +137,61 @@ def get_admin_console_summary():
     from property_management.models import DisputeCase, DisputeStatus
     from engagement.models import VerificationRequest, VerificationRequestStatus
     from oaziland.analytics import compute_period_over_period
+    from django.db.models import Sum, Q
+    from property.models import Listing, ListingStatus
+    from hotels.models import Hotel
+    from events.models import Venue
+    from marketplace.models import DriverProfile
+    from student_hostels.models import StudentHostel, WelfareAlert
+    from identity.models import User, AgentProfile, LandlordProfile, TechnicianProfile, AccountStatus
+    from transactions.models import Booking, PaymentEscrow, EscrowStatus
 
     reports_trend = compute_period_over_period(queryset=ContentReport.objects.all(), date_field="created_at")
+
+    escrow_total = PaymentEscrow.objects.aggregate(t=Sum("gross_amount_xaf"))["t"] or 0
+    escrow_held = PaymentEscrow.objects.filter(status=EscrowStatus.HELD).aggregate(t=Sum("gross_amount_xaf"))["t"] or 0
+    escrow_released = PaymentEscrow.objects.filter(status=EscrowStatus.RELEASED).aggregate(t=Sum("gross_amount_xaf"))["t"] or 0
+    platform_revenue = PaymentEscrow.objects.filter(status=EscrowStatus.RELEASED).aggregate(t=Sum("platform_fee_xaf"))["t"] or 0
+    disputed_volume = DisputeCase.objects.filter(
+        status__in=[DisputeStatus.OPEN, DisputeStatus.ADMIN_RESPONDED]
+    ).aggregate(t=Sum("escrow__gross_amount_xaf"))["t"] or 0
+
+    # Real count of users needing admin attention (suspended/banned, or
+    # carrying at least one strike) — computed once here from the
+    # actual DB, not by the admin console counting whatever page of
+    # users happens to be loaded client-side.
+    flagged_users_count = User.objects.filter(
+        Q(account_status__in=[AccountStatus.SUSPENDED, AccountStatus.BANNED]) | Q(warnings__isnull=False)
+    ).distinct().count()
 
     return {
         "pending_verification_requests": VerificationRequest.objects.filter(status=VerificationRequestStatus.PENDING).count(),
         "open_content_reports": ContentReport.objects.filter(status=ReportStatus.OPEN).count(),
         "open_dispute_cases": DisputeCase.objects.filter(status__in=[DisputeStatus.OPEN, DisputeStatus.ADMIN_RESPONDED]).count(),
+        "pending_property_listings": Listing.objects.filter(status=ListingStatus.PENDING_REVIEW).count(),
+        "pending_hotels": Hotel.objects.filter(verified=False).count(),
+        "pending_venues": Venue.objects.filter(verified=False).count(),
+        "pending_drivers": DriverProfile.objects.filter(is_verified=False).count(),
+        "open_welfare_alerts": WelfareAlert.objects.filter(resolved_at__isnull=True).count(),
+        "flagged_users_count": flagged_users_count,
         "reports_trend": reports_trend,
+        "platform_analytics": {
+            "total_users": User.objects.count(),
+            "total_agents": AgentProfile.objects.count(),
+            "total_landlords": LandlordProfile.objects.count(),
+            "total_technicians": TechnicianProfile.objects.count(),
+            "total_drivers": DriverProfile.objects.count(),
+            "active_listings_count": Listing.objects.filter(status=ListingStatus.PUBLISHED).count(),
+            "total_hotels_count": Hotel.objects.count(),
+            "total_venues_count": Venue.objects.count(),
+            "total_hostels_count": StudentHostel.objects.count(),
+            "total_bookings_count": Booking.objects.count(),
+            "escrow_volume_xaf": str(escrow_total),
+            "escrow_held_xaf": str(escrow_held),
+            "escrow_released_xaf": str(escrow_released),
+            "platform_revenue_xaf": str(platform_revenue),
+            "total_disputed_amount_xaf": str(disputed_volume),
+        },
     }
 
 

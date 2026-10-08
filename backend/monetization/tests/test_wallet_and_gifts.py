@@ -31,7 +31,8 @@ def recipient(db):
 
 @pytest.fixture
 def gift_fee_policy(db):
-    return PlatformFeePolicy.objects.create(category=TransactionCategory.GIFT_CONVERSION, fee_percent=Decimal("5.0"))
+    policy, _ = PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.GIFT_CONVERSION, defaults={"fee_percent": Decimal("5.0")})
+    return policy
 
 
 @pytest.mark.django_db
@@ -135,7 +136,7 @@ def test_cannot_fund_ad_beyond_wallet_balance(recipient):
 
 @pytest.mark.django_db
 def test_withdrawal_request_reserves_balance_and_requires_approval(recipient, gift_fee_policy):
-    PlatformFeePolicy.objects.create(category=TransactionCategory.WALLET_WITHDRAWAL, fee_percent=Decimal("2.0"))
+    PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.WALLET_WITHDRAWAL, defaults={"fee_percent": Decimal("2.0")})
     wallet = get_or_create_wallet(recipient)
     wallet.balance_xaf = Decimal("20000")
     wallet.save()

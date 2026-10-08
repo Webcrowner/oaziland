@@ -256,6 +256,7 @@ class HouseStyle(models.TextChoices):
 class House(PropertyAsset):
     bedrooms = models.PositiveSmallIntegerField(default=0)
     bathrooms = models.PositiveSmallIntegerField(default=0)
+    living_rooms = models.PositiveSmallIntegerField(default=0)  # parlours / salons
     pets_allowed = models.BooleanField(default=False)
     has_garage = models.BooleanField(default=False)
     house_style = models.CharField(max_length=20, choices=HouseStyle.choices, default=HouseStyle.STANDARD)

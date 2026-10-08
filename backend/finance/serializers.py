@@ -21,3 +21,13 @@ class ValuationRequestSerializer(serializers.Serializer):
 
 class AffordabilityRequestSerializer(serializers.Serializer):
     monthly_income_xaf = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+
+
+class EarningsReportRequestSerializer(serializers.Serializer):
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+
+
+class CurrencyConversionRequestSerializer(serializers.Serializer):
+    amount_xaf = serializers.DecimalField(max_digits=14, decimal_places=2)
+    currency_code = serializers.CharField(max_length=3)

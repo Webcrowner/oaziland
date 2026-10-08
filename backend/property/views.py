@@ -5,23 +5,35 @@ functions (Prompts 8/12) rather than reimplementing filtering logic at
 the API layer — the API is a thin wrapper around already-tested
 business logic, not a second copy of it.
 """
-from rest_framework import viewsets, permissions, status
+from decimal import Decimal, InvalidOperation
+
+from django.core.exceptions import ValidationError
+
+from rest_framework import viewsets, permissions, status, views, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from drf_spectacular.utils import extend_schema
 
 from .models import Listing, ListingStatus, ListingType, House, Shop
-from .serializers import ListingSerializer, HouseCreateSerializer, ShopCreateSerializer
-from oaziland.permissions import IsAdminRole, IsOwnerOrReadOnly, IsVerifiedAndMfaEnabled
+from .serializers import ListingSerializer, ListingEditSerializer, HouseCreateSerializer, ShopCreateSerializer
+from .services import get_landlord_portfolio_summary
+from oaziland.permissions import IsAdminRole, IsOwnerOrReadOnly, IsKycVerified
 
 
 class ListingViewSet(viewsets.ModelViewSet):
     """list/retrieve are public (AllowAny) — browsing listings should
     never require an account, matching how the actual platform works.
-    create requires MFA+KYC (per the platform-wide enforcement rule);
-    only the listing's own agent/landlord can update/delete it."""
+    create is the platform's real 'publish' moment — this is where KYC
+    is actually enforced (IsKycVerified) — MFA is no longer required
+    anywhere on the platform, just an optional feature a user can turn
+    on for themselves from account/dashboard settings; only the
+    listing's own agent/landlord can update/delete it."""
     serializer_class = ListingSerializer
-    queryset = Listing.objects.filter(status=ListingStatus.PUBLISHED).select_related("property_asset", "property_asset__quarter").order_by("-published_at")
+    # prefetch_related("photos") — the serializer's get_photos() calls
+    # listing.photos.all() for every row; without this it's a real N+1
+    # (one extra query per listing in a paginated list of 20).
+    queryset = Listing.objects.filter(status=ListingStatus.PUBLISHED).select_related("property_asset", "property_asset__quarter", "property_asset__house").prefetch_related("photos").order_by("-published_at")
     throttle_scope = "search"
     throttle_classes = [ScopedRateThrottle]
 
@@ -29,8 +41,8 @@ class ListingViewSet(viewsets.ModelViewSet):
         if self.action in ("list", "retrieve"):
             return [permissions.AllowAny()]
         if self.action == "create":
-            return [IsVerifiedAndMfaEnabled()]
-        if self.action == "approve":
+            return [IsKycVerified()]
+        if self.action in ["approve", "reject", "pending"]:
             return [IsAdminRole()]
         if self.action == "contact":
             # WHY just IsAuthenticated, not IsOwnerOrReadOnly: ANY
@@ -53,28 +65,43 @@ class ListingViewSet(viewsets.ModelViewSet):
         approval permanently impossible, which is exactly the bug this
         fix corrects."""
         if self.action != "list":
-            return Listing.objects.select_related("property_asset", "property_asset__quarter")
+            return Listing.objects.select_related("property_asset", "property_asset__quarter", "property_asset__house")
 
         quarter_id = self.request.query_params.get("quarter")
         property_type = self.request.query_params.get("property_type")
         finish_level = self.request.query_params.get("finish_level")
         listing_type = self.request.query_params.get("listing_type")
+        ordering = self.request.query_params.get("ordering")  # "price_asc" | "price_desc" | "newest"
+        max_price = None
+        try:
+            raw_max_price = self.request.query_params.get("max_price")
+            max_price = Decimal(raw_max_price) if raw_max_price else None
+        except InvalidOperation:
+            max_price = None  # a malformed budget is ignored rather than failing the whole search
 
         if quarter_id:
             from geo.models import Quarter
             from .services import search_listings_by_quarter
             try:
                 quarter = Quarter.objects.get(id=quarter_id)
-            except Quarter.DoesNotExist:
+            except (Quarter.DoesNotExist, ValidationError, ValueError):
                 return Listing.objects.none()
             results = search_listings_by_quarter(
                 quarter, property_type=property_type, finish_level=finish_level, listing_type=listing_type,
             )
             result_ids = [listing.id for listing in results]
-            # Preserve the search's own ranking (boosted listings first)
+            queryset = Listing.objects.filter(id__in=result_ids).select_related("property_asset", "property_asset__quarter", "property_asset__house")
+            if max_price is not None:
+                queryset = queryset.filter(price_xaf__lte=max_price)
+            if ordering == "price_asc":
+                return queryset.order_by("price_xaf")
+            if ordering == "price_desc":
+                return queryset.order_by("-price_xaf")
+            if ordering == "newest":
+                return queryset.order_by("-published_at")
+            # Default: preserve the search's own ranking (boosted listings first)
             # rather than letting the queryset's default ordering win.
             preserved_order = {pk: i for i, pk in enumerate(result_ids)}
-            queryset = Listing.objects.filter(id__in=result_ids).select_related("property_asset", "property_asset__quarter")
             return sorted(queryset, key=lambda listing: preserved_order[listing.id])
 
         # WHY this branch exists now, and didn't fully work before: with
@@ -91,6 +118,12 @@ class ListingViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(property_asset__finish_level=finish_level)
         if listing_type:
             queryset = queryset.filter(listing_type=listing_type)
+        if max_price is not None:
+            queryset = queryset.filter(price_xaf__lte=max_price)
+        if ordering == "price_asc":
+            queryset = queryset.order_by("price_xaf")
+        elif ordering == "price_desc":
+            queryset = queryset.order_by("-price_xaf")
         return queryset
 
     def perform_create(self, serializer):
@@ -128,6 +161,48 @@ class ListingViewSet(viewsets.ModelViewSet):
         return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        """Admin-only rejection of a pending listing."""
+        listing = self.get_object()
+        listing.status = ListingStatus.REJECTED
+        listing.save(update_fields=["status"])
+        return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="pending")
+    def pending(self, request):
+        """Admin queue for all listings awaiting moderation review."""
+        queryset = Listing.objects.filter(status=ListingStatus.PENDING_REVIEW).select_related(
+            "property_asset", "property_asset__quarter"
+        ).order_by("-created_at")
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = ListingSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = ListingSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        # Plain PUT/PATCH share the edit path so a lister can never re-point a listing at someone else's property.
+        return self.edit_details(request, pk=kwargs.get("pk"))
+
+    @extend_schema(request=ListingEditSerializer, responses={200: ListingSerializer, 400: dict})
+    @action(detail=True, methods=["patch"], url_path="edit-details")
+    def edit_details(self, request, pk=None):
+        """The lister (landlord or agent) edits price, type and the property's own details. Only the
+        lister passes IsOwnerOrReadOnly; a changed price never sends a live listing back to review."""
+        from .services import update_listing_details, ListingEditError, InvalidAmenityError
+
+        listing = self.get_object()
+        serializer = ListingEditSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            update_listing_details(listing, serializer.validated_data)
+        except (ListingEditError, InvalidAmenityError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        listing.refresh_from_db()
+        return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
     def renew(self, request, pk=None):
         """Self-service renewal — only the listing's own agent/landlord
         can renew it (IsOwnerOrReadOnly, applied via get_permissions
@@ -135,6 +210,40 @@ class ListingViewSet(viewsets.ModelViewSet):
         listing = self.get_object()
         listing.renew()
         return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+    # What the lister may do without admin review: a listing that was already approved can be
+    # paused, marked rented/sold, or reopened. Never into DRAFT/PENDING/REJECTED/EXPIRED.
+    OWNER_STATUS_TRANSITIONS = {
+        ListingStatus.PUBLISHED: {ListingStatus.UNDER_OFFER, ListingStatus.CLOSED},
+        ListingStatus.UNDER_OFFER: {ListingStatus.PUBLISHED, ListingStatus.CLOSED},
+        ListingStatus.CLOSED: {ListingStatus.PUBLISHED},
+    }
+
+    @extend_schema(request=dict, responses={200: ListingSerializer, 400: dict})
+    @action(detail=True, methods=["post"], url_path="set-status")
+    def set_status(self, request, pk=None):
+        listing = self.get_object()
+        new_status = request.data.get("status")
+        allowed = self.OWNER_STATUS_TRANSITIONS.get(listing.status, set())
+        if new_status not in allowed:
+            return Response(
+                {"detail": f"A {listing.get_status_display().lower()} listing can't be changed to '{new_status}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if new_status == ListingStatus.PUBLISHED and listing.published_at is None:
+            return Response({"detail": "This listing was never approved, so it can't be reopened."}, status=status.HTTP_400_BAD_REQUEST)
+        listing.status = new_status
+        listing.save(update_fields=["status"])
+        return Response(ListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        listing = self.get_object()
+        if listing.status in (ListingStatus.PUBLISHED, ListingStatus.UNDER_OFFER):
+            return Response(
+                {"detail": "A live listing can't be deleted — mark it as closed first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"])
     def contact(self, request, pk=None):
@@ -230,22 +339,37 @@ class PropertyAmenitiesMixin:
         set_nearby_facilities(property_asset, request.data.get("point_of_interest_ids", []))
         return Response({"nearby_facilities": list(property_asset.nearby_facilities.values_list("id", flat=True))})
 
+    @action(detail=True, methods=["post"], url_path="set-location")
+    def set_location_action(self, request, pk=None):
+        property_asset = self.get_object()
+        if property_asset.owner_id != request.user.id and not hasattr(request.user, "admin_profile"):
+            return Response({"detail": "Only the property owner can set its location."}, status=status.HTTP_403_FORBIDDEN)
+        lat = request.data.get("latitude")
+        lng = request.data.get("longitude")
+        if lat is None or lng is None:
+            return Response({"detail": "latitude and longitude are required."}, status=status.HTTP_400_BAD_REQUEST)
+        property_asset.latitude = lat
+        property_asset.longitude = lng
+        property_asset.save(update_fields=["latitude", "longitude"])
+        return Response({"id": str(property_asset.id), "latitude": str(property_asset.latitude), "longitude": str(property_asset.longitude)})
+
 
 class HouseViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
     """Real property-creation, closing a genuine gap: Listing.create()
     could only ATTACH to an already-existing PropertyAsset — nothing
     ever let a user create the House itself. list/retrieve are public
-    (browsing someone's property details isn't sensitive); create
-    requires the same MFA+KYC as listing creation itself, since a
-    property record un-attached to a listing yet is still real,
-    identity-linked data."""
+    (browsing someone's property details isn't sensitive); create only
+    requires being signed in — KYC is enforced at the point the
+    property actually goes public (ListingViewSet.create, the
+    'publish' step), not at this earlier, lower-stakes asset-creation
+    step, per the platform's KYC-at-publish policy."""
     serializer_class = HouseCreateSerializer
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [permissions.AllowAny()]
         if self.action == "create":
-            return [IsVerifiedAndMfaEnabled()]
+            return [permissions.IsAuthenticated()]
         return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
 
     def get_queryset(self):
@@ -258,13 +382,14 @@ class HouseViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
 
 
 class ShopViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
+    """Same deferred-KYC policy as HouseViewSet — see its docstring."""
     serializer_class = ShopCreateSerializer
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [permissions.AllowAny()]
         if self.action == "create":
-            return [IsVerifiedAndMfaEnabled()]
+            return [permissions.IsAuthenticated()]
         return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
 
     def get_queryset(self):
@@ -274,3 +399,36 @@ class ShopViewSet(PropertyAmenitiesMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user, type="SHOP")
+
+
+class MyListingsView(generics.ListAPIView):
+    """Everything the caller has listed, in every status (drafts, pending review, rejected,
+    expired...) — the public listings endpoint only ever shows PUBLISHED ones."""
+    serializer_class = ListingSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Listing.objects.none()
+        queryset = (
+            Listing.objects.filter(listed_by=self.request.user)
+            .select_related("property_asset", "property_asset__quarter", "property_asset__house")
+            .prefetch_related("photos")
+            .order_by("-created_at")
+        )
+        status_filter = self.request.query_params.get("status")
+        if status_filter in ListingStatus.values:
+            queryset = queryset.filter(status=status_filter)
+        return queryset
+
+
+class MyLandlordPortfolioView(views.APIView):
+    """A real gap this closes: get_landlord_portfolio_summary() already
+    aggregated across every property type a landlord owns (house, land,
+    shop, warehouse...) with a real bookings trend, but nothing ever
+    exposed it — same class of gap as the technician/agent dashboards."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        return Response(get_landlord_portfolio_summary(request.user))

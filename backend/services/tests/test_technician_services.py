@@ -50,7 +50,7 @@ def quarter(db):
 @pytest.fixture
 def plumber(db, quarter):
     user = User.objects.create(username="test_plumber", phone="+237699100001")
-    profile = TechnicianProfile.objects.create(user=user, coverage_quarter=quarter)
+    profile = TechnicianProfile.objects.create(user=user, coverage_quarter=quarter, is_verified=True)
     set_technician_specialties(profile, [ServiceCategory.PLUMBING])
     TechnicianLocationPing.objects.create(technician=user, latitude=Decimal("3.8800"), longitude=Decimal("11.5210"))
     return user
@@ -93,7 +93,7 @@ def test_find_available_technicians_matches_specialty_and_proximity(plumber):
 @pytest.mark.django_db
 def test_full_plumber_service_request_paid_through_oaziland_escrow(plumber, quarter):
     """Prompt 10's literal acceptance criteria."""
-    PlatformFeePolicy.objects.create(category=TransactionCategory.SERVICE_PAYMENT, fee_percent=Decimal("4.0"))
+    PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.SERVICE_PAYMENT, defaults={"fee_percent": Decimal("4.0")})
     homeowner = User.objects.create(username="service_homeowner", phone="+237699100003")
 
     request = create_service_request(
@@ -122,7 +122,7 @@ def test_full_plumber_service_request_paid_through_oaziland_escrow(plumber, quar
     assert request.status == ServiceRequestStatus.COMPLETED
     assert request.booking == booking
     assert booking.booking_type == "SERVICE_REQUEST"
-    assert escrow.status == "HELD"
+    assert escrow.status == "RELEASED"  # the technician actually gets paid now, not held forever
     # The SERVICE_PAYMENT fee rate (4%), not the PROPERTY_BOOKING rate,
     # must have been applied — proves the fee-category bug fix works.
     assert escrow.platform_fee_xaf == Decimal("600.00")  # 4% of 15,000

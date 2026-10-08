@@ -3,9 +3,12 @@ import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { routing } from "@/i18n/routing";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
-import Header from "@/components/Header";
+import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import SiteChrome from "@/components/SiteChrome";
 import OnboardingModal from "@/components/OnboardingModal";
+import SupportChatWidget from "@/components/SupportChatWidget";
+import PresenceHeartbeat from "@/components/PresenceHeartbeat";
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));
@@ -32,11 +35,17 @@ export default async function LocaleLayout({
           on every page: it's the only way to GUARANTEE every page has
           consistent navigation — a page file simply can't forget to
           include it if it's not that page's responsibility at all. */}
-      <Header />
+      <SiteChrome>
+        <Navbar />
+      </SiteChrome>
       <div className="flex-1">{children}</div>
-      <Footer />
+      <SiteChrome>
+        <Footer />
+      </SiteChrome>
       <ServiceWorkerRegister />
       <OnboardingModal />
+      <SupportChatWidget />
+      <PresenceHeartbeat />
     </NextIntlClientProvider>
   );
 }

@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { listServiceCategories } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
+import RequestServiceButton from "@/components/RequestServiceButton";
 import type { Metadata } from "next";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -37,6 +38,7 @@ export default async function ServicesPage() {
                     <p className="text-sm font-semibold text-[var(--gold)]">
                       {offering.price_hint_xaf ? t("priceFrom", { price: Number(offering.price_hint_xaf).toLocaleString() }) : t("priceOnRequest")}
                     </p>
+                    <RequestServiceButton offeringId={Number(offering.id)} />
                   </div>
                 ))}
               </div>

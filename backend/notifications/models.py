@@ -51,3 +51,35 @@ class Notification(models.Model):
         from django.utils import timezone
         self.read_at = timezone.now()
         self.save(update_fields=["read_at"])
+
+
+class GreetingSettings(models.Model):
+    """Admin-configurable settings for automatic greetings (birthday, happy new month, etc.).
+    Maintained as a singleton row where admins can toggle delivery on/off and edit the
+    custom template messages (supports {name} and {month} placeholders)."""
+    birthday_enabled = models.BooleanField(default=True)
+    birthday_title = models.CharField(max_length=200, default="Happy Birthday! 🎉")
+    birthday_message = models.TextField(
+        default="Happy Birthday, {name}! Wishing you a wonderful year ahead, from all of us at Oaziland."
+    )
+
+    new_month_enabled = models.BooleanField(default=True)
+    new_month_title = models.CharField(max_length=200, default="Happy New Month, {name}!")
+    new_month_message = models.TextField(
+        default="Happy {month}, {name}! Wishing you a productive and successful month ahead, from Oaziland."
+    )
+
+    # Pre-filled WhatsApp text for the listing card's share button; placeholders: {title}, {price}, {location}, {link}.
+    listing_share_message = models.TextField(
+        default="Check out this {title} in {location} for {price} XAF on Oaziland: {link}"
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "greeting_settings"
+
+    @classmethod
+    def get_settings(cls):
+        obj, _ = cls.objects.get_or_create(id=1)
+        return obj

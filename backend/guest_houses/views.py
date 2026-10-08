@@ -16,18 +16,30 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
+from oaziland.permissions import IsKycVerified
 from property.models import GuestHouseLodge, PropertyAssetPhoto
 from .serializers import GuestHouseLodgeSerializer, GuestHouseLodgeCreateSerializer
+from .services import get_host_dashboard_summary
 
 
 class GuestHouseLodgeViewSet(viewsets.ModelViewSet):
     serializer_class = GuestHouseLodgeSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
+    def get_permissions(self):
+        # Listing a property (a real financial/legal commitment) needs
+        # real identity verification, same as property/hotel/venue
+        # listings — browsing stays completely open to anyone.
+        if self.action == "create":
+            return [IsKycVerified()]
+        if self.action == "my_dashboard":
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
+
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return GuestHouseLodge.objects.none()
-        return GuestHouseLodge.objects.order_by("-created_at")
+        return GuestHouseLodge.objects.select_related("owner__agent_profile").prefetch_related("asset_photos").order_by("-created_at")
 
     @extend_schema(request=GuestHouseLodgeCreateSerializer, responses={201: GuestHouseLodgeSerializer})
     def create(self, request, *args, **kwargs):
@@ -36,10 +48,37 @@ class GuestHouseLodgeViewSet(viewsets.ModelViewSet):
         data = input_serializer.validated_data
 
         guest_house = GuestHouseLodge.objects.create(
-            owner=request.user, quarter_id=data["quarter"], type="HOUSE",
-            is_coastal_leisure=data["is_coastal_leisure"], finish_level=data["finish_level"],
+            owner=request.user,
+            quarter_id=data["quarter"],
+            type="HOUSE",
+            is_coastal_leisure=data["is_coastal_leisure"],
+            finish_level=data["finish_level"],
+            latitude=data.get("latitude"),
+            longitude=data.get("longitude"),
         )
         return Response(GuestHouseLodgeSerializer(guest_house).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="set-location")
+    def set_location(self, request, pk=None):
+        guest_house = self.get_object()
+        if guest_house.owner_id != request.user.id and not hasattr(request.user, "admin_profile"):
+            return Response({"detail": "Only the guest house owner can set its location."}, status=status.HTTP_403_FORBIDDEN)
+        lat = request.data.get("latitude")
+        lng = request.data.get("longitude")
+        if lat is None or lng is None:
+            return Response({"detail": "latitude and longitude are required."}, status=status.HTTP_400_BAD_REQUEST)
+        guest_house.latitude = lat
+        guest_house.longitude = lng
+        guest_house.save(update_fields=["latitude", "longitude"])
+        return Response({"id": str(guest_house.id), "latitude": str(guest_house.latitude), "longitude": str(guest_house.longitude)})
+
+    @action(detail=False, methods=["get"], url_path="my-dashboard")
+    def my_dashboard(self, request):
+        """A real gap this closes: get_host_dashboard_summary()
+        already aggregated across every guest house a host owns, but
+        nothing ever exposed it — same class of gap as the landlord
+        portfolio/technician/agent dashboards."""
+        return Response(get_host_dashboard_summary(request.user))
 
     @action(detail=True, methods=["post"], url_path="add-photo")
     def add_photo(self, request, pk=None):
