@@ -324,6 +324,8 @@ SPECTACULAR_SETTINGS = {
     # same underlying choice set.
     'ENUM_NAME_OVERRIDES': {
         'RideCategoryEnum': 'marketplace.models.RideCategory',
+        # RideBooking.status is read by both the ride serializer and the admin SOS list.
+        'RideStatusEnum': 'marketplace.models.RideStatus',
         # ContentReport.reason and WelfareAlert.reason both use a field
         # named "reason" with different TextChoices — give each an
         # explicit, distinct component name to avoid an auto-generated

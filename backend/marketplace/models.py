@@ -281,6 +281,12 @@ class RideBooking(models.Model):
     # Set when the rider or the driver presses SOS during a trip; admins are alerted.
     sos_raised_at = models.DateTimeField(null=True, blank=True)
     sos_raised_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    sos_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    sos_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    sos_note = models.CharField(max_length=500, blank=True)
+    # An admin marks the SOS handled; pressing SOS again reopens it.
+    sos_resolved_at = models.DateTimeField(null=True, blank=True)
+    sos_resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
 
     class Meta:
         db_table = "ride_bookings"

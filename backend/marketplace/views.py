@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, PriceBasis, RideEmergencyContact
 from .serializers import (
-    PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer, EmergencyContactSerializer,
+    PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer, EmergencyContactSerializer, AdminSosRideSerializer,
     AddMediaSerializer, SetAvailabilitySerializer,
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer,
     RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer, RideSosSerializer,
@@ -616,6 +616,37 @@ class AdminDriverViewSet(viewsets.ReadOnlyModelViewSet):
         driver_profile.is_verified = True
         driver_profile.save(update_fields=["is_verified"])
         return Response(DriverProfileSerializer(driver_profile).data)
+
+
+class AdminSosRideViewSet(viewsets.ReadOnlyModelViewSet):
+    """Rides where someone pressed SOS, newest first. Open ones by default; ?status=resolved or ?status=all for the rest."""
+    serializer_class = AdminSosRideSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return RideBooking.objects.none()
+        queryset = (
+            RideBooking.objects.filter(sos_raised_at__isnull=False)
+            .select_related("rider", "driver", "vehicle", "sos_raised_by", "sos_raised_by__ride_emergency_contact")
+            .order_by("-sos_raised_at")
+        )
+        wanted = self.request.query_params.get("status", "open")
+        if wanted == "open":
+            return queryset.filter(sos_resolved_at__isnull=True)
+        if wanted == "resolved":
+            return queryset.filter(sos_resolved_at__isnull=False)
+        return queryset
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: AdminSosRideSerializer})
+    def resolve(self, request, pk=None):
+        from django.utils import timezone
+        ride = self.get_object()
+        if ride.sos_resolved_at is None:
+            RideBooking.objects.filter(pk=ride.pk).update(sos_resolved_at=timezone.now(), sos_resolved_by=request.user)
+            ride.refresh_from_db()
+        return Response(AdminSosRideSerializer(ride).data)
 
 
 class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):

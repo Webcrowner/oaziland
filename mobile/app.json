@@ -42,6 +42,12 @@
         {
           "faceIDPermission": "Use Face ID to sign in to Oaziland quickly and securely."
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Oaziland uses your location to share it in an emergency during a ride and to show technicians where a job is."
+        }
       ]
     ]
   }

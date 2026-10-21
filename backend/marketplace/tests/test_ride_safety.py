@@ -268,6 +268,45 @@ def test_a_user_manages_their_own_emergency_contact():
 
 
 @pytest.mark.django_db
+def test_admins_see_sos_rides_with_where_who_and_who_to_call_and_can_mark_them_handled():
+    rider = _verify(User.objects.create(username="rs_rider15", phone="+237699300151", first_name="Marie", last_name="Ngono"))
+    driver, driver_client, vehicle_id = _verified_driver("rs_driver15", "+237699300153")
+    quiet = _request_ride(rider)
+    ride = _request_ride(rider)
+    driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
+    rider_client = _auth_client(rider)
+    rider_client.put("/api/my-emergency-contact/", {"name": "Paul Ngono", "phone": "+237677000111"}, format="json")
+    rider_client.post(f"/api/rides/{ride['id']}/sos/", {"latitude": "3.8480000", "longitude": "11.5020000", "note": "Driver is not following the route"}, format="json")
+
+    admin = User.objects.get(username="rs_driver15_admin")
+    admin_client = _auth_client(admin)
+    listed = admin_client.get("/api/admin/sos-rides/").data
+    assert listed["count"] == 1 and quiet["id"] not in [r["id"] for r in listed["results"]]
+    row = listed["results"][0]
+    assert row["id"] == ride["id"] and row["sos_note"] == "Driver is not following the route"
+    assert row["sos_latitude"] == "3.8480000" and row["sos_resolved_at"] is None
+    assert row["raised_by"]["phone"] == "+237699300151" and row["driver"]["phone"] == "+237699300153"
+    assert row["raised_by_contact"] == {"name": "Paul Ngono", "phone": "+237677000111"}
+    assert row["vehicle_details"]["plate_number"] == "LT-r15"
+
+    # Only admins can see or resolve them.
+    assert rider_client.get("/api/admin/sos-rides/").status_code == 403
+    assert rider_client.post(f"/api/admin/sos-rides/{ride['id']}/resolve/").status_code == 403
+
+    resolved = admin_client.post(f"/api/admin/sos-rides/{ride['id']}/resolve/")
+    assert resolved.status_code == 200 and resolved.data["sos_resolved_at"] is not None
+    assert admin_client.get("/api/admin/sos-rides/").data["count"] == 0
+    assert admin_client.get("/api/admin/sos-rides/?status=resolved").data["count"] == 1
+    assert admin_client.get("/api/admin/sos-rides/?status=all").data["count"] == 1
+
+    # Pressing SOS again after it was handled reopens it with the new details.
+    RideBooking.objects.filter(pk=ride["id"]).update(sos_raised_at=timezone.now() - timedelta(minutes=5))
+    rider_client.post(f"/api/rides/{ride['id']}/sos/", {"note": "Still not safe"}, format="json")
+    reopened = admin_client.get("/api/admin/sos-rides/").data["results"][0]
+    assert reopened["sos_note"] == "Still not safe" and reopened["sos_resolved_at"] is None and reopened["sos_latitude"] is None
+
+
+@pytest.mark.django_db
 def test_sos_is_refused_once_the_ride_is_over():
     rider = _verify(User.objects.create(username="rs_rider12", phone="+237699300121"))
     driver, driver_client, vehicle_id = _verified_driver("rs_driver12", "+237699300122")

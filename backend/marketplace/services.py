@@ -228,7 +228,10 @@ def raise_sos(*, ride, user, latitude=None, longitude=None, note=""):
     now = timezone.now()
     if ride.sos_raised_by_id == user.id and ride.sos_raised_at and now - ride.sos_raised_at < timedelta(seconds=SOS_REPEAT_SECONDS):
         return 0, False
-    RideBooking.objects.filter(pk=ride.pk).update(sos_raised_at=now, sos_raised_by=user)
+    RideBooking.objects.filter(pk=ride.pk).update(
+        sos_raised_at=now, sos_raised_by=user, sos_latitude=latitude, sos_longitude=longitude, sos_note=note,
+        sos_resolved_at=None, sos_resolved_by=None,
+    )
     ride.refresh_from_db()
 
     vehicle = ride.vehicle

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Alert, Image } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { getCurrentCoords } from "../lib/location";
 import {
   listMyServiceRequests, createServiceRequest, acceptServiceRequest, getMyTechnicianProfile, startServiceRequest, completeServiceRequest,
   fundServiceRequest, releaseServiceRequest, markServiceRequestEnRoute, proposeServiceQuote, approveServiceQuote, disputeServiceRequest,
@@ -158,25 +159,23 @@ export default function TasklnServiceScreen() {
     }
   }
 
-  function handleShareLocation() {
+  async function handleShareLocation() {
     setSharingLocation(true);
     setError("");
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          await submitTechnicianLocationPing(pos.coords.latitude, pos.coords.longitude);
-          load();
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Could not share your location");
-        } finally {
-          setSharingLocation(false);
-        }
-      },
-      () => {
-        setError("Allow location access to share your location.");
-        setSharingLocation(false);
-      },
-    );
+    const coords = await getCurrentCoords();
+    if (!coords) {
+      setError("Allow location access to share your location.");
+      setSharingLocation(false);
+      return;
+    }
+    try {
+      await submitTechnicianLocationPing(coords.latitude, coords.longitude);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not share your location");
+    } finally {
+      setSharingLocation(false);
+    }
   }
 
   async function handleAddProblemPhoto() {
@@ -210,20 +209,20 @@ export default function TasklnServiceScreen() {
       .finally(() => setRequesting(false));
   }
 
-  function handleRequest() {
+  async function handleRequest() {
     setError("");
     setRequesting(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { submitRequest(pos.coords.latitude, pos.coords.longitude); },
-      () => {
-        if (areaLabel.trim()) {
-          submitRequest(null, null);
-          return;
-        }
-        setError("Allow location access, or enter the town or neighbourhood, so technicians can tell where the job is.");
-        setRequesting(false);
-      },
-    );
+    const coords = await getCurrentCoords();
+    if (coords) {
+      submitRequest(coords.latitude, coords.longitude);
+      return;
+    }
+    if (areaLabel.trim()) {
+      submitRequest(null, null);
+      return;
+    }
+    setError("Allow location access, or enter the town or neighbourhood, so technicians can tell where the job is.");
+    setRequesting(false);
   }
 
   function confirmDismissTechnician(id: string) {

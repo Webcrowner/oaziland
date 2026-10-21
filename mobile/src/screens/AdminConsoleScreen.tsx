@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Linking } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -7,12 +7,12 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import {
   getAdminConsoleSummary, listAdminVerificationRequests, approveVerificationRequest, rejectVerificationRequest,
   listAdminContentReports, resolveContentReport,
-  listAdminDisputeCases, respondToDispute, resolveDispute,
-  AdminConsoleSummary, AdminVerificationRequest, AdminContentReport, AdminDisputeCase,
+  listAdminDisputeCases, respondToDispute, resolveDispute, listAdminSosRides, resolveAdminSosRide,
+  AdminConsoleSummary, AdminVerificationRequest, AdminContentReport, AdminDisputeCase, AdminSosRide,
 } from "../lib/api";
 
 type Props = NativeStackScreenProps<RootStackParamList, "AdminConsole">;
-type Tab = "summary" | "verifications" | "reports" | "disputes";
+type Tab = "summary" | "verifications" | "reports" | "disputes" | "sos";
 
 /**
  * The mobile equivalent of the real admin console built on web this
@@ -27,6 +27,7 @@ export default function AdminConsoleScreen({ navigation }: Props) {
   const [verifications, setVerifications] = useState<AdminVerificationRequest[]>([]);
   const [reports, setReports] = useState<AdminContentReport[]>([]);
   const [disputes, setDisputes] = useState<AdminDisputeCase[]>([]);
+  const [sosRides, setSosRides] = useState<AdminSosRide[]>([]);
 
   const loadAll = useCallback(() => {
     SecureStore.getItemAsync("access_token").then(async (token) => {
@@ -35,13 +36,15 @@ export default function AdminConsoleScreen({ navigation }: Props) {
         return;
       }
       try {
-        const [summaryData, verificationsData, reportsData, disputesData] = await Promise.all([
+        const [summaryData, verificationsData, reportsData, disputesData, sosData] = await Promise.all([
           getAdminConsoleSummary(), listAdminVerificationRequests(), listAdminContentReports(), listAdminDisputeCases(),
+          listAdminSosRides().catch(() => ({ count: 0, results: [] as AdminSosRide[] })),
         ]);
         setSummary(summaryData);
         setVerifications(verificationsData.results);
         setReports(reportsData.results);
         setDisputes(disputesData.results);
+        setSosRides(sosData.results);
         setStatus("ready");
       } catch {
         setStatus("notAdmin");
@@ -86,6 +89,12 @@ export default function AdminConsoleScreen({ navigation }: Props) {
     loadAll();
   }
 
+  async function handleResolveSos(id: string) {
+    const res = await resolveAdminSosRide(id);
+    if (!res.ok) return Alert.alert("That action failed", "Please try again.");
+    loadAll();
+  }
+
   if (status === "signedOut") {
     return (
       <View style={styles.centered}>
@@ -123,6 +132,7 @@ export default function AdminConsoleScreen({ navigation }: Props) {
           { key: "verifications" as const, label: `Verifications (${verifications.length})` },
           { key: "reports" as const, label: `Reports (${reports.length})` },
           { key: "disputes" as const, label: `Disputes (${disputes.length})` },
+          { key: "sos" as const, label: `SOS (${sosRides.length})` },
         ]).map((t) => (
           <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabSelected]} onPress={() => setTab(t.key)}>
             <Text style={[styles.tabText, tab === t.key && styles.tabTextSelected]}>{t.label}</Text>
@@ -168,6 +178,36 @@ export default function AdminConsoleScreen({ navigation }: Props) {
         reports.length === 0 ? <Text style={styles.empty}>Nothing here right now.</Text> :
         reports.map((r) => (
           <ReportCard key={r.id} report={r} onResolve={(actionTaken, issueStrike) => resolveContentReport(r.id, actionTaken, issueStrike).then(loadAll)} />
+        ))
+      )}
+
+      {tab === "sos" && (
+        sosRides.length === 0 ? <Text style={styles.empty}>No open SOS alerts from OaziGo rides.</Text> :
+        sosRides.map((ride) => (
+          <View key={ride.id} style={[styles.card, { borderColor: "#FCA5A5" }]}>
+            <Text style={styles.cardTitle}>🆘 {ride.raised_by?.name ?? "—"} ({ride.raised_by?.phone})</Text>
+            <Text style={styles.cardSubtitle}>{new Date(ride.sos_raised_at).toLocaleString()}</Text>
+            <Text style={styles.cardSubtitle}>{ride.pickup_description} → {ride.dropoff_description} · {ride.status.replace("_", " ")}</Text>
+            {ride.sos_note ? <Text style={styles.cardTitle}>“{ride.sos_note}”</Text> : null}
+            <Text style={styles.cardSubtitle}>
+              Rider: {ride.rider?.name} ({ride.rider?.phone})
+              {ride.driver ? ` · Driver: ${ride.driver.name} (${ride.driver.phone})` : ""}
+              {ride.vehicle_details ? ` · ${ride.vehicle_details.make} ${ride.vehicle_details.model}, ${ride.vehicle_details.plate_number}` : ""}
+            </Text>
+            {ride.raised_by_contact ? <Text style={styles.cardSubtitle}>Emergency contact: {ride.raised_by_contact.name} ({ride.raised_by_contact.phone})</Text> : null}
+            <View style={styles.actionRow}>
+              {ride.sos_latitude && ride.sos_longitude ? (
+                <TouchableOpacity style={styles.neutralButton} onPress={() => Linking.openURL(`https://www.google.com/maps?q=${ride.sos_latitude},${ride.sos_longitude}`)}>
+                  <Text style={styles.actionButtonTextDark}>Open map</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.cardSubtitle}>No location shared</Text>
+              )}
+              <TouchableOpacity style={styles.approveButton} onPress={() => handleResolveSos(ride.id)}>
+                <Text style={styles.actionButtonText}>Mark handled</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         ))
       )}
 

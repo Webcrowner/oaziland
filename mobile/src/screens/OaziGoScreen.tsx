@@ -7,6 +7,7 @@ import {
 } from "../lib/api";
 import RateAndReport from "../components/RateAndReport";
 import EmergencyContactCard from "../components/EmergencyContactCard";
+import { getCurrentCoords } from "../lib/location";
 
 const STATUS_COLORS: Record<string, string> = {
   REQUESTED: "#C9A227", ACCEPTED: "#1B2A4A", IN_PROGRESS: "#1B2A4A", COMPLETED: "#16A34A", CANCELLED: "#A8502E",
@@ -132,7 +133,7 @@ export default function OaziGoScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              const result = await raiseRideSos(id);
+              const result = await raiseRideSos(id, await getCurrentCoords());
               const alerted = result.admins_alerted > 0 || result.emergency_contact_alerted;
               Alert.alert(
                 alerted ? "SOS sent" : "SOS recorded",

@@ -694,6 +694,39 @@ export async function rejectVerificationRequest(id: string, reason: string) {
   });
 }
 
+export interface AdminSosPerson {
+  id: string;
+  name: string;
+  phone: string;
+}
+
+export interface AdminSosRide {
+  id: string;
+  status: string;
+  pickup_description: string;
+  dropoff_description: string;
+  vehicle_details: { vehicle_category: string; make: string; model: string; plate_number: string } | null;
+  rider: AdminSosPerson | null;
+  driver: AdminSosPerson | null;
+  raised_by: AdminSosPerson | null;
+  raised_by_contact: { name: string; phone: string } | null;
+  sos_raised_at: string;
+  sos_latitude: string | null;
+  sos_longitude: string | null;
+  sos_note: string;
+  sos_resolved_at: string | null;
+}
+
+export async function listAdminSosRides(): Promise<PaginatedResponse<AdminSosRide>> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/sos-rides/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`SOS rides fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function resolveAdminSosRide(rideId: string) {
+  return fetch(`${API_BASE_URL}/api/admin/sos-rides/${rideId}/resolve/`, { method: "POST", headers: await authHeaders() });
+}
+
 export async function listAdminContentReports(): Promise<PaginatedResponse<AdminContentReport>> {
   const res = await fetch(`${API_BASE_URL}/api/admin/content-reports/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error(`Content reports fetch failed: ${res.status}`);
@@ -1111,11 +1144,14 @@ export async function deleteMyEmergencyContact() {
   if (!res.ok) throw new Error("Could not remove the contact");
 }
 
-export async function raiseRideSos(rideId: string): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact_alerted: boolean }> {
+export async function raiseRideSos(
+  rideId: string,
+  coords?: { latitude: number; longitude: number } | null,
+): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact_alerted: boolean }> {
   const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/sos/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify({}),
+    body: JSON.stringify(coords ? { latitude: coords.latitude.toFixed(7), longitude: coords.longitude.toFixed(7) } : {}),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "Could not raise the SOS");

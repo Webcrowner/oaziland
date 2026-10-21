@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from typing import Optional
 from .models import (
     WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, RideMessage, ListingCondition,
     RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder, RideEmergencyContact,
@@ -187,6 +188,42 @@ class EmergencyContactSerializer(serializers.ModelSerializer):
         if not (8 <= len(digits) <= 15) or any(c not in "+0123456789 -" for c in value):
             raise serializers.ValidationError("Enter a valid phone number, for example +237 6XX XXX XXX.")
         return value
+
+
+def _person(user) -> Optional[dict]:
+    if user is None:
+        return None
+    return {"id": str(user.id), "name": user.full_name or user.username, "phone": user.phone}
+
+
+class AdminSosRideSerializer(serializers.ModelSerializer):
+    """What an admin needs to act on an SOS: who raised it, where, the people and the car involved, and who to call."""
+    raised_by = serializers.SerializerMethodField()
+    raised_by_contact = serializers.SerializerMethodField()
+    rider = serializers.SerializerMethodField()
+    driver = serializers.SerializerMethodField()
+    vehicle_details = RideVehicleSerializer(source="vehicle", read_only=True)
+
+    class Meta:
+        model = RideBooking
+        fields = [
+            "id", "status", "pickup_description", "dropoff_description", "vehicle_details", "rider", "driver",
+            "raised_by", "raised_by_contact", "sos_raised_at", "sos_latitude", "sos_longitude", "sos_note", "sos_resolved_at",
+        ]
+        read_only_fields = fields
+
+    def get_raised_by(self, ride) -> Optional[dict]:
+        return _person(ride.sos_raised_by)
+
+    def get_raised_by_contact(self, ride) -> Optional[dict]:
+        contact = getattr(ride.sos_raised_by, "ride_emergency_contact", None) if ride.sos_raised_by else None
+        return {"name": contact.name, "phone": contact.phone} if contact else None
+
+    def get_rider(self, ride) -> Optional[dict]:
+        return _person(ride.rider)
+
+    def get_driver(self, ride) -> Optional[dict]:
+        return _person(ride.driver)
 
 
 class RideSosSerializer(serializers.Serializer):

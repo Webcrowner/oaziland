@@ -2316,6 +2316,39 @@ export async function resolveAdminWelfareAlert(alertId: string, accessToken: str
   return fetch(`${API_BASE_URL}/api/admin/welfare-alerts/${alertId}/resolve/`, { method: "POST", headers: adminHeaders(accessToken) });
 }
 
+export interface AdminSosPerson {
+  id: string;
+  name: string;
+  phone: string;
+}
+
+export interface AdminSosRide {
+  id: string;
+  status: string;
+  pickup_description: string;
+  dropoff_description: string;
+  vehicle_details: { vehicle_category: string; make: string; model: string; plate_number: string } | null;
+  rider: AdminSosPerson | null;
+  driver: AdminSosPerson | null;
+  raised_by: AdminSosPerson | null;
+  raised_by_contact: { name: string; phone: string } | null;
+  sos_raised_at: string;
+  sos_latitude: string | null;
+  sos_longitude: string | null;
+  sos_note: string;
+  sos_resolved_at: string | null;
+}
+
+export async function listAdminSosRides(accessToken: string, status: "open" | "resolved" | "all" = "open"): Promise<{ count: number; results: AdminSosRide[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/sos-rides/?status=${status}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`SOS rides fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function resolveAdminSosRide(rideId: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/sos-rides/${rideId}/resolve/`, { method: "POST", headers: adminHeaders(accessToken) });
+}
+
 export async function listAdminUsers(
   accessToken: string,
   accountStatus?: string,

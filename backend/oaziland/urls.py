@@ -60,7 +60,7 @@ from property_management.views import (
 )
 from marketplace.views import (
     WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet,
-    MyDriverProfileView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView,
+    MyDriverProfileView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView, AdminSosRideViewSet,
 )
 from services.views import (
     ServiceRequestViewSet, FindTechniciansView, TechnicianDirectoryView, MyTechnicianDocumentsView, MyTechnicianDashboardView, MyTechnicianProfileView, AdminTechnicianViewSet,
@@ -96,6 +96,7 @@ router.register(r"marketplace-orders", MarketplaceOrderViewSet, basename="market
 router.register(r"rides", RideViewSet, basename="ride")
 router.register(r"my-vehicles", MyVehicleViewSet, basename="my-vehicle")
 router.register(r"admin/drivers", AdminDriverViewSet, basename="admin-driver")
+router.register(r"admin/sos-rides", AdminSosRideViewSet, basename="admin-sos-ride")
 router.register(r"admin/technicians", AdminTechnicianViewSet, basename="admin-technician")
 router.register(r"admin/service-disputes", AdminServiceDisputeViewSet, basename="admin-service-dispute")
 router.register(r"service-requests", ServiceRequestViewSet, basename="service-request")

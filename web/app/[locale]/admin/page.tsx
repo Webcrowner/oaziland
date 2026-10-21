@@ -32,6 +32,8 @@ import {
   rejectPropertyListing,
   listAdminWelfareAlerts,
   resolveAdminWelfareAlert,
+  listAdminSosRides,
+  resolveAdminSosRide,
   listAdminUsers,
   toggleAdminUserSuspend,
   issueAdminUserStrike,
@@ -53,6 +55,7 @@ import {
   type TechnicianProfileItem,
   type Listing,
   type AdminWelfareAlert,
+  type AdminSosRide,
   type AdminUser,
   type AssignableRole,
 } from "@/lib/api";
@@ -91,6 +94,7 @@ type Tab =
   | "reports"
   | "disputes"
   | "welfare"
+  | "sos"
   | "users"
   | "greetings"
   | "faqs";
@@ -116,6 +120,7 @@ export default function AdminConsolePage() {
   const [serviceDisputes, setServiceDisputes] = useState<AdminServiceDisputeItem[]>([]);
   const [activeDisputeChatId, setActiveDisputeChatId] = useState<string | null>(null);
   const [welfareAlerts, setWelfareAlerts] = useState<AdminWelfareAlert[]>([]);
+  const [sosRides, setSosRides] = useState<AdminSosRide[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [userStatusFilter, setUserStatusFilter] = useState<string>("ALL");
   const [userRoleFilter, setUserRoleFilter] = useState<string>("ALL");
@@ -180,6 +185,7 @@ export default function AdminConsolePage() {
       getAdminGreetingSettings(token).catch(() => null),
       listAdminServiceDisputes(token).catch(() => [] as AdminServiceDisputeItem[]),
       listTechniciansForAdmin(token, "verified").catch(() => ({ results: [] as TechnicianProfileItem[] })),
+      listAdminSosRides(token).catch(() => ({ count: 0, results: [] as AdminSosRide[] })),
     ])
       .then(
         ([
@@ -197,6 +203,7 @@ export default function AdminConsolePage() {
           greetingsData,
           serviceDisputesData,
           verifiedTechniciansData,
+          sosRidesData,
         ]) => {
           setSummary(summaryData);
           setPendingProperties(propertiesData.results || []);
@@ -212,6 +219,7 @@ export default function AdminConsolePage() {
           if (greetingsData) setGreetingSettings(greetingsData);
           setServiceDisputes(serviceDisputesData);
           setVerifiedTechnicians(verifiedTechniciansData.results || []);
+          setSosRides(sosRidesData.results || []);
           setStatus("ready");
         }
       )
@@ -410,6 +418,17 @@ export default function AdminConsolePage() {
     loadAll();
   }
 
+  // Actions: OaziGo SOS
+  async function handleResolveSos(id: string) {
+    if (!token) return;
+    const res = await resolveAdminSosRide(id, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
+    loadAll();
+  }
+
   // Actions: Celebratory Greetings Settings
   async function handleSaveGreetingSettings(e: React.FormEvent) {
     e.preventDefault();
@@ -548,6 +567,7 @@ export default function AdminConsolePage() {
     reports: IconAlertCircle,
     disputes: IconLock,
     welfare: IconGraduationCap,
+    sos: IconAlertCircle,
     users: IconUsers,
     greetings: IconSparkles,
     faqs: IconMapPin,
@@ -562,6 +582,7 @@ export default function AdminConsolePage() {
     { key: "reports", label: t("tabReports"), count: reports.length, isUrgent: reports.length > 0 },
     { key: "disputes", label: t("tabDisputes"), count: disputes.length + serviceDisputes.length, isUrgent: disputes.length + serviceDisputes.length > 0 },
     { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
+    { key: "sos", label: t("tabSos"), count: sosRides.length, isUrgent: sosRides.length > 0 },
     { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
     { key: "greetings", label: t("tabGreetings") || "Celebratory Messages" },
     { key: "faqs", label: t("tabFaqs") },
@@ -601,6 +622,7 @@ export default function AdminConsolePage() {
         { key: "reports", label: t("tabReports"), count: reports.length, isUrgent: reports.length > 0 },
         { key: "disputes", label: t("tabDisputes"), count: disputes.length + serviceDisputes.length, isUrgent: disputes.length + serviceDisputes.length > 0 },
         { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
+        { key: "sos", label: t("tabSos"), count: sosRides.length, isUrgent: sosRides.length > 0 },
         { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
       ],
     },
@@ -615,6 +637,7 @@ export default function AdminConsolePage() {
     disputes.length +
     serviceDisputes.length +
     welfareAlerts.filter((w) => !w.resolved_at).length +
+    sosRides.length +
     (summary.flagged_users_count ?? 0);
 
   return (
@@ -1523,6 +1546,59 @@ export default function AdminConsolePage() {
                     {t("markResolved")}
                   </button>
                 )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab === "sos" && (
+        <div className="space-y-4 animate-rise-in">
+          {sosRides.length === 0 ? (
+            <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 bg-white">
+              <p className="text-sm font-semibold text-slate-600">{t("noItems")}</p>
+              <p className="text-xs text-slate-400 mt-1">{t("sosEmpty")}</p>
+            </div>
+          ) : (
+            sosRides.map((ride) => (
+              <div key={ride.id} className="border border-red-200 rounded-2xl p-5 bg-white shadow-sm flex flex-col md:flex-row items-start justify-between gap-4">
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="clay">{t("sosBadge")}</Badge>
+                    <span className="font-bold text-slate-900 text-sm">
+                      {ride.raised_by?.name ?? "—"} <span className="font-normal text-slate-500">({ride.raised_by?.phone})</span>
+                    </span>
+                    <span className="text-[11px] text-slate-400">{new Date(ride.sos_raised_at).toLocaleString()}</span>
+                  </div>
+                  <p className="text-xs text-slate-700">{ride.pickup_description} → {ride.dropoff_description} · {ride.status.replace("_", " ")}</p>
+                  {ride.sos_note && <p className="text-xs text-slate-800 font-medium">“{ride.sos_note}”</p>}
+                  <p className="text-[11px] text-slate-500">
+                    {t("sosRider")}: {ride.rider?.name} ({ride.rider?.phone})
+                    {ride.driver && <> · {t("sosDriver")}: {ride.driver.name} ({ride.driver.phone})</>}
+                    {ride.vehicle_details && <> · {ride.vehicle_details.make} {ride.vehicle_details.model}, {ride.vehicle_details.plate_number}</>}
+                  </p>
+                  {ride.raised_by_contact && (
+                    <p className="text-[11px] text-slate-500">{t("sosContact")}: {ride.raised_by_contact.name} ({ride.raised_by_contact.phone})</p>
+                  )}
+                  {ride.sos_latitude && ride.sos_longitude ? (
+                    <a
+                      href={`https://www.google.com/maps?q=${ride.sos_latitude},${ride.sos_longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block text-[11px] font-bold text-amber-700 underline"
+                    >
+                      {t("sosOpenMap")}
+                    </a>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">{t("sosNoLocation")}</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleResolveSos(ride.id)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors whitespace-nowrap shadow-sm"
+                >
+                  {t("markResolved")}
+                </button>
               </div>
             ))
           )}
