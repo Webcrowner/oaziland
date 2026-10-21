@@ -1,5 +1,6 @@
 """Ride safety: fare can't be dodged with a fake distance, rides can be cancelled or released, open requests are private."""
 import pytest
+from rest_framework.test import APIClient
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
@@ -212,6 +213,58 @@ def test_sos_alerts_admins_and_only_works_for_the_people_on_an_active_ride():
     assert rider_client.post(url, {}, format="json").data["admins_alerted"] == 0
     assert driver_client.post(url, {}, format="json").data["admins_alerted"] == 1
     assert Notification.objects.filter(notification_type="RIDE_SOS").count() == 2
+
+
+@pytest.mark.django_db
+def test_sos_also_alerts_the_senders_emergency_contact_and_survives_a_failing_sms(monkeypatch):
+    rider = _verify(User.objects.create(username="rs_rider13", phone="+237699300131", first_name="Marie", last_name="Ngono"))
+    driver, driver_client, vehicle_id = _verified_driver("rs_driver13", "+237699300133")
+    ride = _request_ride(rider)
+    driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
+    rider_client = _auth_client(rider)
+    url = f"/api/rides/{ride['id']}/sos/"
+
+    # Without a contact only the admins hear about it.
+    assert rider_client.post(url, {}, format="json").data["emergency_contact_alerted"] is False
+
+    assert rider_client.put("/api/my-emergency-contact/", {"name": "Paul Ngono", "phone": "+237 677 000 111"}, format="json").status_code == 200
+    RideBooking.objects.filter(pk=ride["id"]).update(sos_raised_at=None)
+    response = rider_client.post(url, {"latitude": "3.8480000", "longitude": "11.5020000"}, format="json")
+    assert response.data["emergency_contact_alerted"] is True and response.data["admins_alerted"] == 1
+    text = Notification.objects.get(notification_type="RIDE_SOS", external_phone_number="+237 677 000 111")
+    assert text.channel == "SMS" and "Marie Ngono pressed SOS" in text.message and "LT-r13" in text.message and "3.848" in text.message
+    assert "+237699300131" in text.message and "+237699300133" not in text.message
+
+    # A provider that cannot send must not stop the admins being alerted.
+    def broken_sms(**kwargs):
+        if kwargs.get("channel") == "SMS":
+            raise NotImplementedError("SMS provider not connected")
+        return real_notify(**kwargs)
+    import notifications.services as notification_services
+    real_notify = notification_services.notify
+    monkeypatch.setattr(notification_services, "notify", broken_sms)
+    RideBooking.objects.filter(pk=ride["id"]).update(sos_raised_at=None)
+    failed = rider_client.post(url, {}, format="json")
+    assert failed.status_code == 200 and failed.data["admins_alerted"] == 1 and failed.data["emergency_contact_alerted"] is False
+
+
+@pytest.mark.django_db
+def test_a_user_manages_their_own_emergency_contact():
+    user = User.objects.create(username="rs_user14", phone="+237699300141")
+    other = User.objects.create(username="rs_other14", phone="+237699300142")
+    client = _auth_client(user)
+
+    assert client.get("/api/my-emergency-contact/").status_code == 404
+    assert client.put("/api/my-emergency-contact/", {"name": "Paul", "phone": "abc"}, format="json").status_code == 400
+    assert client.put("/api/my-emergency-contact/", {"name": "  ", "phone": "+237677000111"}, format="json").status_code == 400
+    assert client.put("/api/my-emergency-contact/", {"name": " Paul ", "phone": "+237677000111"}, format="json").data == {"name": "Paul", "phone": "+237677000111"}
+    assert client.put("/api/my-emergency-contact/", {"name": "Paul", "phone": "+237677000222"}, format="json").status_code == 200
+    assert client.get("/api/my-emergency-contact/").data["phone"] == "+237677000222"
+    assert _auth_client(other).get("/api/my-emergency-contact/").status_code == 404
+    assert APIClient().get("/api/my-emergency-contact/").status_code == 401
+
+    assert client.delete("/api/my-emergency-contact/").status_code == 204
+    assert client.get("/api/my-emergency-contact/").status_code == 404
 
 
 @pytest.mark.django_db

@@ -60,7 +60,7 @@ from property_management.views import (
 )
 from marketplace.views import (
     WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet,
-    MyDriverProfileView, MyVehicleViewSet, AdminDriverViewSet,
+    MyDriverProfileView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView,
 )
 from services.views import (
     ServiceRequestViewSet, FindTechniciansView, TechnicianDirectoryView, MyTechnicianDocumentsView, MyTechnicianDashboardView, MyTechnicianProfileView, AdminTechnicianViewSet,
@@ -221,6 +221,7 @@ urlpatterns = [
     path('api/my-ratings/', MyRatingsView.as_view(), name='my-ratings'),
     path('api/my-referrals/', MyReferralsView.as_view(), name='my-referrals'),
     path('api/my-driver-profile/', MyDriverProfileView.as_view(), name='my-driver-profile'),
+    path('api/my-emergency-contact/', MyEmergencyContactView.as_view(), name='my-emergency-contact'),
     path('api/content-reports/', FileContentReportView.as_view(), name='file-content-report'),
     path('api/admin/greeting-settings/', AdminGreetingSettingsView.as_view(), name='admin-greeting-settings'),
     path('api/listing-share-message/', ListingShareMessageView.as_view(), name='listing-share-message'),

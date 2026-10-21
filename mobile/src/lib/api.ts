@@ -1080,7 +1080,38 @@ export async function cancelRide(rideId: string) {
   return data;
 }
 
-export async function raiseRideSos(rideId: string): Promise<{ sos_raised_at: string; admins_alerted: number }> {
+export interface EmergencyContact {
+  name: string;
+  phone: string;
+}
+
+export async function getMyEmergencyContact(): Promise<EmergencyContact | null> {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, { headers: await authHeaders() });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Could not load your emergency contact");
+  return res.json();
+}
+
+export async function saveMyEmergencyContact(contact: EmergencyContact): Promise<EmergencyContact> {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(contact),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not save the contact"));
+  }
+  return data;
+}
+
+export async function deleteMyEmergencyContact() {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, { method: "DELETE", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not remove the contact");
+}
+
+export async function raiseRideSos(rideId: string): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact_alerted: boolean }> {
   const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/sos/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },

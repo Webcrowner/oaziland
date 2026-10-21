@@ -4,9 +4,12 @@ attaching/reading generic ListingCondition objects, and the full ride
 lifecycle settling through the SAME Booking/PaymentEscrow machinery as
 every other transaction on the platform.
 """
+import logging
 from decimal import Decimal
 
 from django.db.models import Q
+
+logger = logging.getLogger(__name__)
 
 LISTING_ORDERINGS = {
     "newest": ("-created_at",),
@@ -208,9 +211,10 @@ SOS_REPEAT_SECONDS = 60
 
 
 def raise_sos(*, ride, user, latitude=None, longitude=None, note=""):
-    """The rider or the driver asks for help during a trip. Records who raised it and when, and alerts every admin
-    with the route, the people involved and, when given, the sender's location. Pressing again within a minute
-    does not alert twice. Returns how many admins were alerted (0 on a repeat press)."""
+    """The rider or the driver asks for help during a trip. Records who raised it and when, alerts every admin
+    with the route, the people involved and, when given, the sender's location, and texts the sender's own
+    emergency contact if they set one. Pressing again within a minute does not alert twice.
+    Returns (admins alerted, whether the contact was alerted); (0, False) on a repeat press."""
     from datetime import timedelta
     from django.utils import timezone
     from identity.models import User
@@ -223,7 +227,7 @@ def raise_sos(*, ride, user, latitude=None, longitude=None, note=""):
 
     now = timezone.now()
     if ride.sos_raised_by_id == user.id and ride.sos_raised_at and now - ride.sos_raised_at < timedelta(seconds=SOS_REPEAT_SECONDS):
-        return 0
+        return 0, False
     RideBooking.objects.filter(pk=ride.pk).update(sos_raised_at=now, sos_raised_by=user)
     ride.refresh_from_db()
 
@@ -246,7 +250,31 @@ def raise_sos(*, ride, user, latitude=None, longitude=None, note=""):
     admins = list(User.objects.filter(admin_profile__isnull=False))
     for admin in admins:
         notify(recipient=admin, notification_type="RIDE_SOS", title="SOS on an OaziGo ride", message=" ".join(lines), related_reference=str(ride.id))
-    return len(admins)
+
+    contact_alerted = False
+    contact = getattr(user, "ride_emergency_contact", None)
+    if contact is not None:
+        who = user.full_name or user.username
+        to_contact = [f"{who} pressed SOS on an OaziGo ride.", f"Route: {ride.pickup_description} → {ride.dropoff_description}."]
+        if ride.driver is not None and user.id == ride.rider_id:
+            to_contact.append(f"Driver: {ride.driver.full_name or ride.driver.username}.")
+        if vehicle is not None:
+            to_contact.append(f"Vehicle: {vehicle.make} {vehicle.model}, plate {vehicle.plate_number}.")
+        if latitude is not None and longitude is not None:
+            to_contact.append(f"Location: https://www.google.com/maps?q={latitude},{longitude}")
+        if note:
+            to_contact.append(f"Note: {note}")
+        to_contact.append(f"Try calling them on {user.phone}, or contact local emergency services.")
+        try:
+            notify(
+                external_phone_number=contact.phone, notification_type="RIDE_SOS", title="SOS from someone who listed you as a contact",
+                message=" ".join(to_contact), channel="SMS", related_reference=str(ride.id),
+            )
+            contact_alerted = True
+        except Exception:
+            # A failing SMS provider must never stop the admins from being alerted.
+            logger.exception("Could not alert the emergency contact for ride %s", ride.id)
+    return len(admins), contact_alerted
 
 
 def expire_stale_rides(*, max_age_hours: int = STALE_RIDE_HOURS, now=None) -> list:

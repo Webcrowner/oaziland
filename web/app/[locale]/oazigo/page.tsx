@@ -13,6 +13,7 @@ import Button from "@/components/ui/Button";
 import GpsCaptureButton from "@/components/GpsCaptureButton";
 import RideChat from "@/components/RideChat";
 import RateAndReport from "@/components/RateAndReport";
+import EmergencyContactCard from "@/components/EmergencyContactCard";
 import { IconMapPin, IconCompass } from "@/components/Icons";
 
 const STATUS_VARIANT: Record<string, "navy" | "gold" | "green" | "clay"> = {
@@ -224,7 +225,10 @@ export default function OaziGoPage() {
     });
     try {
       const result = await raiseRideSos(id, token, coords);
-      setSosMessage({ rideId: id, text: result.admins_alerted > 0 ? t("sosSent") : t("sosNoOperator") });
+      const text = result.admins_alerted > 0 || result.emergency_contact_alerted
+        ? t(result.emergency_contact_alerted ? "sosSentWithContact" : "sosSent")
+        : t("sosNoOperator");
+      setSosMessage({ rideId: id, text });
       load();
     } catch (err) {
       setRideActionError(err instanceof Error ? err.message : t("actionFailed"));
@@ -254,6 +258,8 @@ export default function OaziGoPage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
       <PageHeader title={t("title")} subtitle={t("subtitle")} />
+
+      <EmergencyContactCard />
 
       {/* Real ride request form */}
       <form onSubmit={handleRequest} className="border border-gray-200 rounded-xl p-6 bg-white mb-6 flex flex-col gap-3">

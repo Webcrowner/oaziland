@@ -296,3 +296,14 @@ class RideMessage(models.Model):
     class Meta:
         db_table = "ride_messages"
         ordering = ["created_at"]
+
+
+class RideEmergencyContact(models.Model):
+    """Someone a user wants told when they press SOS on a ride. One per user, chosen by the user themselves."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ride_emergency_contact")
+    name = models.CharField(max_length=200)
+    phone = models.CharField(max_length=20)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ride_emergency_contacts"

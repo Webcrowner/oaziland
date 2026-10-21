@@ -15,9 +15,9 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, PriceBasis
+from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, PriceBasis, RideEmergencyContact
 from .serializers import (
-    PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer,
+    PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer, EmergencyContactSerializer,
     AddMediaSerializer, SetAvailabilitySerializer,
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer,
     RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer, RideSosSerializer,
@@ -395,13 +395,13 @@ class RideViewSet(viewsets.ModelViewSet):
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data
         try:
-            alerted = raise_sos(ride=ride, user=request.user, latitude=data.get("latitude"), longitude=data.get("longitude"), note=data.get("note", ""))
+            admins_alerted, contact_alerted = raise_sos(ride=ride, user=request.user, latitude=data.get("latitude"), longitude=data.get("longitude"), note=data.get("note", ""))
         except NotPartyToRideError as e:
             return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
         except RideStateError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         ride.refresh_from_db()
-        return Response({"sos_raised_at": ride.sos_raised_at, "admins_alerted": alerted})
+        return Response({"sos_raised_at": ride.sos_raised_at, "admins_alerted": admins_alerted, "emergency_contact_alerted": contact_alerted})
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
@@ -553,6 +553,30 @@ class MyDriverProfileView(APIView):
         input_serializer.is_valid(raise_exception=True)
         driver_profile = register_as_driver(user=request.user, license_number=input_serializer.validated_data["license_number"])
         return Response(DriverProfileSerializer(driver_profile).data, status=status.HTTP_201_CREATED)
+
+
+class MyEmergencyContactView(APIView):
+    """The person a user wants told when they press SOS on a ride. One per user; they set, change and remove it."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: EmergencyContactSerializer, 404: dict})
+    def get(self, request):
+        contact = getattr(request.user, "ride_emergency_contact", None)
+        if contact is None:
+            return Response({"detail": "You have not set an emergency contact."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(EmergencyContactSerializer(contact).data)
+
+    @extend_schema(request=EmergencyContactSerializer, responses={200: EmergencyContactSerializer})
+    def put(self, request):
+        serializer = EmergencyContactSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        contact, _ = RideEmergencyContact.objects.update_or_create(user=request.user, defaults=serializer.validated_data)
+        return Response(EmergencyContactSerializer(contact).data)
+
+    @extend_schema(responses={204: None})
+    def delete(self, request):
+        RideEmergencyContact.objects.filter(user=request.user).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MyVehicleViewSet(viewsets.ModelViewSet):

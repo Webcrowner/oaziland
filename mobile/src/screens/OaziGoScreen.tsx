@@ -6,6 +6,7 @@ import {
   type RideBookingItem, type DriverProfileItem, type VehicleItem,
 } from "../lib/api";
 import RateAndReport from "../components/RateAndReport";
+import EmergencyContactCard from "../components/EmergencyContactCard";
 
 const STATUS_COLORS: Record<string, string> = {
   REQUESTED: "#C9A227", ACCEPTED: "#1B2A4A", IN_PROGRESS: "#1B2A4A", COMPLETED: "#16A34A", CANCELLED: "#A8502E",
@@ -132,10 +133,11 @@ export default function OaziGoScreen() {
           onPress: async () => {
             try {
               const result = await raiseRideSos(id);
+              const alerted = result.admins_alerted > 0 || result.emergency_contact_alerted;
               Alert.alert(
-                result.admins_alerted > 0 ? "SOS sent" : "SOS recorded",
-                result.admins_alerted > 0
-                  ? "The Oaziland team has been alerted. If you are in immediate danger, contact your local emergency services."
+                alerted ? "SOS sent" : "SOS recorded",
+                alerted
+                  ? `The Oaziland team has been alerted${result.emergency_contact_alerted ? " and your emergency contact has been notified" : ""}. If you are in immediate danger, contact your local emergency services.`
                   : "No Oaziland operator could be alerted right now. Please contact your local emergency services.",
               );
               load();
@@ -186,6 +188,7 @@ export default function OaziGoScreen() {
       ListEmptyComponent={<Text style={styles.empty}>No rides yet.</Text>}
       ListHeaderComponent={
         <View>
+          <EmergencyContactCard />
           <View style={styles.formCard}>
             <TextInput style={styles.input} placeholder="Pickup location" value={pickup} onChangeText={setPickup} />
             <TextInput style={styles.input} placeholder="Drop-off location" value={dropoff} onChangeText={setDropoff} />

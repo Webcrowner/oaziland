@@ -1475,6 +1475,18 @@
     "mediaAttached": "{count} file(s) attached",
     "noMatches": "No listings match your filters."
   },
+  "EmergencyContact": {
+    "title": "Emergency contact",
+    "explainer": "Someone we alert, with your route, vehicle and location, if you press SOS during a ride.",
+    "add": "Add an emergency contact",
+    "change": "Change",
+    "remove": "Remove",
+    "namePlaceholder": "Contact's name",
+    "phonePlaceholder": "Contact's phone number, e.g. +237 6XX XXX XXX",
+    "save": "Save",
+    "cancel": "Cancel",
+    "saveFailed": "Could not save the contact. Please try again."
+  },
   "MarketplaceFilters": {
     "search": "Search listings",
     "priceBasis": "Price type",
@@ -1938,6 +1950,7 @@
     "sosButton": "SOS — I need help",
     "sosConfirm": "Send an SOS to the Oaziland team? Your trip details and location will be shared. If you are in immediate danger, also contact your local emergency services.",
     "sosSent": "SOS sent. The Oaziland team has been alerted. If you are in immediate danger, contact your local emergency services.",
+    "sosSentWithContact": "SOS sent. The Oaziland team has been alerted and your emergency contact has been notified. If you are in immediate danger, contact your local emergency services.",
     "sosNoOperator": "SOS recorded, but no Oaziland operator could be alerted right now. Please contact your local emergency services.",
     "yourDriver": "Your driver: {name}",
     "yourRider": "Rider: {name}",

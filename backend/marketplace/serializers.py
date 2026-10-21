@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, RideMessage, ListingCondition,
-    RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder,
+    RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder, RideEmergencyContact,
 )
 
 
@@ -168,6 +168,25 @@ class DriverProfileSerializer(serializers.ModelSerializer):
         model = DriverProfile
         fields = ["id", "user_name", "license_number", "is_verified", "vehicles", "created_at"]
         read_only_fields = ["is_verified", "created_at"]
+
+
+class EmergencyContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RideEmergencyContact
+        fields = ["name", "phone"]
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Enter the contact's name.")
+        return value
+
+    def validate_phone(self, value):
+        value = value.strip()
+        digits = [c for c in value if c.isdigit()]
+        if not (8 <= len(digits) <= 15) or any(c not in "+0123456789 -" for c in value):
+            raise serializers.ValidationError("Enter a valid phone number, for example +237 6XX XXX XXX.")
+        return value
 
 
 class RideSosSerializer(serializers.Serializer):

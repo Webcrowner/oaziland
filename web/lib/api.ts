@@ -3576,11 +3576,42 @@ async function postRideAction(rideId: string, action: string, accessToken: strin
 export const cancelRide = (rideId: string, accessToken: string) => postRideAction(rideId, "cancel", accessToken);
 export const releaseRide = (rideId: string, accessToken: string) => postRideAction(rideId, "release", accessToken);
 
+export interface EmergencyContact {
+  name: string;
+  phone: string;
+}
+
+export async function getMyEmergencyContact(accessToken: string): Promise<EmergencyContact | null> {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Could not load your emergency contact");
+  return res.json();
+}
+
+export async function saveMyEmergencyContact(contact: EmergencyContact, accessToken: string): Promise<EmergencyContact> {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(contact),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not save the contact"));
+  }
+  return data;
+}
+
+export async function deleteMyEmergencyContact(accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not remove the contact");
+}
+
 export async function raiseRideSos(
   rideId: string,
   accessToken: string,
   coords?: { latitude: number; longitude: number },
-): Promise<{ sos_raised_at: string; admins_alerted: number }> {
+): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact_alerted: boolean }> {
   const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/sos/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
