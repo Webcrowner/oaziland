@@ -1,22 +1,27 @@
 """identity.serializers — registration and profile serializers."""
 from rest_framework import serializers
 from .models import User, KYCProfile
+from .services import SELF_SERVICE_ROLES, grant_role
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     referral_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # What the person wants to do here; "renter" is the normal-user default and adds no extra role.
+    role = serializers.ChoiceField(choices=SELF_SERVICE_ROLES, write_only=True, required=False, default="renter")
 
     class Meta:
         model = User
-        fields = ["id", "username", "phone", "email", "password", "preferred_language", "referral_code"]
+        fields = ["id", "username", "phone", "email", "password", "preferred_language", "referral_code", "role"]
 
     def create(self, validated_data):
         password = validated_data.pop("password")
         referral_code = validated_data.pop("referral_code", "").strip()
+        role = validated_data.pop("role", "renter")
         user = User(**validated_data)
         user.set_password(password)  # never store a plain-text password — Django's hashing, applied explicitly here
         user.save()
+        grant_role(user, role)
 
         if referral_code:
             # WHY a bad/unknown code never fails registration itself:

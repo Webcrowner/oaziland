@@ -168,6 +168,7 @@ def test_dispute_by_either_party_and_rating_after_completion():
     _client(plumber).post(f"/api/service-requests/{request_id}/accept/")
     _client(plumber).post(f"/api/service-requests/{request_id}/quote/", {"amount_xaf": "9000"})
     _client(requester).post(f"/api/service-requests/{request_id}/approve-quote/")
+    _client(requester).post(f"/api/service-requests/{request_id}/fund/", {"phone_number": requester.phone})
     _client(plumber).post(f"/api/service-requests/{request_id}/start/")
     _client(requester).post(f"/api/service-requests/{request_id}/complete/", {"phone_number": requester.phone})
 
@@ -254,6 +255,7 @@ def test_itemized_quote_sums_to_the_total_and_a_receipt_is_issued_to_the_parties
 
     assert _client(requester).get(f"/api/service-requests/{request_id}/receipt/").status_code == 404  # not completed yet
     _client(requester).post(f"/api/service-requests/{request_id}/approve-quote/")
+    _client(requester).post(f"/api/service-requests/{request_id}/fund/", {"phone_number": requester.phone})
     _client(plumber).post(f"/api/service-requests/{request_id}/start/")
     _client(requester).post(f"/api/service-requests/{request_id}/complete/", {"phone_number": requester.phone})
 

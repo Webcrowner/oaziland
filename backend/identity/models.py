@@ -174,6 +174,9 @@ class TechnicianProfile(models.Model):
     # get paid for real jobs claiming any specialty — no admin vetting at all,
     # unlike DriverProfile.is_verified. Mirrors that same admin-review posture.
     is_verified = models.BooleanField(default=False)
+    # Set when an admin rejects an application or revokes verification; cleared when the technician resubmits documents.
+    rejection_reason = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
     # Upload-pipeline URLs: credentials are reviewed by admins before verification; portfolio is shown publicly.
     credential_urls = models.JSONField(default=list, blank=True)
     portfolio_urls = models.JSONField(default=list, blank=True)

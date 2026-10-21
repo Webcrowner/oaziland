@@ -24,6 +24,54 @@ class KycNotSubmittedError(Exception):
     APPROVED yet — just submitted)."""
 
 
+# Roles a person may pick for themselves at signup. "admin" and "agency" stay
+# admin-only; "renter" is the default normal user and needs no profile row.
+SELF_SERVICE_ROLES = ("renter", "landlord", "agent", "student", "technician", "driver")
+ALL_ROLES = SELF_SERVICE_ROLES + ("agency", "admin")
+
+
+def grant_role(user, role: str, *, commission_percent=None, registration_number=None,
+               institution_name=None, license_number=None):
+    """Adds a role on top of whatever the user already has — never replaces or
+    removes one, so a person can hold several at once. Shared by signup and
+    the admin 'assign role' action so both create identical profiles.
+    Roles that need vetting (technician, driver) start unverified."""
+    from decimal import Decimal
+    import uuid
+    from .models import LandlordProfile, AgentProfile, AgencyProfile, StudentProfile, TechnicianProfile, AdminProfile
+    from marketplace.models import DriverProfile
+
+    if role == "renter":
+        return
+    if role == "landlord":
+        LandlordProfile.objects.get_or_create(user=user)
+    elif role == "agent":
+        AgentProfile.objects.get_or_create(
+            user=user, defaults={"agent_commission_percent": Decimal(str(commission_percent or "5.00"))},
+        )
+    elif role == "agency":
+        AgencyProfile.objects.get_or_create(
+            user=user,
+            defaults={
+                "registration_number": registration_number or f"AGY-{uuid.uuid4().hex[:10].upper()}",
+                "agency_commission_percent": Decimal(str(commission_percent or "10.00")),
+            },
+        )
+    elif role == "student":
+        StudentProfile.objects.get_or_create(user=user, defaults={"institution_name": institution_name or "Unspecified"})
+    elif role == "technician":
+        TechnicianProfile.objects.get_or_create(user=user, defaults={"specialties": []})
+    elif role == "driver":
+        DriverProfile.objects.get_or_create(user=user, defaults={"license_number": license_number or "PENDING-ADMIN-ASSIGNED"})
+    elif role == "admin":
+        AdminProfile.objects.get_or_create(user=user, defaults={"permissions": []})
+        if not user.is_staff:
+            user.is_staff = True
+            user.save(update_fields=["is_staff"])
+    else:
+        raise ValueError(f"Unknown role '{role}'.")
+
+
 def approve_kyc(kyc_profile):
     """The real gap this closes: a submitted KYCProfile could sit at
     kyc_status=PENDING forever — nothing anywhere (not even Django

@@ -40,6 +40,12 @@ class ServiceRequestStatus(models.TextChoices):
     DISPUTED = "DISPUTED", "Disputed"
 
 
+class ServiceDisputeResolution(models.TextChoices):
+    RESUME = "RESUME", "Resume the job with the same technician"
+    REASSIGN = "REASSIGN", "Put back on the job board"
+    CANCEL = "CANCEL", "Cancel the job"
+
+
 class ServiceRequest(models.Model):
     """A request for a technician. Deliberately holds an OPTIONAL link to
     a Booking (transactions app) — a request exists the moment someone
@@ -54,6 +60,13 @@ class ServiceRequest(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="service_requests_received",
     )
+    # Set when the requester picked a technician from the directory; only that technician may accept until it is opened to all.
+    requested_technician = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="service_requests_directed",
+    )
+    # Technicians who left this job (released, declined, timed out, no-show); they cannot take it again.
+    excluded_technicians = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name="service_requests_left")
     category = models.CharField(max_length=25, choices=ServiceCategory.choices)
     priority = models.CharField(max_length=10, choices=ServiceRequestPriority.choices, default=ServiceRequestPriority.SCHEDULED)
     status = models.CharField(max_length=15, choices=ServiceRequestStatus.choices, default=ServiceRequestStatus.REQUESTED)
@@ -61,6 +74,10 @@ class ServiceRequest(models.Model):
     quarter = models.ForeignKey("geo.Quarter", on_delete=models.SET_NULL, null=True, blank=True)
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    # Landmark or street description; only the two parties on the job ever see it.
+    address_note = models.CharField(max_length=255, blank=True)
+    # Town or neighbourhood in plain words; shown to technicians on the board, so it must stay coarse.
+    area_label = models.CharField(max_length=100, blank=True)
     booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="service_request")
     # Price is agreed up front: technician proposes, requester approves, payment settles at exactly this amount.
     quoted_amount_xaf = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
@@ -69,12 +86,17 @@ class ServiceRequest(models.Model):
     quoted_materials_xaf = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     quote_approved = models.BooleanField(default=False)
     dispute_reason = models.TextField(blank=True)
+    dispute_resolution = models.CharField(max_length=10, choices=ServiceDisputeResolution.choices, blank=True)
+    dispute_resolution_notes = models.TextField(blank=True)
+    dispute_resolved_at = models.DateTimeField(null=True, blank=True)
     # When the requester wants the job done; null means as soon as possible.
     scheduled_for = models.DateTimeField(null=True, blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
     en_route_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
+    # The technician's "work is done" signal; the requester then confirms, or the escrow is released automatically.
+    work_completed_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -92,6 +114,23 @@ class ServiceRequestMessage(models.Model):
     class Meta:
         db_table = "service_request_messages"
         ordering = ["created_at"]
+
+
+class ServiceReview(models.Model):
+    """One review per party per completed job. Kept apart from social.Rating on purpose: a
+    client's reputation as a requester must not leak into a technician's own average."""
+    service_request = models.ForeignKey(ServiceRequest, on_delete=models.CASCADE, related_name="reviews")
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="service_reviews_written")
+    subject = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="service_reviews_received")
+    # Which side of the job the subject was: the technician, or the requester (client).
+    subject_is_requester = models.BooleanField(default=False)
+    score = models.DecimalField(max_digits=2, decimal_places=1)
+    comment = models.TextField(max_length=1000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "service_reviews"
+        constraints = [models.UniqueConstraint(fields=["service_request", "author"], name="one_service_review_per_author")]
 
 
 class ServiceRequestPhotoType(models.TextChoices):

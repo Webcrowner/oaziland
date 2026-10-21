@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import ServiceRequest
+from .models import ServiceRequest, ServiceReview
+
+
+@admin.register(ServiceReview)
+class ServiceReviewAdmin(admin.ModelAdmin):
+    list_display = ("service_request", "author", "subject", "subject_is_requester", "score", "created_at")
+    list_filter = ("subject_is_requester",)
+    search_fields = ("author__username", "subject__username", "comment")
 
 
 @admin.register(ServiceRequest)

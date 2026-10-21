@@ -6,6 +6,7 @@ dashboard summary all had substantial, working logic with zero way to
 reach any of it.
 """
 from django.http import Http404
+import uuid
 from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.decorators import action
@@ -22,8 +23,14 @@ from .serializers import (
     ProjectMilestoneSerializer, LinkProjectTechnicianSerializer, CompleteProjectMilestoneSerializer,
     ProposeQuoteSerializer, EnRouteSerializer, DisputeServiceRequestSerializer, RateTechnicianSerializer,
     TechnicianDocumentsSerializer, RescheduleServiceRequestSerializer, ServiceRequestMessageSerializer,
+    AdminServiceDisputeSerializer, ResolveServiceDisputeSerializer, FundServiceRequestSerializer,
+    TechnicianReviewReasonSerializer,
 )
 from .services import (
+    BOARD_DEFAULT_RADIUS_KM, BOARD_MAX_RADIUS_KM, get_technician_reference_point, bounding_box, ContactSharingBlockedError,
+    resolve_service_dispute, fund_service_request_escrow, is_escrow_funded,
+    decline_service_request, open_request_to_all, reject_quote, dismiss_technician, mark_work_done, rate_requester,
+    verify_technician, reject_technician, revoke_technician, TechnicianReviewStateError,
     release_service_request, mark_en_route, propose_quote, approve_quote, dispute_service_request, rate_technician,
     reschedule_service_request, post_service_request_message,
     TechnicianSpecialtyMismatchError, ServiceRequestStateError, InvalidQuoteError, AlreadyRegisteredTechnicianError,
@@ -68,17 +75,60 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
         from django.db.models import Q
         if self.action == "list":
             user = self.request.user
-            visible = Q(requester=user) | Q(technician=user)
+            mine = Q(requester=user)
+            assigned = Q(technician=user)
             # The open job board is only for verified technicians, and only for their own specialties.
+            board = Q(pk__in=[])
             profile = getattr(user, "technician_profile", None)
-            if profile is not None and profile.is_verified and profile.specialties:
-                visible |= Q(status=ServiceRequestStatus.REQUESTED, category__in=profile.specialties)
+            if profile is not None and profile.is_verified:
+                board = Q(status=ServiceRequestStatus.REQUESTED, requested_technician=user)
+                if profile.specialties:
+                    board |= Q(
+                        status=ServiceRequestStatus.REQUESTED, requested_technician__isnull=True,
+                        category__in=profile.specialties,
+                    ) & self._nearby_filter(user)
+                board &= ~Q(excluded_technicians=user)
+            # ?scope= lets the UI page each list separately; no scope keeps the combined list.
+            scope = self.request.query_params.get("scope", "")
+            if scope == "mine":
+                visible = mine
+            elif scope == "jobs":
+                visible = assigned
+            elif scope == "board":
+                visible = board & ~mine
+            else:
+                visible = mine | assigned | board
+            # Urgent jobs lead the open board; every other list is simply newest first.
+            ordering = ["-requested_at"]
+            if scope == "board":
+                from django.db.models import Case, IntegerField, Value, When
+                urgent_first = Case(When(priority="URGENT", then=Value(0)), default=Value(1), output_field=IntegerField())
+                ordering = [urgent_first, "-requested_at"]
             return (
                 ServiceRequest.objects.filter(visible).distinct()
-                .select_related("requester", "technician", "quarter").prefetch_related("photos")
-                .order_by("-requested_at")
+                .select_related("requester", "technician", "quarter").prefetch_related("photos", "reviews")
+                .order_by(*ordering)
             )
-        return ServiceRequest.objects.select_related("requester", "technician", "quarter").prefetch_related("photos")
+        return ServiceRequest.objects.select_related("requester", "technician", "quarter").prefetch_related("photos", "reviews")
+
+    def _nearby_filter(self, user):
+        """Limits the open board to jobs near the technician's last known position.
+        Jobs without coordinates stay visible, and so does everything when the
+        technician has no recent location or asks for ?radius_km=all."""
+        from django.db.models import Q
+        raw = self.request.query_params.get("radius_km", "")
+        if raw == "all":
+            return Q()
+        try:
+            radius = float(raw) if raw else BOARD_DEFAULT_RADIUS_KM
+        except ValueError:
+            radius = BOARD_DEFAULT_RADIUS_KM
+        radius = min(max(radius, 1), BOARD_MAX_RADIUS_KM)
+        point = get_technician_reference_point(user)
+        if point is None:
+            return Q()
+        south, north, west, east = bounding_box(point[0], point[1], radius)
+        return Q(latitude__isnull=True) | Q(latitude__range=(south, north), longitude__range=(west, east))
 
     def retrieve(self, request, *args, **kwargs):
         # Detail GET stays hidden from outsiders (404, so existence isn't leaked).
@@ -89,6 +139,8 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
         on_board = (
             profile is not None and profile.is_verified and service_request.status == ServiceRequestStatus.REQUESTED
             and service_request.category in (profile.specialties or [])
+            and service_request.requested_technician_id in (None, user.id)
+            and not service_request.excluded_technicians.filter(pk=user.pk).exists()
         )
         if not (is_party or on_board):
             raise Http404
@@ -102,8 +154,24 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
             latitude=serializer.validated_data.get("latitude"),
             scheduled_for=serializer.validated_data.get("scheduled_for"),
             longitude=serializer.validated_data.get("longitude"),
+            requested_technician=serializer.validated_data.get("requested_technician"),
+            address_note=serializer.validated_data.get("address_note", ""),
+            area_label=serializer.validated_data.get("area_label", ""),
+            photo_urls=serializer.validated_data.get("photo_urls", ()),
         )
         serializer.instance = service_request
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    def decline(self, request, pk=None):
+        """The technician the requester chose turns the job down; it opens to the board."""
+        return self._run(request, decline_service_request, technician=request.user)
+
+    @action(detail=True, methods=["post"], url_path="open-to-all")
+    @extend_schema(request=None, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    def open_to_all(self, request, pk=None):
+        """The requester stops waiting on their chosen technician and opens the job to the board."""
+        return self._run(request, open_request_to_all, actor=request.user)
 
     @action(detail=True, methods=["post"])
     def accept(self, request, pk=None):
@@ -138,8 +206,23 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
             return Response({"detail": "This request must be accepted before it can start."}, status=status.HTTP_400_BAD_REQUEST)
         if not service_request.quote_approved:
             return Response({"detail": "The requester must approve your quote before work can start."}, status=status.HTTP_400_BAD_REQUEST)
+        if not is_escrow_funded(service_request):
+            return Response({"detail": "The requester must pay into escrow before work can start."}, status=status.HTTP_400_BAD_REQUEST)
         start_service(service_request)
         return Response(self.get_serializer(service_request).data)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=FundServiceRequestSerializer, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    def fund(self, request, pk=None):
+        """The requester pays the approved quote into escrow before work starts."""
+        from transactions.views import FakeRedisLock
+        from payments.gateways import get_active_gateway
+        input_serializer = FundServiceRequestSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        return self._run(
+            request, fund_service_request_escrow, requester=request.user, lock_client=FakeRedisLock(),
+            payment_gateway=get_active_gateway(), phone_number=input_serializer.validated_data["phone_number"],
+        )
 
     @action(detail=True, methods=["post"])
     @extend_schema(request=CompleteServiceRequestSerializer, responses={200: ServiceRequestSerializer, 400: dict})
@@ -163,11 +246,14 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
         input_serializer.is_valid(raise_exception=True)
         if not service_request.quote_approved or service_request.quoted_amount_xaf is None:
             return Response({"detail": "There is no approved quote for this job."}, status=status.HTTP_400_BAD_REQUEST)
+        phone_number = input_serializer.validated_data["phone_number"]
+        if not is_escrow_funded(service_request) and not phone_number:
+            return Response({"detail": "Pay into escrow first, or provide a phone number to pay now."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             complete_service_request_with_payment(
                 service_request=service_request, amount_xaf=service_request.quoted_amount_xaf,
                 lock_client=FakeRedisLock(), payment_gateway=get_active_gateway(),
-                phone_number=input_serializer.validated_data["phone_number"],
+                phone_number=phone_number,
             )
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -232,10 +318,27 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
             amount_xaf=data.get("amount_xaf"), labor_xaf=data.get("labor_xaf"), materials_xaf=data.get("materials_xaf"),
         )
 
+    @action(detail=True, methods=["post"], url_path="work-done")
+    @extend_schema(request=None, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    def work_done(self, request, pk=None):
+        """The technician reports the job finished so the requester can confirm and release payment."""
+        return self._run(request, mark_work_done, technician=request.user)
+
     @action(detail=True, methods=["post"], url_path="approve-quote")
     @extend_schema(request=None, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
     def approve_quote(self, request, pk=None):
         return self._run(request, approve_quote, requester=request.user)
+
+    @action(detail=True, methods=["post"], url_path="reject-quote")
+    @extend_schema(request=None, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    def reject_quote(self, request, pk=None):
+        return self._run(request, reject_quote, requester=request.user)
+
+    @action(detail=True, methods=["post"], url_path="dismiss-technician")
+    @extend_schema(request=None, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    def dismiss_technician(self, request, pk=None):
+        """The requester replaces the assigned technician before work starts."""
+        return self._run(request, dismiss_technician, requester=request.user)
 
     @action(detail=True, methods=["post"])
     @extend_schema(request=DisputeServiceRequestSerializer, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
@@ -252,7 +355,7 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
         return self._run(request, reschedule_service_request, actor=request.user, scheduled_for=input_serializer.validated_data["scheduled_for"])
 
     @extend_schema(methods=["GET"], responses={200: ServiceRequestMessageSerializer(many=True)})
-    @extend_schema(methods=["POST"], request=ServiceRequestMessageSerializer, responses={201: ServiceRequestMessageSerializer, 403: dict})
+    @extend_schema(methods=["POST"], request=ServiceRequestMessageSerializer, responses={201: ServiceRequestMessageSerializer, 400: dict, 403: dict})
     @action(detail=True, methods=["get", "post"])
     def messages(self, request, pk=None):
         """In-job chat, visible to the two parties only (404 for anyone else)."""
@@ -264,7 +367,10 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
             return Response(ServiceRequestMessageSerializer(thread, many=True).data)
         input_serializer = ServiceRequestMessageSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
-        message = post_service_request_message(service_request=service_request, sender=request.user, text=input_serializer.validated_data["text"])
+        try:
+            message = post_service_request_message(service_request=service_request, sender=request.user, text=input_serializer.validated_data["text"])
+        except ContactSharingBlockedError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(ServiceRequestMessageSerializer(message).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])
@@ -297,7 +403,15 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
     def rate(self, request, pk=None):
         input_serializer = RateTechnicianSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
-        return self._run(request, rate_technician, requester=request.user, score=input_serializer.validated_data["score"])
+        return self._run(request, rate_technician, requester=request.user, score=input_serializer.validated_data["score"], comment=input_serializer.validated_data["comment"])
+
+    @action(detail=True, methods=["post"], url_path="rate-requester")
+    @extend_schema(request=RateTechnicianSerializer, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    def rate_requester(self, request, pk=None):
+        """The assigned technician reviews the client once the job is completed."""
+        input_serializer = RateTechnicianSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        return self._run(request, rate_requester, technician=request.user, score=input_serializer.validated_data["score"], comment=input_serializer.validated_data["comment"])
 
 
 class TechnicianDirectoryView(APIView):
@@ -309,12 +423,18 @@ class TechnicianDirectoryView(APIView):
     def get(self, request):
         from django.db.models import Count, Q
         specialty = request.query_params.get("specialty")
+        user_id = request.query_params.get("user_id")
         profiles = (
             TechnicianProfile.objects.filter(is_verified=True).select_related("user", "coverage_quarter")
             .annotate(completed_jobs=Count("user__service_requests_received", filter=Q(user__service_requests_received__status=ServiceRequestStatus.COMPLETED)))
             .order_by("-avg_rating", "-completed_jobs")
         )
         # Specialties are filtered in Python: JSONField __contains isn't supported on every DB backend.
+        if user_id:
+            try:
+                profiles = profiles.filter(user_id=uuid.UUID(user_id))
+            except ValueError:
+                profiles = profiles.none()
         if specialty:
             profiles = [p for p in profiles if specialty in (p.specialties or [])]
         return Response([
@@ -406,26 +526,94 @@ class MyTechnicianDocumentsView(APIView):
         input_serializer.is_valid(raise_exception=True)
         profile.credential_urls = input_serializer.validated_data["credential_urls"]
         profile.portfolio_urls = input_serializer.validated_data["portfolio_urls"]
-        profile.save(update_fields=["credential_urls", "portfolio_urls"])
+        fields = ["credential_urls", "portfolio_urls"]
+        if not profile.is_verified and profile.rejection_reason:
+            # Resubmitting after a rejection puts the application back in the review queue.
+            profile.rejection_reason = ""
+            fields.append("rejection_reason")
+        profile.save(update_fields=fields)
         return Response(TechnicianProfileSerializer(profile).data)
 
 
 class AdminTechnicianViewSet(viewsets.ReadOnlyModelViewSet):
-    """The other half of the technician vetting gap: previously there was
-    no way for an admin to see or verify a pending technician registration
-    at all — mirrors AdminDriverViewSet exactly."""
+    """Technician vetting for admins. The list defaults to pending applications;
+    ?status=verified|rejected lists the others. Only `list` is scoped, so the
+    detail actions work on any technician and return explicit errors."""
     serializer_class = TechnicianProfileSerializer
     permission_classes = [IsAdminRole]
-    queryset = TechnicianProfile.objects.filter(is_verified=False).order_by("-created_at")
+    queryset = TechnicianProfile.objects.select_related("user").order_by("-created_at")
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action != "list":
+            return queryset
+        review_status = self.request.query_params.get("status", "pending")
+        if review_status == "verified":
+            return queryset.filter(is_verified=True)
+        if review_status == "rejected":
+            return queryset.filter(is_verified=False).exclude(rejection_reason="")
+        return queryset.filter(is_verified=False, rejection_reason="")
+
+    @extend_schema(request=None, responses={200: TechnicianProfileSerializer, 400: dict})
     @action(detail=True, methods=["post"])
     def verify(self, request, pk=None):
         technician_profile = self.get_object()
         if not technician_profile.credential_urls:
             return Response({"detail": "This technician has not uploaded any credential documents yet."}, status=status.HTTP_400_BAD_REQUEST)
-        technician_profile.is_verified = True
-        technician_profile.save(update_fields=["is_verified"])
+        try:
+            verify_technician(technician_profile)
+        except TechnicianReviewStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(TechnicianProfileSerializer(technician_profile).data)
+
+    @extend_schema(request=TechnicianReviewReasonSerializer, responses={200: TechnicianProfileSerializer, 400: dict})
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        technician_profile = self.get_object()
+        input_serializer = TechnicianReviewReasonSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        try:
+            reject_technician(technician_profile, input_serializer.validated_data["reason"])
+        except TechnicianReviewStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(TechnicianProfileSerializer(technician_profile).data)
+
+    @extend_schema(request=TechnicianReviewReasonSerializer, responses={200: dict, 400: dict})
+    @action(detail=True, methods=["post"])
+    def revoke(self, request, pk=None):
+        technician_profile = self.get_object()
+        input_serializer = TechnicianReviewReasonSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        try:
+            outcome = revoke_technician(technician_profile, input_serializer.validated_data["reason"])
+        except TechnicianReviewStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({**outcome, "technician": TechnicianProfileSerializer(technician_profile).data})
+
+
+class AdminServiceDisputeViewSet(viewsets.ReadOnlyModelViewSet):
+    """Queue of jobs a requester or technician disputed. These happen before
+    payment, so they never reach the escrow dispute queue — without this
+    an admin had no way to unstick them."""
+    serializer_class = AdminServiceDisputeSerializer
+    permission_classes = [IsAdminRole]
+    pagination_class = None
+    queryset = (
+        ServiceRequest.objects.filter(status=ServiceRequestStatus.DISPUTED)
+        .select_related("requester", "technician").order_by("-requested_at")
+    )
+
+    @extend_schema(request=ResolveServiceDisputeSerializer, responses={200: AdminServiceDisputeSerializer, 400: dict})
+    @action(detail=True, methods=["post"])
+    def resolve(self, request, pk=None):
+        service_request = self.get_object()
+        input_serializer = ResolveServiceDisputeSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        try:
+            resolve_service_dispute(service_request=service_request, **input_serializer.validated_data)
+        except ServiceRequestStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(AdminServiceDisputeSerializer(service_request).data)
 
 
 class MyTechnicianLocationPingView(APIView):

@@ -21,6 +21,7 @@ LOC = {"latitude": "3.848", "longitude": "11.502"}
 def _approved_quote(request_id, requester, technician, amount):
     _auth_client(technician).post(f"/api/service-requests/{request_id}/quote/", {"amount_xaf": amount})
     _auth_client(requester).post(f"/api/service-requests/{request_id}/approve-quote/")
+    _auth_client(requester).post(f"/api/service-requests/{request_id}/fund/", {"phone_number": requester.phone})
 
 
 def _auth_client(user):
