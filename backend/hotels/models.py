@@ -32,6 +32,7 @@ class Hotel(PropertyAsset):
     used to duplicate that with its own unvalidated JSONField before
     the parent had one at all; removed to use the inherited field
     instead of shadowing it with a second, less-validated copy."""
+    name = models.CharField(max_length=200, blank=True, default="")
     star_rating = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5, null = unrated
     verified = models.BooleanField(default=False)
 

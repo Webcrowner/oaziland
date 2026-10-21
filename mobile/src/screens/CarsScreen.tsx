@@ -1,10 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, Modal, ScrollView } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 import {
-  listMarketplaceListings, createMarketplaceListing, addMarketplaceMedia, listQuarters, uploadMediaFile,
+  createMarketplaceListing, addMarketplaceMedia, listQuarters, uploadMediaFile,
   type CarListing, type Quarter, type MediaUploadResult,
 } from "../lib/api";
+import { useMarketplaceListings } from "../lib/useMarketplaceListings";
+import LoadMoreButton from "../components/LoadMoreButton";
+import type { RootStackParamList } from "../navigation/AppNavigator";
+import MarketplaceFilterBar from "../components/MarketplaceFilterBar";
+import { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "../lib/marketplaceFilters";
 
 const PRICE_BASIS_OPTIONS = ["SALE", "RENT_NIGHTLY", "RENT_WEEKLY", "RENT_MONTHLY", "RENT_ANNUAL"];
 
@@ -15,9 +22,10 @@ const PRICE_BASIS_OPTIONS = ["SALE", "RENT_NIGHTLY", "RENT_WEEKLY", "RENT_MONTHL
  * flow already proven on ListPropertyScreen.
  */
 export default function CarsScreen() {
-  const [listings, setListings] = useState<CarListing[]>([]);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [filters, setFilters] = useState<MarketplaceFilters>(EMPTY_MARKETPLACE_FILTERS);
+  const { items: listings, loading, hasMore, loadingMore, loadMore, reload } = useMarketplaceListings<CarListing>("cars", filtersToQuery(filters));
   const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
 
   const [title, setTitle] = useState("");
@@ -32,18 +40,12 @@ export default function CarsScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const load = useCallback(() => {
-    listMarketplaceListings<CarListing>("cars")
-      .then((data) => setListings(data.results)).catch(() => setListings([])).finally(() => setLoading(false));
-  }, []);
-
   useEffect(() => {
-    load();
     listQuarters().then((data) => {
       setQuarters(data);
       if (data.length > 0) setQuarterId(data[0].id);
     }).catch(() => {});
-  }, [load]);
+  }, []);
 
   async function handlePickPhoto() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -74,7 +76,7 @@ export default function CarsScreen() {
       await Promise.all(media.map((m) => addMarketplaceMedia("cars", listing.id, m.url, m.media_type)));
       setShowForm(false);
       setTitle(""); setMake(""); setModel(""); setYear(""); setPrice(""); setMedia([]);
-      load();
+      reload();
     } catch {
       setError("Could not create listing. Please check your details and try again.");
     } finally {
@@ -97,15 +99,19 @@ export default function CarsScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
-          <TouchableOpacity style={styles.listButton} onPress={() => setShowForm(true)}>
-            <Text style={styles.listButtonText}>List a Car</Text>
-          </TouchableOpacity>
+          <View>
+            <TouchableOpacity style={styles.listButton} onPress={() => setShowForm(true)}>
+              <Text style={styles.listButtonText}>List a Car</Text>
+            </TouchableOpacity>
+            <MarketplaceFilterBar value={filters} onChange={setFilters} />
+          </View>
         }
-        ListEmptyComponent={<Text style={styles.empty}>No cars listed yet.</Text>}
+        ListFooterComponent={hasMore ? <LoadMoreButton onPress={loadMore} loading={loadingMore} /> : null}
+        ListEmptyComponent={<Text style={styles.empty}>{filtersActive(filters) ? "No listings match your filters." : "No cars listed yet."}</Text>}
         renderItem={({ item }) => {
           const photo = item.media.find((m) => m.media_type === "PHOTO");
           return (
-            <View style={styles.card}>
+            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("MarketplaceListingDetail", { category: "cars", listingId: item.id })}>
               {photo ? (
                 <Image source={{ uri: photo.file_url }} style={styles.cardImage} />
               ) : (
@@ -116,7 +122,7 @@ export default function CarsScreen() {
                 <Text style={styles.cardSubtitle}>{item.vehicle_spec.year} {item.vehicle_spec.make} {item.vehicle_spec.model}</Text>
                 <Text style={styles.price}>{Number(item.price_xaf).toLocaleString()} XAF</Text>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         }}
       />

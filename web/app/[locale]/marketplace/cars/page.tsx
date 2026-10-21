@@ -1,7 +1,11 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { listMarketplaceListings, createMarketplaceListing, addMarketplaceMedia, listQuarters, type CarListing, type Quarter, type MediaUploadResult } from "@/lib/api";
+import { createMarketplaceListing, addMarketplaceMedia, listQuarters, type CarListing, type Quarter, type MediaUploadResult } from "@/lib/api";
+import { useMarketplaceListings } from "@/lib/useMarketplaceListings";
+import LoadMoreButton from "@/components/LoadMoreButton";
+import MarketplaceFilterBar, { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "@/components/MarketplaceFilterBar";
+import FavoriteButton from "@/components/FavoriteButton";
 import QuarterOptions from "@/components/QuarterOptions";
 import MissingAreaRequest from "@/components/MissingAreaRequest";
 import PageHeader from "@/components/ui/PageHeader";
@@ -31,9 +35,7 @@ const PRICE_BASIS_LABELS: Record<string, string> = {
  */
 export default function CarsMarketplacePage() {
   const t = useTranslations("MarketplaceCategoryPage");
-  const [listings, setListings] = useState<CarListing[]>([]);
   const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready">("loading");
   const [showForm, setShowForm] = useState(false);
 
   const [title, setTitle] = useState("");
@@ -49,17 +51,13 @@ export default function CarsMarketplacePage() {
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [errorText, setErrorText] = useState("");
 
-  const load = useCallback(() => {
-    listMarketplaceListings<CarListing>("cars")
-      .then((data) => setListings(data.results))
-      .catch(() => setListings([]))
-      .finally(() => setStatus("ready"));
-  }, []);
+  const [filters, setFilters] = useState<MarketplaceFilters>(EMPTY_MARKETPLACE_FILTERS);
+  const [reloadKey, setReloadKey] = useState(0);
+  const { items: listings, status, hasMore, loadingMore, loadMore } = useMarketplaceListings<CarListing>("cars", filtersToQuery(filters), reloadKey);
 
   useEffect(() => {
-    load();
     listQuarters().then(setQuarters).catch(() => {});
-  }, [load]);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -78,7 +76,7 @@ export default function CarsMarketplacePage() {
       for (const m of media) await addMarketplaceMedia("cars", listing.id, m.url, m.media_type, token);
       setShowForm(false);
       setTitle(""); setPrice(""); setMake(""); setModel(""); setYear(""); setMileage(""); setMedia([]); setGps(EMPTY_GPS);
-      load();
+      setReloadKey((k) => k + 1);
     } catch {
       setErrorText(t("submitFailed"));
       setSubmitStatus("error");
@@ -121,16 +119,21 @@ export default function CarsMarketplacePage() {
         </form>
       )}
 
+      <MarketplaceFilterBar value={filters} onChange={setFilters} />
+
       {status === "loading" ? (
         <p className="text-gray-400">...</p>
       ) : listings.length === 0 ? (
-        <EmptyState icon="🚗" title={t("noCarsYet")} action={<Button variant="secondary" onClick={() => setShowForm(true)}>{t("listACar")}</Button>} />
+        filtersActive(filters)
+          ? <EmptyState icon="🚗" title={t("noMatches")} />
+          : <EmptyState icon="🚗" title={t("noCarsYet")} action={<Button variant="secondary" onClick={() => setShowForm(true)}>{t("listACar")}</Button>} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {listings.map((listing) => {
             const photo = listing.media.find((m) => m.media_type === "PHOTO");
             return (
               <Card key={listing.id}>
+                <div className="relative">
                 <Link href={`/marketplace/cars/${listing.id}`} className="block">
                 {photo ? (
                   <div className="h-40 bg-gray-100"><img src={photo.file_url} alt="" className="w-full h-full object-cover" /></div>
@@ -138,6 +141,8 @@ export default function CarsMarketplacePage() {
                   <CardMedia label={t("noPhotoYet")} />
                 )}
                 </Link>
+                <FavoriteButton listingId={listing.id} />
+                </div>
                 <CardBody>
                   <div className="flex items-center justify-between mb-2">
                     <ListerRoleBadge role={listing.lister_role} isSale={listing.price_basis === "SALE"} />
@@ -163,6 +168,7 @@ export default function CarsMarketplacePage() {
           })}
         </div>
       )}
+      {status === "ready" && hasMore && <LoadMoreButton onClick={loadMore} loading={loadingMore} />}
     </main>
   );
 }

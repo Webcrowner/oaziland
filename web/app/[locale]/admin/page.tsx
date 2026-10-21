@@ -24,6 +24,9 @@ import {
   verifyDriver,
   listTechniciansForAdmin,
   verifyTechnician,
+  reviewTechnician,
+  listAdminServiceDisputes,
+  resolveAdminServiceDispute,
   listAdminPendingPropertyListings,
   approvePropertyListing,
   rejectPropertyListing,
@@ -42,6 +45,8 @@ import {
   type AdminKycReviewItem,
   type AdminContentReport,
   type AdminDisputeCase,
+  type AdminServiceDisputeItem,
+  type ServiceDisputeOutcome,
   type Hotel,
   type Venue,
   type DriverProfileItem,
@@ -103,10 +108,12 @@ export default function AdminConsolePage() {
   const [pendingVenues, setPendingVenues] = useState<Venue[]>([]);
   const [pendingDrivers, setPendingDrivers] = useState<DriverProfileItem[]>([]);
   const [pendingTechnicians, setPendingTechnicians] = useState<TechnicianProfileItem[]>([]);
+  const [verifiedTechnicians, setVerifiedTechnicians] = useState<TechnicianProfileItem[]>([]);
   const [verifications, setVerifications] = useState<AdminVerificationRequest[]>([]);
   const [kycReviews, setKycReviews] = useState<AdminKycReviewItem[]>([]);
   const [reports, setReports] = useState<AdminContentReport[]>([]);
   const [disputes, setDisputes] = useState<AdminDisputeCase[]>([]);
+  const [serviceDisputes, setServiceDisputes] = useState<AdminServiceDisputeItem[]>([]);
   const [activeDisputeChatId, setActiveDisputeChatId] = useState<string | null>(null);
   const [welfareAlerts, setWelfareAlerts] = useState<AdminWelfareAlert[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -171,6 +178,8 @@ export default function AdminConsolePage() {
       listTechniciansForAdmin(token),
       listAdminWelfareAlerts(token),
       getAdminGreetingSettings(token).catch(() => null),
+      listAdminServiceDisputes(token).catch(() => [] as AdminServiceDisputeItem[]),
+      listTechniciansForAdmin(token, "verified").catch(() => ({ results: [] as TechnicianProfileItem[] })),
     ])
       .then(
         ([
@@ -186,6 +195,8 @@ export default function AdminConsolePage() {
           techniciansData,
           welfareData,
           greetingsData,
+          serviceDisputesData,
+          verifiedTechniciansData,
         ]) => {
           setSummary(summaryData);
           setPendingProperties(propertiesData.results || []);
@@ -199,6 +210,8 @@ export default function AdminConsolePage() {
           setPendingTechnicians(techniciansData.results || []);
           setWelfareAlerts(welfareData.results || []);
           if (greetingsData) setGreetingSettings(greetingsData);
+          setServiceDisputes(serviceDisputesData);
+          setVerifiedTechnicians(verifiedTechniciansData.results || []);
           setStatus("ready");
         }
       )
@@ -319,6 +332,18 @@ export default function AdminConsolePage() {
   }
 
   // Actions: Hospitality & Drivers
+  async function handleResolveServiceDispute(id: string, outcome: ServiceDisputeOutcome) {
+    if (!token) return;
+    const notes = prompt(t("resolutionNotesPlaceholder")) || "";
+    const res = await resolveAdminServiceDispute(id, outcome, notes, token);
+    if (!res.ok) {
+      alert(t("actionFailed"));
+      return;
+    }
+    loadAll();
+  }
+
+  // Actions: Hospitality & Drivers
   async function handleVerifyHotel(id: string) {
     if (!token) return;
     const res = await verifyHotel(id, token);
@@ -352,6 +377,20 @@ export default function AdminConsolePage() {
   async function handleVerifyTechnician(id: number) {
     if (!token) return;
     const res = await verifyTechnician(id, token);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      alert(body?.detail || t("actionFailed"));
+      return;
+    }
+    loadAll();
+  }
+
+  // Actions: Student Welfare
+  async function handleReviewTechnician(id: number, action: "reject" | "revoke") {
+    if (!token) return;
+    const reason = (prompt(t(action === "reject" ? "technicianRejectPrompt" : "technicianRevokePrompt")) || "").trim();
+    if (reason.length < 3) return;
+    const res = await reviewTechnician(id, action, reason, token);
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       alert(body?.detail || t("actionFailed"));
@@ -521,7 +560,7 @@ export default function AdminConsolePage() {
     { key: "verifications", label: t("tabVerifications"), count: verifications.length },
     { key: "kyc", label: t("tabKyc"), count: kycReviews.length },
     { key: "reports", label: t("tabReports"), count: reports.length, isUrgent: reports.length > 0 },
-    { key: "disputes", label: t("tabDisputes"), count: disputes.length, isUrgent: disputes.length > 0 },
+    { key: "disputes", label: t("tabDisputes"), count: disputes.length + serviceDisputes.length, isUrgent: disputes.length + serviceDisputes.length > 0 },
     { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
     { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
     { key: "greetings", label: t("tabGreetings") || "Celebratory Messages" },
@@ -560,7 +599,7 @@ export default function AdminConsolePage() {
       title: t("groupTrust"),
       items: [
         { key: "reports", label: t("tabReports"), count: reports.length, isUrgent: reports.length > 0 },
-        { key: "disputes", label: t("tabDisputes"), count: disputes.length, isUrgent: disputes.length > 0 },
+        { key: "disputes", label: t("tabDisputes"), count: disputes.length + serviceDisputes.length, isUrgent: disputes.length + serviceDisputes.length > 0 },
         { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
         { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
       ],
@@ -574,6 +613,7 @@ export default function AdminConsolePage() {
     kycReviews.length +
     reports.length +
     disputes.length +
+    serviceDisputes.length +
     welfareAlerts.filter((w) => !w.resolved_at).length +
     (summary.flagged_users_count ?? 0);
 
@@ -1121,11 +1161,41 @@ export default function AdminConsolePage() {
                       )}
                     </div>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleReviewTechnician(tech.id, "reject")}
+                      className="bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold px-4 py-2 rounded-xl transition-colors cursor-pointer"
+                    >
+                      {t("rejectTechnician")}
+                    </button>
+                    <button
+                      onClick={() => handleVerifyTechnician(tech.id)}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-sm cursor-pointer"
+                    >
+                      {t("verifyTechnician")}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {verifiedTechnicians.length > 0 && (
+            <div className="space-y-3 pt-4">
+              <h3 className="text-sm font-black uppercase tracking-widest text-slate-500">{t("verifiedTechniciansTitle")}</h3>
+              {verifiedTechnicians.map((tech) => (
+                <div key={tech.id} className="border border-slate-200/80 rounded-2xl p-4 bg-white shadow-sm flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">{tech.user_name}</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {tech.specialties.map((s) => taskln.category(s)).join(", ") || t("noneLabel")} &bull; ★ {tech.avg_rating}
+                    </p>
+                  </div>
                   <button
-                    onClick={() => handleVerifyTechnician(tech.id)}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
+                    onClick={() => handleReviewTechnician(tech.id, "revoke")}
+                    className="bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold px-4 py-2 rounded-xl transition-colors cursor-pointer"
                   >
-                    {t("verifyTechnician")}
+                    {t("revokeTechnician")}
                   </button>
                 </div>
               ))}
@@ -1285,7 +1355,7 @@ export default function AdminConsolePage() {
       {/* ================= TAB: ESCROW DISPUTE CASES ================= */}
       {tab === "disputes" && (
         <div className="space-y-4 animate-rise-in">
-          {disputes.length === 0 ? (
+          {disputes.length === 0 && serviceDisputes.length === 0 ? (
             <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 bg-white">
               <p className="text-sm font-semibold text-slate-600">{t("noItems")}</p>
               <p className="text-xs text-slate-400 mt-1">Zero pending escrow payment disputes.</p>
@@ -1341,6 +1411,70 @@ export default function AdminConsolePage() {
                 )}
               </div>
             ))
+          )}
+
+          {serviceDisputes.length > 0 && (
+            <>
+              <h3 className="pt-2 text-sm font-black uppercase tracking-widest text-slate-500">{t("jobDisputesTitle")}</h3>
+              {serviceDisputes.map((job) => (
+                <div key={job.id} className="border border-slate-200/80 rounded-2xl p-6 bg-white shadow-sm flex flex-col gap-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900 text-sm">{taskln.category(job.category)} #{job.id.slice(0, 8)}</span>
+                      <Badge variant="clay">{job.status}</Badge>
+                    </div>
+                    {job.quoted_amount_xaf && (
+                      <span className="text-xs font-bold text-slate-600">
+                        {t("jobDisputeQuote")}: {Number(job.quoted_amount_xaf).toLocaleString()} XAF
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-slate-500">
+                    {t("jobDisputeRequester")}: <span className="font-semibold text-slate-800">{job.requester_name}</span>
+                    {" · "}
+                    {t("jobDisputeTechnician")}: <span className="font-semibold text-slate-800">{job.technician_name || "—"}</span>
+                  </p>
+                  <p className="text-xs text-slate-600">{job.description}</p>
+                  <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100">{job.dispute_reason}</p>
+                  {job.escrow_funded && (
+                    <p className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl p-3">{t("jobDisputeEscrowHeld")}</p>
+                  )}
+
+                  {job.messages.length > 0 && (
+                    <div className="rounded-xl border border-slate-100 p-3 space-y-1 max-h-40 overflow-y-auto">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{t("jobDisputeChat")}</p>
+                      {job.messages.map((m) => (
+                        <p key={m.id} className="text-xs text-slate-600"><span className="font-bold text-slate-800">{m.sender_name}:</span> {m.text}</p>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                    {job.technician && (
+                      <button
+                        onClick={() => handleResolveServiceDispute(job.id, "RESUME")}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors cursor-pointer"
+                      >
+                        {t("jobDisputeResume")}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleResolveServiceDispute(job.id, "REASSIGN")}
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-4 py-2 rounded-xl transition-colors cursor-pointer"
+                    >
+                      {t("jobDisputeReassign")}
+                    </button>
+                    <button
+                      onClick={() => handleResolveServiceDispute(job.id, "CANCEL")}
+                      className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors cursor-pointer"
+                    >
+                      {t("jobDisputeCancel")}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </>
           )}
         </div>
       )}

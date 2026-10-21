@@ -36,6 +36,8 @@ export default async function MarketplacePage() {
       <div className="text-center mb-12">
         <h1 className="font-[family-name:var(--font-display)] text-3xl md:text-4xl text-[var(--navy)] mb-3">{t("title")}</h1>
         <p className="text-gray-500 max-w-xl mx-auto">{t("subtitle")}</p>
+        <Link href="/marketplace/my-listings" className="inline-block mt-4 text-sm font-semibold text-[var(--navy)] underline">{t("myListings")}</Link>
+        <Link href="/marketplace/orders" className="inline-block mt-4 ml-4 text-sm font-semibold text-[var(--navy)] underline">{t("myOrders")}</Link>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-14">

@@ -1,15 +1,23 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, Modal, ScrollView, Switch } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 import {
-  listMarketplaceListings, createMarketplaceListing, addMarketplaceMedia, uploadMediaFile,
+  createMarketplaceListing, addMarketplaceMedia, uploadMediaFile,
   type BusinessListing, type MediaUploadResult,
 } from "../lib/api";
+import { useMarketplaceListings } from "../lib/useMarketplaceListings";
+import LoadMoreButton from "../components/LoadMoreButton";
+import type { RootStackParamList } from "../navigation/AppNavigator";
+import MarketplaceFilterBar from "../components/MarketplaceFilterBar";
+import { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "../lib/marketplaceFilters";
 
 /** Businesses — mobile parity with the web app's /marketplace/businesses page. */
 export default function BusinessesScreen() {
-  const [listings, setListings] = useState<BusinessListing[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [filters, setFilters] = useState<MarketplaceFilters>(EMPTY_MARKETPLACE_FILTERS);
+  const { items: listings, loading, hasMore, loadingMore, loadMore, reload } = useMarketplaceListings<BusinessListing>("businesses", filtersToQuery(filters));
   const [showForm, setShowForm] = useState(false);
 
   const [title, setTitle] = useState("");
@@ -20,13 +28,6 @@ export default function BusinessesScreen() {
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-
-  const load = useCallback(() => {
-    listMarketplaceListings<BusinessListing>("businesses")
-      .then((data) => setListings(data.results)).catch(() => setListings([])).finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
 
   async function handlePickPhoto() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -56,7 +57,7 @@ export default function BusinessesScreen() {
       await Promise.all(media.map((m) => addMarketplaceMedia("businesses", listing.id, m.url, m.media_type)));
       setShowForm(false);
       setTitle(""); setPrice(""); setIncludesGoodwill(false); setIncludesInventory(false); setMedia([]);
-      load();
+      reload();
     } catch {
       setError("Could not create listing. Please check your details and try again.");
     } finally {
@@ -75,15 +76,19 @@ export default function BusinessesScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
-          <TouchableOpacity style={styles.listButton} onPress={() => setShowForm(true)}>
-            <Text style={styles.listButtonText}>List a Business</Text>
-          </TouchableOpacity>
+          <View>
+            <TouchableOpacity style={styles.listButton} onPress={() => setShowForm(true)}>
+              <Text style={styles.listButtonText}>List a Business</Text>
+            </TouchableOpacity>
+            <MarketplaceFilterBar value={filters} onChange={setFilters} showPriceBasis={false} />
+          </View>
         }
-        ListEmptyComponent={<Text style={styles.empty}>No businesses listed yet.</Text>}
+        ListFooterComponent={hasMore ? <LoadMoreButton onPress={loadMore} loading={loadingMore} /> : null}
+        ListEmptyComponent={<Text style={styles.empty}>{filtersActive(filters) ? "No listings match your filters." : "No businesses listed yet."}</Text>}
         renderItem={({ item }) => {
           const photo = item.media.find((m) => m.media_type === "PHOTO");
           return (
-            <View style={styles.card}>
+            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("MarketplaceListingDetail", { category: "businesses", listingId: item.id })}>
               {photo ? <Image source={{ uri: photo.file_url }} style={styles.cardImage} /> : (
                 <View style={styles.imagePlaceholder}><Text style={styles.imagePlaceholderText}>No photo yet</Text></View>
               )}
@@ -95,7 +100,7 @@ export default function BusinessesScreen() {
                 </View>
                 <Text style={styles.price}>{Number(item.price_xaf).toLocaleString()} XAF</Text>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         }}
       />

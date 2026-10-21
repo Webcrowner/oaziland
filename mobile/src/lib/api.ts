@@ -81,7 +81,9 @@ export async function listQuarters(): Promise<Quarter[]> {
   return data.results;
 }
 
-export async function registerUser(payload: { username: string; phone: string; password: string }) {
+export type SignupRole = "renter" | "landlord" | "agent" | "student" | "technician" | "driver";
+
+export async function registerUser(payload: { username: string; phone: string; password: string; role?: SignupRole }) {
   const res = await fetch(`${API_BASE_URL}/api/auth/register/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -234,7 +236,18 @@ export async function getMfaStatus(): Promise<{ mfa_enabled: boolean }> {
 // ---------------------------------------------------------------------------
 // Favorites — mirrors the web app's real favoriting flow.
 // ---------------------------------------------------------------------------
-export async function getMyFavorites(): Promise<{ listing_ids: string[] }> {
+export interface SavedMarketplaceListing {
+  id: string;
+  category: MarketplaceCategory;
+  title: string;
+  price_xaf: string;
+  price_basis: string;
+  availability_status: string;
+  quarter_name: string | null;
+  photo_url: string | null;
+}
+
+export async function getMyFavorites(): Promise<{ listing_ids: string[]; marketplace_listings: SavedMarketplaceListing[] }> {
   const res = await fetch(`${API_BASE_URL}/api/my-favorites/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error("Could not fetch favorites");
   return res.json();
@@ -784,11 +797,14 @@ export interface MarketplaceMediaItem {
 
 interface BaseMarketplaceListing {
   id: string;
+  lister_user: string;
   lister_name: string;
   lister_role: string;
   title: string;
+  description: string;
   price_basis: string;
   price_xaf: string;
+  availability_status: string;
   quarter: string | null;
   quarter_name: string | null;
   media: MarketplaceMediaItem[];
@@ -805,10 +821,128 @@ export interface CarListing extends BaseMarketplaceListing { vehicle_spec: Vehic
 const MARKETPLACE_ENDPOINTS = { warehouses: "warehouses", stores: "stores", businesses: "businesses", cars: "cars" } as const;
 export type MarketplaceCategory = keyof typeof MARKETPLACE_ENDPOINTS;
 
-export async function listMarketplaceListings<T>(category: MarketplaceCategory): Promise<PaginatedResponse<T>> {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/`);
+export async function listMarketplaceListings<T>(category: MarketplaceCategory, filters?: Record<string, string>): Promise<PaginatedResponse<T>> {
+  const query = filters && Object.keys(filters).length > 0 ? `?${new URLSearchParams(filters).toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${query}`);
   if (!res.ok) throw new Error(`${category} fetch failed: ${res.status}`);
   return res.json();
+}
+
+export async function getMarketplaceListing<T>(category: MarketplaceCategory, id: string): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`Not found: ${res.status}`);
+  return res.json();
+}
+
+export type MarketplaceOrderStatus = "PAID" | "HANDED_OVER" | "COMPLETED" | "CANCELLED" | "DISPUTED";
+
+export type MarketplaceAvailability = "AVAILABLE" | "UNDER_OFFER" | "UNAVAILABLE";
+
+export interface MyMarketplaceListing {
+  id: string;
+  title: string;
+  description: string;
+  price_xaf: string;
+  availability_status: MarketplaceAvailability;
+  removed_by_moderation: boolean;
+}
+
+// Everything the caller posted in one category, including sold or paused listings the public list hides.
+// The API pages at 20, so keep fetching until every listing is in.
+export async function listMyMarketplaceListings(category: MarketplaceCategory): Promise<MyMarketplaceListing[]> {
+  const all: MyMarketplaceListing[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/mine/?page=${page}`, { headers: await authHeaders() });
+    if (!res.ok) throw new Error(`Could not load your ${category}`);
+    const data: PaginatedResponse<MyMarketplaceListing> = await res.json();
+    all.push(...data.results);
+    if (all.length >= data.count || data.results.length === 0) break;
+  }
+  return all;
+}
+
+async function marketplaceMutationError(res: Response, fallback: string): Promise<Error> {
+  const data = await res.json().catch(() => ({}));
+  const firstFieldError = Object.values(data).flat()[0];
+  return new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : fallback));
+}
+
+export async function updateMarketplaceListing(category: MarketplaceCategory, id: string, payload: { title: string; price_xaf: string; description: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not update the listing");
+  return res.json();
+}
+
+export async function setMarketplaceListingStatus(category: MarketplaceCategory, id: string, status: MarketplaceAvailability) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/set-status/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not change the listing status");
+  return res.json();
+}
+
+export async function deleteMarketplaceListing(category: MarketplaceCategory, id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, { method: "DELETE", headers: await authHeaders() });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not delete the listing");
+}
+
+export interface MarketplaceOrderItem {
+  id: string;
+  listing_id: string;
+  listing_title: string;
+  category: MarketplaceCategory | "";
+  buyer: string;
+  buyer_name: string;
+  seller: string;
+  seller_name: string;
+  amount_xaf: string;
+  status: MarketplaceOrderStatus;
+  handed_over_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  auto_release_at: string | null;
+  seller_deadline: string | null;
+}
+
+async function marketplaceOrderResponse(res: Response, fallback: string): Promise<MarketplaceOrderItem> {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : fallback));
+  }
+  return data;
+}
+
+export async function placeMarketplaceOrder(category: MarketplaceCategory, listingId: string, phoneNumber: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ category, listing_id: listingId, phone_number: phoneNumber }),
+  });
+  return marketplaceOrderResponse(res, "Could not place the order");
+}
+
+export async function listMyMarketplaceOrders(role: "buying" | "selling"): Promise<PaginatedResponse<MarketplaceOrderItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/?role=${role}`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your orders");
+  return res.json();
+}
+
+export type MarketplaceOrderActionName = "hand-over" | "confirm" | "cancel" | "decline" | "dispute";
+
+export async function marketplaceOrderAction(orderId: string, action: MarketplaceOrderActionName, reason?: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+  });
+  return marketplaceOrderResponse(res, "That action could not be completed");
 }
 
 export async function createMarketplaceListing(category: MarketplaceCategory, payload: Record<string, unknown>) {
@@ -834,9 +968,12 @@ export async function addMarketplaceMedia(category: MarketplaceCategory, listing
 
 export interface RideBookingItem {
   id: string;
+  rider: string;
   rider_name: string;
+  driver: string | null;
   driver_name: string | null;
   vehicle: number | null;
+  vehicle_details: { vehicle_category: string; make: string; model: string; plate_number: string } | null;
   pickup_description: string;
   dropoff_description: string;
   fare_estimate_xaf: string;
@@ -936,6 +1073,31 @@ export async function startRide(rideId: string) {
   return res.json();
 }
 
+export async function cancelRide(rideId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/cancel/`, { method: "POST", headers: await authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not cancel the ride");
+  return data;
+}
+
+export async function raiseRideSos(rideId: string): Promise<{ sos_raised_at: string; admins_alerted: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/sos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not raise the SOS");
+  return data;
+}
+
+export async function releaseRide(rideId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/release/`, { method: "POST", headers: await authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not release the ride");
+  return data;
+}
+
 export async function completeRide(rideId: string, phoneNumber: string) {
   const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/complete/`, {
     method: "POST",
@@ -963,24 +1125,61 @@ export interface ServiceRequestItem {
   quoted_labor_xaf: string | null;
   quoted_materials_xaf: string | null;
   quote_approved: boolean;
+  escrow_funded: boolean;
   dispute_reason: string;
+  dispute_resolution: "" | "RESUME" | "REASSIGN" | "CANCEL";
+  dispute_resolution_notes: string;
   scheduled_for: string | null;
+  address_note?: string;
+  area_label?: string;
+  requested_technician?: string | null;
+  requested_technician_name?: string | null;
+  distance_km?: number | null;
+  quote_deadline?: string | null;
+  work_completed_at?: string | null;
+  auto_release_at?: string | null;
+  technician_overdue?: boolean;
+  requester_rating?: { average: number | null; count: number };
+  my_review?: { score: number; comment: string } | null;
+  their_review?: { score: number; comment: string } | null;
+  photos?: { id: number; photo_type: string; file_url: string }[];
 }
 
-export async function listMyServiceRequests(): Promise<PaginatedResponse<ServiceRequestItem>> {
-  const res = await fetch(`${API_BASE_URL}/api/service-requests/`, { headers: await authHeaders() });
+export type ServiceRequestScope = "mine" | "jobs" | "board";
+
+export async function listMyServiceRequests(
+  options: { scope?: ServiceRequestScope; radiusKm?: string; page?: number } = {},
+): Promise<PaginatedResponse<ServiceRequestItem> & { next: string | null }> {
+  const params = new URLSearchParams();
+  if (options.scope) params.set("scope", options.scope);
+  if (options.radiusKm) params.set("radius_km", options.radiusKm);
+  if (options.page && options.page > 1) params.set("page", String(options.page));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${query}`, { headers: await authHeaders() });
   if (!res.ok) throw new Error("Could not fetch service requests");
   return res.json();
 }
 
-export async function createServiceRequest(category: string, description: string, priority: string, latitude: number, longitude: number) {
+export async function createServiceRequest(
+  category: string, description: string, priority: string, latitude: number | null, longitude: number | null,
+  extras: { addressNote?: string; areaLabel?: string; photoUrls?: string[] } = {},
+) {
   const res = await fetch(`${API_BASE_URL}/api/service-requests/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify({ category, description, priority, latitude: latitude.toFixed(7), longitude: longitude.toFixed(7) }),
+    body: JSON.stringify({
+      category, description, priority,
+      ...(latitude !== null && longitude !== null ? { latitude: latitude.toFixed(7), longitude: longitude.toFixed(7) } : {}),
+      ...(extras.addressNote ? { address_note: extras.addressNote } : {}),
+      ...(extras.areaLabel ? { area_label: extras.areaLabel } : {}),
+      ...(extras.photoUrls && extras.photoUrls.length > 0 ? { photo_urls: extras.photoUrls } : {}),
+    }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Could not create service request");
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not create service request"));
+  }
   return data;
 }
 
@@ -991,7 +1190,10 @@ async function postServiceRequestAction(id: string, action: string, body: object
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Action failed");
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Action failed"));
+  }
   return data;
 }
 
@@ -1004,8 +1206,27 @@ export const proposeServiceQuote = (id: string, laborXaf: string, materialsXaf?:
 export const rescheduleServiceRequest = (id: string, scheduledForIso: string) => postServiceRequestAction(id, "reschedule", { scheduled_for: scheduledForIso });
 export const approveServiceQuote = (id: string) => postServiceRequestAction(id, "approve-quote");
 export const disputeServiceRequest = (id: string, reason: string) => postServiceRequestAction(id, "dispute", { reason });
-export const rateServiceTechnician = (id: string, score: number) => postServiceRequestAction(id, "rate", { score });
-export const completeServiceRequest = (id: string, phoneNumber: string) => postServiceRequestAction(id, "complete", { phone_number: phoneNumber });
+export const rateServiceTechnician = (id: string, score: number, comment = "") => postServiceRequestAction(id, "rate", { score, comment });
+export const rateServiceRequester = (id: string, score: number, comment = "") => postServiceRequestAction(id, "rate-requester", { score, comment });
+export const declineServiceRequest = (id: string) => postServiceRequestAction(id, "decline");
+export const openServiceRequestToAll = (id: string) => postServiceRequestAction(id, "open-to-all");
+export const rejectServiceQuote = (id: string) => postServiceRequestAction(id, "reject-quote");
+export const dismissServiceTechnician = (id: string) => postServiceRequestAction(id, "dismiss-technician");
+export const markServiceWorkDone = (id: string) => postServiceRequestAction(id, "work-done");
+export const cancelServiceRequest = (id: string) => postServiceRequestAction(id, "cancel");
+
+export async function submitTechnicianLocationPing(latitude: number, longitude: number) {
+  const res = await fetch(`${API_BASE_URL}/api/my-technician-location/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ latitude: latitude.toFixed(7), longitude: longitude.toFixed(7) }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not share your location");
+  return data;
+}
+export const completeServiceRequest = (id: string, phoneNumber?: string) => postServiceRequestAction(id, "complete", phoneNumber ? { phone_number: phoneNumber } : {});
+export const fundServiceRequest = (id: string, phoneNumber: string) => postServiceRequestAction(id, "fund", { phone_number: phoneNumber });
 
 export async function getMyUserId(): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/api/auth/me/`, { headers: await authHeaders() });
@@ -1075,6 +1296,17 @@ export async function fileReportAgainstUser(targetUserId: string, reason: string
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ target_user: targetUserId, reason, notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit report");
+  return data;
+}
+
+export async function fileReportAgainstListing(listingId: string, reason: string, notes: string) {
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ target_listing_id: listingId, reason, notes }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "Could not submit report");
@@ -1381,6 +1613,20 @@ export interface TechnicianDashboardData {
   completed_job_count: number;
   wallet_balance_xaf: string;
   jobs_trend: { percent_change: number | null };
+}
+
+export interface TechnicianProfileItem {
+  id: number;
+  specialties: string[];
+  is_verified: boolean;
+  rejection_reason: string;
+}
+
+export async function getMyTechnicianProfile(): Promise<TechnicianProfileItem | null> {
+  const res = await fetch(`${API_BASE_URL}/api/my-technician-profile/`, { headers: await authHeaders() });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Could not fetch technician profile");
+  return res.json();
 }
 
 export async function getMyTechnicianDashboard(): Promise<TechnicianDashboardData> {

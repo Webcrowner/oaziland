@@ -1,10 +1,10 @@
 import { useState, useCallback } from "react";
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Image } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { getMyFavorites, getListing, Listing } from "../lib/api";
+import { getMyFavorites, getListing, Listing, type SavedMarketplaceListing } from "../lib/api";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Favorites">;
 
@@ -16,10 +16,12 @@ const FINISH_LABELS: Record<string, string> = { MODERN: "Modern", STANDARD: "Sta
  * CURRENT detail (never stale cached data), the same design already
  * used on web. useFocusEffect (not a plain useEffect) so returning
  * from unfavoriting a listing on its detail screen refreshes this
- * list automatically.
+ * list automatically. Saved marketplace listings come back from the
+ * API already summarised and are shown alongside the properties.
  */
 export default function FavoritesScreen({ navigation }: Props) {
   const [listings, setListings] = useState<Listing[]>([]);
+  const [marketplace, setMarketplace] = useState<SavedMarketplaceListing[]>([]);
   const [status, setStatus] = useState<"loading" | "signedOut" | "ready">("loading");
 
   useFocusEffect(
@@ -32,9 +34,12 @@ export default function FavoritesScreen({ navigation }: Props) {
         }
         try {
           const data = await getMyFavorites();
-          const fetched = await Promise.all(data.listing_ids.map((id) => getListing(id).catch(() => null)));
+          const marketplaceIds = new Set(data.marketplace_listings.map((m) => m.id));
+          const propertyIds = data.listing_ids.filter((id) => !marketplaceIds.has(id));
+          const fetched = await Promise.all(propertyIds.map((id) => getListing(id).catch(() => null)));
           if (isActive) {
             setListings(fetched.filter((l): l is Listing => l !== null));
+            setMarketplace(data.marketplace_listings);
             setStatus("ready");
           }
         } catch {
@@ -66,29 +71,56 @@ export default function FavoritesScreen({ navigation }: Props) {
     );
   }
 
+  type Row = { kind: "property"; listing: Listing } | { kind: "marketplace"; item: SavedMarketplaceListing };
+  const rows: Row[] = [
+    ...listings.map((listing): Row => ({ kind: "property", listing })),
+    ...marketplace.map((item): Row => ({ kind: "marketplace", item })),
+  ];
+
   return (
     <FlatList
-      data={listings}
-      keyExtractor={(item) => item.id}
+      data={rows}
+      keyExtractor={(row) => (row.kind === "property" ? row.listing.id : row.item.id)}
       contentContainerStyle={styles.list}
       ListEmptyComponent={<Text style={styles.empty}>You haven't saved any listings yet.</Text>}
-      renderItem={({ item }) => (
-        <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("ListingDetail", { listingId: item.id })}>
-          <View style={styles.imagePlaceholder}>
-            <Text style={styles.imagePlaceholderText}>No photo yet</Text>
-          </View>
-          <View style={styles.cardBody}>
-            <View style={styles.badgeRow}>
-              <Text style={styles.badge}>{item.property_asset.type}</Text>
-              {item.property_asset.finish_level ? (
-                <Text style={styles.badgeGold}>{FINISH_LABELS[item.property_asset.finish_level]}</Text>
-              ) : null}
+      renderItem={({ item: row }) => {
+        if (row.kind === "marketplace") {
+          const saved = row.item;
+          return (
+            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("MarketplaceListingDetail", { category: saved.category, listingId: saved.id })}>
+              {saved.photo_url ? (
+                <Image source={{ uri: saved.photo_url }} style={styles.photo} />
+              ) : (
+                <View style={styles.imagePlaceholder}><Text style={styles.imagePlaceholderText}>No photo yet</Text></View>
+              )}
+              <View style={styles.cardBody}>
+                <Text style={styles.title}>{saved.title}</Text>
+                <Text style={styles.price}>{Number(saved.price_xaf).toLocaleString()} XAF</Text>
+                <Text style={styles.location}>{saved.quarter_name ?? ""}</Text>
+                {saved.availability_status !== "AVAILABLE" && <Text style={styles.unavailable}>No longer available</Text>}
+              </View>
+            </TouchableOpacity>
+          );
+        }
+        const item = row.listing;
+        return (
+          <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("ListingDetail", { listingId: item.id })}>
+            <View style={styles.imagePlaceholder}>
+              <Text style={styles.imagePlaceholderText}>No photo yet</Text>
             </View>
-            <Text style={styles.price}>{Number(item.price_xaf).toLocaleString()} XAF</Text>
-            <Text style={styles.location}>{item.property_asset.quarter_name}</Text>
-          </View>
-        </TouchableOpacity>
-      )}
+            <View style={styles.cardBody}>
+              <View style={styles.badgeRow}>
+                <Text style={styles.badge}>{item.property_asset.type}</Text>
+                {item.property_asset.finish_level ? (
+                  <Text style={styles.badgeGold}>{FINISH_LABELS[item.property_asset.finish_level]}</Text>
+                ) : null}
+              </View>
+              <Text style={styles.price}>{Number(item.price_xaf).toLocaleString()} XAF</Text>
+              <Text style={styles.location}>{item.property_asset.quarter_name}</Text>
+            </View>
+          </TouchableOpacity>
+        );
+      }}
     />
   );
 }
@@ -109,4 +141,7 @@ const styles = StyleSheet.create({
   badgeGold: { fontSize: 11, fontWeight: "700", color: "#fff", backgroundColor: "#1B2A4A", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, textTransform: "uppercase" },
   price: { fontSize: 18, fontWeight: "bold", color: "#1B2A4A" },
   location: { fontSize: 13, color: "#6B7280", marginTop: 2 },
+  photo: { height: 140, width: "100%" },
+  title: { fontSize: 15, fontWeight: "700", color: "#1B2A4A", marginBottom: 2 },
+  unavailable: { fontSize: 12, color: "#A8502E", marginTop: 4 },
 });

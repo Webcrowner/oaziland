@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     WarehouseListing, StoreListing, BusinessListing, CarListing, VehicleSpec, MarketplaceMedia, RideBooking, RideMessage, ListingCondition,
-    RideCategory, TransportType, Vehicle, DriverProfile,
+    RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder,
 )
 
 
@@ -23,9 +23,9 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
         fields = [
             "id", "lister_user", "lister_name", "lister_role", "title", "description",
             "price_basis", "price_xaf", "quarter", "quarter_name", "latitude", "longitude",
-            "availability_status", "created_at", "media",
+            "availability_status", "removed_by_moderation", "created_at", "media",
         ]
-        read_only_fields = ["lister_user", "lister_role", "availability_status", "created_at"]
+        read_only_fields = ["lister_user", "lister_role", "availability_status", "removed_by_moderation", "created_at"]
         extra_kwargs = {"latitude": {"min_value": -90, "max_value": 90}, "longitude": {"min_value": -180, "max_value": 180}}
 
 
@@ -68,21 +68,48 @@ class CarListingSerializer(BaseMarketplaceListingSerializer):
         VehicleSpec.objects.create(car_listing=car_listing, **vehicle_spec_data)
         return car_listing
 
+    def update(self, instance, validated_data):
+        # Nested writes are not automatic in DRF, so the vehicle details are applied by hand.
+        vehicle_spec_data = validated_data.pop("vehicle_spec", None)
+        instance = super().update(instance, validated_data)
+        if vehicle_spec_data:
+            for field, value in vehicle_spec_data.items():
+                setattr(instance.vehicle_spec, field, value)
+            instance.vehicle_spec.save()
+        return instance
+
+
+class AddMediaSerializer(serializers.Serializer):
+    url = serializers.URLField(max_length=200)
+    media_type = serializers.ChoiceField(choices=MarketplaceMedia.MediaType.choices, default=MarketplaceMedia.MediaType.PHOTO)
+
+
+class SetAvailabilitySerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=AvailabilityStatus.choices)
+
+
+class RideVehicleSerializer(serializers.ModelSerializer):
+    """What a rider needs to recognise the car or moto that turns up."""
+    class Meta:
+        model = Vehicle
+        fields = ["vehicle_category", "make", "model", "plate_number"]
+
 
 class RideBookingSerializer(serializers.ModelSerializer):
     rider_name = serializers.CharField(source="rider.full_name", read_only=True)
     driver_name = serializers.CharField(source="driver.full_name", read_only=True, default=None)
+    vehicle_details = RideVehicleSerializer(source="vehicle", read_only=True)
 
     class Meta:
         model = RideBooking
         fields = [
-            "id", "rider", "rider_name", "driver", "driver_name", "vehicle",
+            "id", "rider", "rider_name", "driver", "driver_name", "vehicle", "vehicle_details",
             "pickup_description", "pickup_latitude", "pickup_longitude",
             "dropoff_description", "dropoff_latitude", "dropoff_longitude",
-            "fare_estimate_xaf", "status", "ride_category", "transport_type", "has_luggage", "cargo_description",
-            "requested_at", "completed_at",
+            "fare_estimate_xaf", "distance_km", "status", "ride_category", "transport_type", "has_luggage", "cargo_description",
+            "requested_at", "completed_at", "sos_raised_at",
         ]
-        read_only_fields = ["rider", "driver", "vehicle", "fare_estimate_xaf", "status", "requested_at", "completed_at"]
+        read_only_fields = ["rider", "driver", "vehicle", "fare_estimate_xaf", "distance_km", "status", "requested_at", "completed_at", "sos_raised_at"]
 
 
 class RideRequestSerializer(serializers.Serializer):
@@ -143,6 +170,12 @@ class DriverProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["is_verified", "created_at"]
 
 
+class RideSosSerializer(serializers.Serializer):
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-180, max_value=180)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
 class CompleteRideSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
 
@@ -165,3 +198,55 @@ class AttachConditionSerializer(serializers.Serializer):
     target_id = serializers.UUIDField()
     structured_conditions = serializers.JSONField(required=False, default=dict)
     free_text_clause = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class PlaceOrderSerializer(serializers.Serializer):
+    category = serializers.ChoiceField(choices=["warehouses", "stores", "businesses", "cars"])
+    listing_id = serializers.UUIDField()
+    phone_number = serializers.CharField()
+
+
+class OrderDisputeSerializer(serializers.Serializer):
+    reason = serializers.CharField(min_length=5, max_length=2000)
+
+
+class MarketplaceOrderSerializer(serializers.ModelSerializer):
+    listing_id = serializers.UUIDField(source="listing.id", read_only=True)
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
+    category = serializers.SerializerMethodField()
+    buyer_name = serializers.CharField(source="buyer.full_name", read_only=True)
+    seller = serializers.UUIDField(source="listing.lister_user_id", read_only=True)
+    seller_name = serializers.CharField(source="listing.lister_user.full_name", read_only=True)
+    auto_release_at = serializers.SerializerMethodField()
+    seller_deadline = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MarketplaceOrder
+        fields = [
+            "id", "listing_id", "listing_title", "category", "buyer", "buyer_name", "seller", "seller_name", "amount_xaf",
+            "status", "handed_over_at", "completed_at", "created_at", "auto_release_at", "seller_deadline",
+        ]
+        read_only_fields = fields
+
+    def get_category(self, obj) -> str:
+        from .services import category_models
+        for name, model in category_models().items():
+            if model.objects.filter(pk=obj.listing_id).exists():
+                return name
+        return ""
+
+    def get_auto_release_at(self, obj) -> str:
+        # When the payment is released if the buyer stays silent after the handover.
+        from datetime import timedelta
+        from .services import ORDER_AUTO_RELEASE_HOURS
+        if obj.status != "HANDED_OVER" or obj.handed_over_at is None:
+            return None
+        return (obj.handed_over_at + timedelta(hours=ORDER_AUTO_RELEASE_HOURS)).isoformat()
+
+    def get_seller_deadline(self, obj) -> str:
+        # When the buyer is refunded automatically if the seller never hands over.
+        from datetime import timedelta
+        from .services import ORDER_SELLER_RESPONSE_DAYS
+        if obj.status != "PAID":
+            return None
+        return (obj.created_at + timedelta(days=ORDER_SELLER_RESPONSE_DAYS)).isoformat()

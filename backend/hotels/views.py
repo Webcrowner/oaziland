@@ -56,6 +56,7 @@ class HotelViewSet(viewsets.ModelViewSet):
             owner=request.user,
             quarter_id=data["quarter"],
             type="HOTEL",
+            name=data.get("name", "").strip(),
             star_rating=data.get("star_rating"),
             latitude=data.get("latitude"),
             longitude=data.get("longitude"),

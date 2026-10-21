@@ -1,16 +1,24 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, Modal, ScrollView } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 import {
-  listMarketplaceListings, createMarketplaceListing, addMarketplaceMedia, listQuarters, uploadMediaFile,
+  createMarketplaceListing, addMarketplaceMedia, listQuarters, uploadMediaFile,
   type StoreListing, type Quarter, type MediaUploadResult,
 } from "../lib/api";
+import { useMarketplaceListings } from "../lib/useMarketplaceListings";
+import LoadMoreButton from "../components/LoadMoreButton";
+import type { RootStackParamList } from "../navigation/AppNavigator";
+import MarketplaceFilterBar from "../components/MarketplaceFilterBar";
+import { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "../lib/marketplaceFilters";
 
 /** Stores — mobile parity with the web app's /marketplace/stores page. */
 export default function StoresScreen() {
-  const [listings, setListings] = useState<StoreListing[]>([]);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [filters, setFilters] = useState<MarketplaceFilters>(EMPTY_MARKETPLACE_FILTERS);
+  const { items: listings, loading, hasMore, loadingMore, loadMore, reload } = useMarketplaceListings<StoreListing>("stores", filtersToQuery(filters));
   const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
 
   const [title, setTitle] = useState("");
@@ -23,18 +31,12 @@ export default function StoresScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const load = useCallback(() => {
-    listMarketplaceListings<StoreListing>("stores")
-      .then((data) => setListings(data.results)).catch(() => setListings([])).finally(() => setLoading(false));
-  }, []);
-
   useEffect(() => {
-    load();
     listQuarters().then((data) => {
       setQuarters(data);
       if (data.length > 0) setQuarterId(data[0].id);
     }).catch(() => {});
-  }, [load]);
+  }, []);
 
   async function handlePickPhoto() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -62,7 +64,7 @@ export default function StoresScreen() {
       await Promise.all(media.map((m) => addMarketplaceMedia("stores", listing.id, m.url, m.media_type)));
       setShowForm(false);
       setTitle(""); setSizeSqm(""); setPrice(""); setMedia([]);
-      load();
+      reload();
     } catch {
       setError("Could not create listing. Please check your details and try again.");
     } finally {
@@ -81,15 +83,19 @@ export default function StoresScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
-          <TouchableOpacity style={styles.listButton} onPress={() => setShowForm(true)}>
-            <Text style={styles.listButtonText}>List a Store</Text>
-          </TouchableOpacity>
+          <View>
+            <TouchableOpacity style={styles.listButton} onPress={() => setShowForm(true)}>
+              <Text style={styles.listButtonText}>List a Store</Text>
+            </TouchableOpacity>
+            <MarketplaceFilterBar value={filters} onChange={setFilters} />
+          </View>
         }
-        ListEmptyComponent={<Text style={styles.empty}>No stores listed yet.</Text>}
+        ListFooterComponent={hasMore ? <LoadMoreButton onPress={loadMore} loading={loadingMore} /> : null}
+        ListEmptyComponent={<Text style={styles.empty}>{filtersActive(filters) ? "No listings match your filters." : "No stores listed yet."}</Text>}
         renderItem={({ item }) => {
           const photo = item.media.find((m) => m.media_type === "PHOTO");
           return (
-            <View style={styles.card}>
+            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("MarketplaceListingDetail", { category: "stores", listingId: item.id })}>
               {photo ? <Image source={{ uri: photo.file_url }} style={styles.cardImage} /> : (
                 <View style={styles.imagePlaceholder}><Text style={styles.imagePlaceholderText}>No photo yet</Text></View>
               )}
@@ -98,7 +104,7 @@ export default function StoresScreen() {
                 <Text style={styles.cardSubtitle}>{item.size_sqm} m²</Text>
                 <Text style={styles.price}>{Number(item.price_xaf).toLocaleString()} XAF</Text>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         }}
       />

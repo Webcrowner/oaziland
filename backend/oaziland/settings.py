@@ -338,5 +338,6 @@ SPECTACULAR_SETTINGS = {
         # both use the SAME student_hostels.models.HostelUnitType choices
         # under different field names.
         'DesiredUnitTypeEnum': 'student_hostels.models.HostelUnitType',
+        'ServiceDisputeResolutionEnum': 'services.models.ServiceDisputeResolution',
     },
 }

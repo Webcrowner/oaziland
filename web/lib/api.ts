@@ -705,6 +705,7 @@ export interface Hotel {
   lister_rating_count?: number;
   owner: string;
   owner_name?: string | null;
+  name?: string;
   star_rating: number | null;
   verified: boolean;
   quarter: string;
@@ -774,6 +775,7 @@ export async function getHotelFinancialDashboard(hotelId: string, accessToken: s
 export async function createHotel(
   payload: {
     quarter: string;
+    name?: string;
     star_rating?: number;
     latitude?: number | string;
     longitude?: number | string;
@@ -1548,6 +1550,17 @@ export async function fileReportAgainstUser(targetUserId: string, reason: string
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ target_user: targetUserId, reason, notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not submit report");
+  return data;
+}
+
+export async function fileReportAgainstListing(listingId: string, reason: string, notes: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ target_listing_id: listingId, reason, notes }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "Could not submit report");
@@ -2364,7 +2377,18 @@ export async function removeAdminUserRole(userId: string, role: AssignableRole, 
   return data;
 }
 
-export async function getMyFavorites(accessToken: string): Promise<{ listing_ids: string[] }> {
+export interface SavedMarketplaceListing {
+  id: string;
+  category: MarketplaceCategory;
+  title: string;
+  price_xaf: string;
+  price_basis: string;
+  availability_status: string;
+  quarter_name: string | null;
+  photo_url: string | null;
+}
+
+export async function getMyFavorites(accessToken: string): Promise<{ listing_ids: string[]; marketplace_listings: SavedMarketplaceListing[] }> {
   const res = await fetch(`${API_BASE_URL}/api/my-favorites/`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error("Could not fetch favorites");
   return res.json();
@@ -2577,11 +2601,16 @@ export async function cancelCreatorPremium(accessToken: string) {
   });
 }
 
+// What a person can choose to do at signup; "renter" is the normal-user default.
+export const SIGNUP_ROLES = ["renter", "landlord", "agent", "student", "technician", "driver"] as const;
+export type SignupRole = (typeof SIGNUP_ROLES)[number];
+
 export async function registerUser(payload: {
   username: string;
   phone: string;
   password: string;
   referral_code?: string;
+  role?: SignupRole;
 }): Promise<{ id: string }> {
   const res = await fetch(`${API_BASE_URL}/api/auth/register/`, {
     method: "POST",
@@ -2906,8 +2935,104 @@ export async function addMarketplaceMedia(category: MarketplaceCategory, listing
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ url, media_type: mediaType }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || "Could not attach media");
+  if (!res.ok) {
+    const data = await res.json();
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not attach media"));
+  }
   return res.json();
+}
+
+export type MarketplaceAvailability = "AVAILABLE" | "UNDER_OFFER" | "UNAVAILABLE";
+
+// Everything the caller posted in one category, including sold or paused listings the public list hides.
+export async function listMyMarketplaceListings<T>(category: MarketplaceCategory, accessToken: string): Promise<{ count: number; results: T[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/mine/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error(`Could not load your ${category}`);
+  return res.json();
+}
+
+export async function updateMarketplaceListing(category: MarketplaceCategory, id: string, payload: Record<string, unknown>, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not update the listing"));
+  }
+  return data;
+}
+
+export async function setMarketplaceListingStatus(category: MarketplaceCategory, id: string, status: MarketplaceAvailability, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/set-status/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ status }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not change the listing status");
+  return data;
+}
+
+export async function deleteMarketplaceListing(category: MarketplaceCategory, id: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not delete the listing");
+}
+
+export type MarketplaceOrderStatus = "PAID" | "HANDED_OVER" | "COMPLETED" | "CANCELLED" | "DISPUTED";
+
+export interface MarketplaceOrderItem {
+  id: string;
+  listing_id: string;
+  listing_title: string;
+  category: MarketplaceCategory | "";
+  buyer: string;
+  buyer_name: string;
+  seller: string;
+  seller_name: string;
+  amount_xaf: string;
+  status: MarketplaceOrderStatus;
+  handed_over_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  auto_release_at: string | null;
+  seller_deadline: string | null;
+}
+
+async function marketplaceOrderResponse(res: Response, fallback: string): Promise<MarketplaceOrderItem> {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : fallback));
+  }
+  return data;
+}
+
+export async function placeMarketplaceOrder(category: MarketplaceCategory, listingId: string, phoneNumber: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ category, listing_id: listingId, phone_number: phoneNumber }),
+  });
+  return marketplaceOrderResponse(res, "Could not place the order");
+}
+
+export async function listMyMarketplaceOrders(role: "buying" | "selling", accessToken: string): Promise<{ count: number; results: MarketplaceOrderItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/?role=${role}`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load your orders");
+  return res.json();
+}
+
+export async function marketplaceOrderAction(orderId: string, action: "hand-over" | "confirm" | "cancel" | "decline" | "dispute", accessToken: string, reason?: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+  });
+  return marketplaceOrderResponse(res, "That action could not be completed");
 }
 
 export async function getMarketplaceListing<T>(category: MarketplaceCategory, id: string): Promise<T> {
@@ -2923,6 +3048,7 @@ export interface RideBookingItem {
   driver: string | null;
   driver_name: string | null;
   vehicle: number | null;
+  vehicle_details: { vehicle_category: string; make: string; model: string; plate_number: string } | null;
   pickup_description: string;
   pickup_latitude?: string | number | null;
   pickup_longitude?: string | number | null;
@@ -2930,6 +3056,7 @@ export interface RideBookingItem {
   dropoff_latitude?: string | number | null;
   dropoff_longitude?: string | number | null;
   fare_estimate_xaf: string;
+  distance_km: string | null;
   status: string;
   ride_category: string;
   transport_type: string;
@@ -3440,6 +3567,30 @@ export async function startRide(rideId: string, accessToken: string) {
   return res.json();
 }
 
+async function postRideAction(rideId: string, action: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/${action}/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Action failed");
+  return data;
+}
+export const cancelRide = (rideId: string, accessToken: string) => postRideAction(rideId, "cancel", accessToken);
+export const releaseRide = (rideId: string, accessToken: string) => postRideAction(rideId, "release", accessToken);
+
+export async function raiseRideSos(
+  rideId: string,
+  accessToken: string,
+  coords?: { latitude: number; longitude: number },
+): Promise<{ sos_raised_at: string; admins_alerted: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/sos/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(coords ? { latitude: coords.latitude.toFixed(7), longitude: coords.longitude.toFixed(7) } : {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not raise the SOS");
+  return data;
+}
+
 export interface MyRoomAllocationItem {
   id: string;
   unit: string;
@@ -3478,12 +3629,27 @@ export interface ServiceRequestPhoto {
   uploaded_at: string;
 }
 
+export interface ServiceJobReview {
+  score: number;
+  comment: string;
+}
+
 export interface ServiceRequestItem {
   id: string;
   requester: string;
   requester_name: string;
   technician: string | null;
   technician_name: string | null;
+  requested_technician?: string | null;
+  requested_technician_name?: string | null;
+  distance_km?: number | null;
+  quote_deadline?: string | null;
+  work_completed_at?: string | null;
+  technician_overdue?: boolean;
+  auto_release_at?: string | null;
+  requester_rating?: { average: number | null; count: number };
+  my_review?: ServiceJobReview | null;
+  their_review?: ServiceJobReview | null;
   category: string;
   priority: string;
   status: string;
@@ -3492,11 +3658,16 @@ export interface ServiceRequestItem {
   quarter_name: string | null;
   latitude?: string | number | null;
   longitude?: string | number | null;
+  address_note?: string;
+  area_label?: string;
   quoted_amount_xaf: string | null;
   quoted_labor_xaf: string | null;
   quoted_materials_xaf: string | null;
   quote_approved: boolean;
   dispute_reason: string;
+  dispute_resolution: "" | "RESUME" | "REASSIGN" | "CANCEL";
+  dispute_resolution_notes: string;
+  escrow_funded: boolean;
   technician_location: { latitude: string; longitude: string; recorded_at: string } | null;
   requested_at: string;
   accepted_at: string | null;
@@ -3507,8 +3678,18 @@ export interface ServiceRequestItem {
   photos: ServiceRequestPhoto[];
 }
 
-export async function listMyServiceRequests(accessToken: string): Promise<{ count: number; results: ServiceRequestItem[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/service-requests/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+export type ServiceRequestScope = "mine" | "jobs" | "board";
+
+export async function listMyServiceRequests(
+  accessToken: string,
+  options: { scope?: ServiceRequestScope; radiusKm?: string; page?: number } = {},
+): Promise<{ count: number; next: string | null; results: ServiceRequestItem[] }> {
+  const params = new URLSearchParams();
+  if (options.scope) params.set("scope", options.scope);
+  if (options.radiusKm) params.set("radius_km", options.radiusKm);
+  if (options.page && options.page > 1) params.set("page", String(options.page));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${query}`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error("Could not fetch service requests");
   return res.json();
 }
@@ -3520,6 +3701,10 @@ export async function createServiceRequest(
     quarter?: string;
     priority?: string;
     scheduled_for?: string;
+    requested_technician?: string;
+    address_note?: string;
+    area_label?: string;
+    photo_urls?: string[];
     latitude?: number | string | null;
     longitude?: number | string | null;
   },
@@ -3531,7 +3716,10 @@ export async function createServiceRequest(
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Could not create service request");
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not create service request"));
+  }
   return data;
 }
 
@@ -3553,14 +3741,25 @@ export async function startServiceRequest(id: string, accessToken: string) {
   return res.json();
 }
 
-export async function completeServiceRequest(id: string, phoneNumber: string, accessToken: string) {
+export async function completeServiceRequest(id: string, phoneNumber: string | undefined, accessToken: string) {
   const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/complete/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(phoneNumber ? { phone_number: phoneNumber } : {}),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || "Could not complete request");
+  return res.json();
+}
+
+export async function fundServiceRequest(id: string, phoneNumber: string, accessToken: string): Promise<ServiceRequestItem> {
+  const res = await fetch(`${API_BASE_URL}/api/service-requests/${id}/fund/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ phone_number: phoneNumber }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || "Could not complete request");
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not pay into escrow");
+  return data;
 }
 
 async function postServiceRequestAction(id: string, action: string, accessToken: string, body?: object): Promise<ServiceRequestItem> {
@@ -3578,6 +3777,8 @@ async function postServiceRequestAction(id: string, action: string, accessToken:
 }
 
 export const releaseServiceRequest = (id: string, token: string) => postServiceRequestAction(id, "release", token);
+export const declineServiceRequest = (id: string, token: string) => postServiceRequestAction(id, "decline", token);
+export const openServiceRequestToAll = (id: string, token: string) => postServiceRequestAction(id, "open-to-all", token);
 export const markServiceRequestEnRoute = (id: string, token: string, location?: { latitude: number; longitude: number }) =>
   postServiceRequestAction(id, "en-route", token, location);
 export const proposeServiceQuote = (id: string, quote: { amountXaf: string } | { laborXaf: string; materialsXaf?: string }, token: string) =>
@@ -3607,6 +3808,9 @@ export async function getServiceReceipt(id: string, accessToken: string): Promis
   return data;
 }
 export const approveServiceQuote = (id: string, token: string) => postServiceRequestAction(id, "approve-quote", token);
+export const rejectServiceQuote = (id: string, token: string) => postServiceRequestAction(id, "reject-quote", token);
+export const markServiceWorkDone = (id: string, token: string) => postServiceRequestAction(id, "work-done", token);
+export const dismissServiceTechnician = (id: string, token: string) => postServiceRequestAction(id, "dismiss-technician", token);
 export const rescheduleServiceRequest = (id: string, scheduledFor: string, token: string) =>
   postServiceRequestAction(id, "reschedule", token, { scheduled_for: scheduledFor });
 
@@ -3636,8 +3840,10 @@ export async function sendServiceRequestMessage(id: string, text: string, access
 }
 export const disputeServiceRequest = (id: string, reason: string, token: string) =>
   postServiceRequestAction(id, "dispute", token, { reason });
-export const rateServiceTechnician = (id: string, score: number, token: string) =>
-  postServiceRequestAction(id, "rate", token, { score });
+export const rateServiceTechnician = (id: string, score: number, token: string, comment = "") =>
+  postServiceRequestAction(id, "rate", token, { score, comment });
+export const rateServiceRequester = (id: string, score: number, token: string, comment = "") =>
+  postServiceRequestAction(id, "rate-requester", token, { score, comment });
 
 export interface TechnicianDirectoryItem {
   user_id: string;
@@ -3650,8 +3856,11 @@ export interface TechnicianDirectoryItem {
   completed_jobs: number;
 }
 
-export async function listTechnicianDirectory(specialty?: string): Promise<TechnicianDirectoryItem[]> {
-  const query = specialty ? `?specialty=${encodeURIComponent(specialty)}` : "";
+export async function listTechnicianDirectory(specialty?: string, userId?: string): Promise<TechnicianDirectoryItem[]> {
+  const params = new URLSearchParams();
+  if (specialty) params.set("specialty", specialty);
+  if (userId) params.set("user_id", userId);
+  const query = params.toString() ? `?${params.toString()}` : "";
   const res = await fetch(`${API_BASE_URL}/api/technicians/${query}`);
   if (!res.ok) throw new Error("Could not load technicians");
   return res.json();
@@ -3862,6 +4071,7 @@ export interface TechnicianProfileItem {
   quarter_name: string | null;
   avg_rating: string;
   is_verified: boolean;
+  rejection_reason: string;
   credential_urls: string[];
   portfolio_urls: string[];
   created_at: string;
@@ -3896,9 +4106,9 @@ export async function registerAsTechnician(specialties: string[], coverageQuarte
   return data;
 }
 
-export async function listTechniciansForAdmin(accessToken: string): Promise<PaginatedResponse<TechnicianProfileItem>> {
-  const res = await fetch(`${API_BASE_URL}/api/admin/technicians/`, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!res.ok) throw new Error("Could not fetch pending technicians");
+export async function listTechniciansForAdmin(accessToken: string, status: "pending" | "verified" | "rejected" = "pending"): Promise<PaginatedResponse<TechnicianProfileItem>> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/technicians/?status=${status}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch technicians");
   return res.json();
 }
 
@@ -3908,6 +4118,48 @@ export async function verifyTechnician(technicianId: number, accessToken: string
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return res;
+}
+
+export async function reviewTechnician(technicianId: number, action: "reject" | "revoke", reason: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/technicians/${technicianId}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export interface AdminServiceDisputeItem {
+  id: string;
+  requester: string;
+  requester_name: string;
+  technician: string | null;
+  technician_name: string | null;
+  category: string;
+  description: string;
+  status: string;
+  dispute_reason: string;
+  quoted_amount_xaf: string | null;
+  quote_approved: boolean;
+  requested_at: string;
+  started_at: string | null;
+  escrow_funded: boolean;
+  messages: { id: number; sender_name: string; text: string; created_at: string }[];
+}
+
+export type ServiceDisputeOutcome = "RESUME" | "REASSIGN" | "CANCEL";
+
+export async function listAdminServiceDisputes(accessToken: string): Promise<AdminServiceDisputeItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/service-disputes/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch job disputes");
+  return res.json();
+}
+
+export async function resolveAdminServiceDispute(id: string, outcome: ServiceDisputeOutcome, notes: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/service-disputes/${id}/resolve/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ outcome, notes }),
+  });
 }
 
 // ---------------------------------------------------------------------------

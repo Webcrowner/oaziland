@@ -59,12 +59,13 @@ from property_management.views import (
     DisputeMessagesView,
 )
 from marketplace.views import (
-    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet, ListingConditionView,
+    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet,
     MyDriverProfileView, MyVehicleViewSet, AdminDriverViewSet,
 )
 from services.views import (
     ServiceRequestViewSet, FindTechniciansView, TechnicianDirectoryView, MyTechnicianDocumentsView, MyTechnicianDashboardView, MyTechnicianProfileView, AdminTechnicianViewSet,
     MyTechnicianLocationPingView, MyTechnicianAvailabilityView, FacilityManagementContractViewSet, ProjectManagementCaseViewSet,
+    AdminServiceDisputeViewSet,
 )
 from catalogue.views import PartnerServiceCategoryViewSet, RequestPartnerServiceView, MyPartnerServiceRequestsView
 from engagement.views import ContactMessageView, MyBadgesView, MySupportTicketsView, SupportTicketDetailView, AnonymousChatbotView, PublicFaqListView, AdminFaqViewSet, BlockUserView, MyBlockedUsersView
@@ -91,10 +92,12 @@ router.register(r"warehouses", WarehouseListingViewSet, basename="warehouse")
 router.register(r"stores", StoreListingViewSet, basename="store")
 router.register(r"businesses", BusinessListingViewSet, basename="business")
 router.register(r"cars", CarListingViewSet, basename="car")
+router.register(r"marketplace-orders", MarketplaceOrderViewSet, basename="marketplace-order")
 router.register(r"rides", RideViewSet, basename="ride")
 router.register(r"my-vehicles", MyVehicleViewSet, basename="my-vehicle")
 router.register(r"admin/drivers", AdminDriverViewSet, basename="admin-driver")
 router.register(r"admin/technicians", AdminTechnicianViewSet, basename="admin-technician")
+router.register(r"admin/service-disputes", AdminServiceDisputeViewSet, basename="admin-service-dispute")
 router.register(r"service-requests", ServiceRequestViewSet, basename="service-request")
 router.register(r"facility-contracts", FacilityManagementContractViewSet, basename="facility-contract")
 router.register(r"project-cases", ProjectManagementCaseViewSet, basename="project-case")

@@ -143,7 +143,7 @@ def test_creating_a_listing_requires_mfa_and_kyc():
 
 
 @pytest.mark.django_db
-def test_anonymous_search_requests_are_rate_limited(settings):
+def test_anonymous_search_requests_are_rate_limited(settings, monkeypatch):
     """Confirms the throttling configuration actually applies — sets an
     artificially low limit for the test so it doesn't take 60 real
     requests to prove the behavior.
@@ -158,7 +158,8 @@ def test_anonymous_search_requests_are_rate_limited(settings):
     from django.core.cache import cache
     cache.clear()
 
-    settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["search"] = "2/hour"
+    # setitem so the low limit is undone after this test instead of leaking into every later one.
+    monkeypatch.setitem(settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"], "search", "2/hour")
     client = APIClient()
 
     first = client.get("/api/listings/")

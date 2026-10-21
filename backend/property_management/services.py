@@ -192,13 +192,18 @@ def admin_respond_to_dispute(dispute):
 def resolve_dispute(*, dispute, outcome: str, notes: str = ""):
     from django.utils import timezone
     from .models import DisputeStatus
+    from marketplace.services import order_for_escrow, resolve_order_dispute
 
-    if outcome == "RELEASE":
-        dispute.escrow.release()
-    elif outcome == "REFUND":
-        dispute.escrow.refund()
-    else:
+    if outcome not in ("RELEASE", "REFUND"):
         raise ValueError("outcome must be 'RELEASE' or 'REFUND'")
+    order = order_for_escrow(dispute.escrow)
+    if order is not None:
+        # A marketplace order also pays the seller's wallet or reopens the listing, not just the escrow.
+        resolve_order_dispute(order=order, outcome=outcome)
+    elif outcome == "RELEASE":
+        dispute.escrow.release()
+    else:
+        dispute.escrow.refund()
 
     dispute.status = DisputeStatus.RESOLVED
     dispute.resolved_at = timezone.now()

@@ -92,6 +92,7 @@ export default function HotelsPage() {
   // Form states
   const [quarterId, setQuarterId] = useState("");
   const [starRating, setStarRating] = useState("");
+  const [hotelName, setHotelName] = useState("");
   const [roomCategory, setRoomCategory] = useState<string>("STANDARD");
   const [roomCapacity, setRoomCapacity] = useState("2");
   const [roomRate, setRoomRate] = useState("");
@@ -179,17 +180,20 @@ export default function HotelsPage() {
 
   useEffect(() => {
     load();
-    // Shared/chatbot links can preselect the area and budget (?quarter=<id>&max_price=<xaf>).
-    const params = new URLSearchParams(window.location.search);
-    const presetQuarter = params.get("quarter");
-    const presetBudget = params.get("max_price");
-    if (presetQuarter) setSearchQuarter(presetQuarter);
-    if (presetBudget) setMaxPrice(presetBudget);
     listQuarters()
       .then((data) => {
         setQuarters(data);
       })
       .catch(() => {});
+    // Shared/chatbot links can preselect the area and budget (?quarter=<id>&max_price=<xaf>).
+    // Read after mount so the server-rendered page and the first client render match.
+    Promise.resolve().then(() => {
+      const params = new URLSearchParams(window.location.search);
+      const presetQuarter = params.get("quarter");
+      const presetBudget = params.get("max_price");
+      if (presetQuarter) setSearchQuarter(presetQuarter);
+      if (presetBudget) setMaxPrice(presetBudget);
+    });
   }, [load]);
 
   // Filtered live hotel listings
@@ -219,6 +223,7 @@ export default function HotelsPage() {
       const hotel = await createHotel(
         {
           quarter: quarterId,
+          name: hotelName.trim() || undefined,
           star_rating: starRating ? Number(starRating) : undefined,
           latitude: gpsCoords.latitude ?? undefined,
           longitude: gpsCoords.longitude ?? undefined,
@@ -229,6 +234,7 @@ export default function HotelsPage() {
       for (const m of media) await addHotelPhoto(hotel.id, m.url, m.media_type, token);
       setShowForm(false);
       setStarRating("");
+      setHotelName("");
       setRoomRate("");
       setMedia([]);
       load();
@@ -386,6 +392,19 @@ export default function HotelsPage() {
               <MissingAreaRequest quarters={quarters} className="mt-1.5" />
             </div>
 
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                {t("hotelNameLabel")}
+              </label>
+              <input
+                maxLength={200}
+                placeholder={t("hotelNamePlaceholder")}
+                value={hotelName}
+                onChange={(e) => setHotelName(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+            </div>
+
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
                 Official Star Rating (Optional)
@@ -538,7 +557,7 @@ export default function HotelsPage() {
                   }}
                   price={cheapestRoom ? Number(cheapestRoom.base_rate_xaf).toLocaleString() : undefined}
                   priceUnit={t("perNight")}
-                  typeLabel="Hotel"
+                  typeLabel={hotel.name || "Hotel"}
                   location={hotel.quarter_name}
                   mapsHref={
                     hotel.latitude && hotel.longitude
@@ -700,12 +719,12 @@ export default function HotelsPage() {
                 <h3 className="font-bold text-slate-900 text-lg mb-1.5">{t("bookingConfirmedTitle")}</h3>
                 <p className="text-xs text-slate-500 mb-5">{t("bookingConfirmedBody")}</p>
                 <div className="flex gap-2">
-                  <a
+                  <Link
                     href="/bookings"
-                    className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors"
+                    className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors text-center"
                   >
                     {t("viewMyBookings")}
-                  </a>
+                  </Link>
                   <button
                     onClick={() => setBookingHotel(null)}
                     className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-sm font-bold hover:bg-slate-200 transition-colors"

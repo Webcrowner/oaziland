@@ -64,7 +64,7 @@ export default function RenterDashboardPage() {
 
   const activeEscrow = bookings.filter((b) => b.status === "PENDING" || b.status === "CONFIRMED");
   const completedStays = bookings.filter((b) => b.status === "COMPLETED");
-  const totalHeldEscrow = activeEscrow.reduce((acc, b) => acc + Number(b.escrow_amount_xaf || 0), 0);
+  const totalHeldEscrow = activeEscrow.reduce((acc, b) => acc + Number(b.amount_xaf || 0), 0);
 
   return (
     <DashboardLayout
@@ -200,7 +200,7 @@ export default function RenterDashboardPage() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-black text-slate-900">
-                      {Number(b.escrow_amount_xaf || 0).toLocaleString()} XAF
+                      {Number(b.amount_xaf || 0).toLocaleString()} XAF
                     </p>
                     <p className="text-[10px] text-emerald-600 font-bold">Escrow Verified</p>
                   </div>

@@ -254,6 +254,8 @@ def resolve_target_owner(booking: Booking):
         return None
     if target is None:
         return None
+    if hasattr(target, "lister_user"):
+        return target.lister_user
     if hasattr(target, "technician"):
         return target.technician
     if hasattr(target, "driver"):

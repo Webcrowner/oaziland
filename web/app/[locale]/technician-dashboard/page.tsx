@@ -10,10 +10,18 @@ import {
 import DashboardLayout from "@/components/DashboardLayout";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
+import Panel from "@/components/ui/Panel";
+import StatCard from "@/components/ui/StatCard";
 import WalletPayoutCard from "@/components/WalletPayoutCard";
 import ShareAndQrModal from "@/components/ShareAndQrModal";
-import { IconChevronRight, IconShare, IconQrCode, IconArrowUpRight } from "@/components/Icons";
+import {
+  IconChevronRight, IconShare, IconQrCode, IconArrowUpRight,
+  IconWrench, IconCheckCircle, IconCreditCard, IconSparkles, IconMapPin,
+} from "@/components/Icons";
 import { useTasklnLabels } from "@/lib/useTasklnLabels";
+
+const smallInputCls =
+  "flex-1 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition focus:bg-white focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-400/15";
 
 // 2024-01-01 is a Monday, matching the backend's 0=Monday day_of_week.
 const dayLabel = (locale: string, index: number) => new Date(2024, 0, 1 + index).toLocaleDateString(locale, { weekday: "short" });
@@ -141,7 +149,14 @@ export default function TechnicianDashboardPage() {
         title={t("title")}
         subtitle={t("subtitle")}
       >
-        <div className="text-center py-20 text-slate-400">{t("loading")}</div>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-28 rounded-3xl bg-slate-100 animate-pulse" />
+            ))}
+          </div>
+          <div className="h-40 rounded-3xl bg-slate-100 animate-pulse" />
+        </div>
       </DashboardLayout>
     );
   }
@@ -189,122 +204,119 @@ export default function TechnicianDashboardPage() {
     >
       <div className="space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-xs">
-            <p className="text-xs font-semibold text-slate-500 mb-1">{t("activeJobs")}</p>
-            <p className="text-2xl font-black text-amber-600">{data.active_job_count}</p>
-            <p className="text-[11px] text-slate-400 mt-1">{t("inProgressHint")}</p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-xs">
-            <p className="text-xs font-semibold text-slate-500 mb-1">{t("completedJobs")}</p>
-            <p className="text-2xl font-black text-emerald-600">{data.completed_job_count}</p>
-            <p className="text-[11px] text-slate-400 mt-1">{t("completedHint")}</p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-xs">
-            <p className="text-xs font-semibold text-slate-500 mb-1">{t("walletBalance")}</p>
-            <p className="text-2xl font-black text-slate-900">
-              {Number(data.wallet_balance_xaf).toLocaleString()} <span className="text-xs font-medium text-slate-400">XAF</span>
-            </p>
-            <p className="text-[11px] text-slate-400 mt-1">{t("payoutHint")}</p>
-          </div>
+          <StatCard icon={IconWrench} tone="amber" label={t("activeJobs")} value={data.active_job_count} hint={t("inProgressHint")} />
+          <StatCard icon={IconCheckCircle} tone="emerald" label={t("completedJobs")} value={data.completed_job_count} hint={t("completedHint")} />
+          <StatCard
+            icon={IconCreditCard}
+            label={t("walletBalance")}
+            value={Number(data.wallet_balance_xaf).toLocaleString()}
+            unit="XAF"
+            hint={t("payoutHint")}
+          />
         </div>
 
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900">{t("jobsTrend")}</h3>
-            <span className="text-xs font-bold text-slate-500">{t("performancePeriod")}</span>
-          </div>
-          <p className="text-base font-extrabold text-slate-900">
-            {data.jobs_trend.percent_change === null
+        <StatCard
+          icon={IconSparkles}
+          tone={data.jobs_trend.percent_change === null ? "default" : data.jobs_trend.percent_change >= 0 ? "emerald" : "rose"}
+          label={`${t("jobsTrend")} · ${t("performancePeriod")}`}
+          value={
+            data.jobs_trend.percent_change === null
+              ? "—"
+              : `${data.jobs_trend.percent_change > 0 ? "+" : ""}${data.jobs_trend.percent_change}%`
+          }
+          hint={
+            data.jobs_trend.percent_change === null
               ? t("noHistoryYet")
-              : `${data.jobs_trend.percent_change > 0 ? "+" : ""}${data.jobs_trend.percent_change}% ${t("vsLastPeriod")}`}
-          </p>
-          <p className="text-xs text-slate-400">
-            {t("currentVsPrevious", { current: data.jobs_trend.current_period_value, previous: data.jobs_trend.previous_period_value })}
-          </p>
-        </div>
+              : `${t("vsLastPeriod")} · ${t("currentVsPrevious", { current: data.jobs_trend.current_period_value, previous: data.jobs_trend.previous_period_value })}`
+          }
+        />
 
         {/* Job Dispatch Ledger — the real, currently-active job queue */}
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-3">
-          <h3 className="text-sm font-bold text-slate-900">{t("dispatchLedger")}</h3>
+        <Panel title={t("dispatchLedger")}>
           {data.active_jobs.length === 0 ? (
-            <p className="text-xs text-slate-400">{t("noActiveJobs")}</p>
+            <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 py-8 text-center text-sm text-slate-500">{t("noActiveJobs")}</p>
           ) : (
-            <div className="space-y-2">
+            <ul className="divide-y divide-slate-100">
               {data.active_jobs.map((job) => (
-                <Link
-                  key={job.id}
-                  href="/taskln-service"
-                  className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/60 hover:bg-slate-100 transition-colors"
-                >
-                  <span className="text-xs font-bold text-slate-900">{labels.category(job.category)}</span>
-                  {job.priority === "URGENT" && <Badge variant="clay">{t("urgent")}</Badge>}
-                </Link>
+                <li key={job.id}>
+                  <Link
+                    href="/taskln-service"
+                    className="flex items-center gap-3.5 py-3 transition-colors hover:bg-slate-50/70"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-amber-300">
+                      <IconWrench size={18} />
+                    </span>
+                    <span className="flex-1 text-sm font-bold text-slate-900">{labels.category(job.category)}</span>
+                    {job.priority === "URGENT" && <Badge variant="clay">{t("urgent")}</Badge>}
+                    <IconChevronRight size={16} className="text-slate-300" />
+                  </Link>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
-        </div>
+        </Panel>
 
         {/* Live location + weekly availability — without these, this
             technician can never actually be matched by "find nearby
             technicians" (radius search requires a recent location ping
             plus a schedule window covering right now). */}
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="text-sm font-bold text-slate-900">{t("liveLocationTitle")}</h3>
+        <Panel
+          title={t("liveLocationTitle")}
+          action={
             <button
               onClick={handleShareLocation}
               disabled={locationStatus === "sharing"}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer ${
+                locationStatus === "shared" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-900 text-amber-300 hover:bg-slate-800"
+              }`}
             >
+              {locationStatus === "shared" ? <IconCheckCircle size={14} /> : <IconMapPin size={14} />}
               {locationStatus === "sharing" ? t("sharing") : locationStatus === "shared" ? t("locationShared") : t("shareLocation")}
             </button>
+          }
+        >
+          {locationStatus === "error" && <p className="mb-4 rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">{t("locationError")}</p>}
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">{t("selectDays")}</p>
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: 7 }, (_, index) => (
+              <button
+                key={index}
+                onClick={() => toggleDay(index)}
+                aria-pressed={availableDays.has(index)}
+                className={`min-w-14 px-3 py-2 rounded-xl text-sm font-bold border transition-colors cursor-pointer ${
+                  availableDays.has(index) ? "bg-amber-400 border-amber-500 text-slate-950 shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {dayLabel(locale, index)}
+              </button>
+            ))}
           </div>
-          {locationStatus === "error" && <p className="text-xs text-rose-600">{t("locationError")}</p>}
-          <div>
-            <p className="text-xs text-slate-500 mb-2">{t("selectDays")}</p>
-            <div className="flex flex-wrap gap-2">
-              {Array.from({ length: 7 }, (_, index) => (
-                <button
-                  key={index}
-                  onClick={() => toggleDay(index)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${
-                    availableDays.has(index) ? "bg-amber-400 border-amber-500 text-slate-950" : "bg-white border-slate-200 text-slate-500"
-                  }`}
-                >
-                  {dayLabel(locale, index)}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={handleSaveAvailability}
-              disabled={savingAvailability}
-              className="mt-3 px-4 py-2 rounded-lg text-xs font-bold bg-slate-100 text-slate-800 hover:bg-slate-200 disabled:opacity-50"
-            >
-              {savingAvailability ? t("saving") : t("saveAvailability")}
-            </button>
-          </div>
-        </div>
+          <button
+            onClick={handleSaveAvailability}
+            disabled={savingAvailability}
+            className="mt-4 px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            {savingAvailability ? t("saving") : t("saveAvailability")}
+          </button>
+        </Panel>
 
         {/* Facility contracts — docs/01 §2.4's recurring facility
             arrangements, with the "routine inspection logs" this
             dashboard was always meant to show. */}
         {facilityContracts.length > 0 && (
-          <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-3">
-            <h3 className="text-sm font-bold text-slate-900">{t("facilityContracts")}</h3>
+          <Panel title={t("facilityContracts")}>
             <div className="space-y-3">
               {facilityContracts.map((contract) => (
-                <div key={contract.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/60 space-y-2">
+                <div key={contract.id} className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <Badge variant="navy">{contract.frequency}</Badge>
-                    <span className="text-[11px] text-slate-400">{t("since", { date: new Date(contract.start_date).toLocaleDateString(locale) })}</span>
+                    <span className="text-xs text-slate-400">{t("since", { date: new Date(contract.start_date).toLocaleDateString(locale) })}</span>
                   </div>
-                  <p className="text-xs text-slate-700">{contract.scope}</p>
+                  <p className="text-sm text-slate-700">{contract.scope}</p>
                   {contract.visit_logs.length > 0 && (
                     <div className="space-y-1">
                       {contract.visit_logs.slice(0, 3).map((visit) => (
-                        <p key={visit.id} className="text-[11px] text-slate-400">
+                        <p key={visit.id} className="text-xs text-slate-400">
                           {new Date(visit.visited_at).toLocaleDateString()} — {visit.notes}
                         </p>
                       ))}
@@ -315,11 +327,11 @@ export default function TechnicianDashboardPage() {
                       placeholder={t("logPlaceholder")}
                       value={visitNotes[contract.id] || ""}
                       onChange={(e) => setVisitNotes((prev) => ({ ...prev, [contract.id]: e.target.value }))}
-                      className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-slate-200"
+                      className={smallInputCls}
                     />
                     <button
                       onClick={() => handleLogVisit(contract.id)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white hover:bg-slate-800"
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 text-amber-300 hover:bg-slate-800 transition-colors whitespace-nowrap cursor-pointer"
                     >
                       {t("logVisit")}
                     </button>
@@ -327,32 +339,31 @@ export default function TechnicianDashboardPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </Panel>
         )}
 
         {/* Linked renovation/build projects — docs/01 §2.4's
             ProjectManagementCase, with milestones this technician can
             mark complete. */}
         {projectCases.length > 0 && (
-          <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-3">
-            <h3 className="text-sm font-bold text-slate-900">{t("linkedProjects")}</h3>
+          <Panel title={t("linkedProjects")}>
             <div className="space-y-3">
               {projectCases.map((project) => (
-                <div key={project.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/60 space-y-2">
+                <div key={project.id} className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-bold text-slate-900">{project.title}</p>
+                    <p className="text-sm font-black text-slate-900">{project.title}</p>
                     <Badge variant={project.status === "COMPLETED" ? "green" : "gold"}>{project.status}</Badge>
                   </div>
                   {project.milestones.filter((m) => m.status !== "COMPLETED").length === 0 ? (
-                    <p className="text-[11px] text-slate-400">{t("noPendingMilestones")}</p>
+                    <p className="text-xs text-slate-400">{t("noPendingMilestones")}</p>
                   ) : (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       {project.milestones.filter((m) => m.status !== "COMPLETED").map((milestone) => (
                         <div key={milestone.id} className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-slate-700">{milestone.title}</span>
+                          <span className="text-sm text-slate-700">{milestone.title}</span>
                           <button
                             onClick={() => handleCompleteMilestone(project.id, milestone.id)}
-                            className="text-[11px] font-bold text-slate-900 underline"
+                            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
                           >
                             {t("markComplete")}
                           </button>
@@ -363,7 +374,7 @@ export default function TechnicianDashboardPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </Panel>
         )}
 
         {/* Real Mobile Money Payout & Withdrawal Module */}

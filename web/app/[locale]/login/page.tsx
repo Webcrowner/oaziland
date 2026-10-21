@@ -16,6 +16,16 @@ import {
   IconSparkles,
 } from "@/components/Icons";
 
+// Where a brand-new account lands first, based on what they chose at signup.
+// Normal users (no entry here) still get the "what do you want to do" picker.
+const ROLE_HOME: Record<string, string> = {
+  landlord: "/landlord-portfolio",
+  agent: "/dashboard",
+  student: "/student-dashboard",
+  technician: "/technician-dashboard",
+  driver: "/driver-dashboard",
+};
+
 export default function LoginPage() {
   const t = useTranslations("LoginPage");
   const router = useRouter();
@@ -41,7 +51,9 @@ export default function LoginPage() {
         router.push(nextUrl);
       } else if (sessionStorage.getItem("oaziland_just_registered")) {
         sessionStorage.removeItem("oaziland_just_registered");
-        router.push("/get-started");
+        const chosenRole = sessionStorage.getItem("oaziland_signup_role") || "renter";
+        sessionStorage.removeItem("oaziland_signup_role");
+        router.push(ROLE_HOME[chosenRole] ?? "/get-started");
       } else {
         // Direct returning users into their primary active workspace
         router.push("/renter-dashboard");

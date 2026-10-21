@@ -14,7 +14,7 @@ from drf_spectacular.utils import extend_schema
 from .models import SocialAccountLink, Conversation, Post, Comment, ContentStatus, Rating, Review
 from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer, PostSerializer, CommentSerializer, RatingSerializer, ReviewSerializer
 from .services import (
-    link_social_account, create_or_update_rating, create_review, CannotRateSelfError,
+    link_social_account, create_or_update_rating, create_review, CannotRateSelfError, RatingNotEarnedError,
     ReviewRequiresCompletedBookingError, AlreadyReviewedError, is_following, is_mutual_follow,
     toggle_follow, get_follow_counts,
 )
@@ -260,7 +260,12 @@ class MyFavoriteListingsView(APIView):
     @extend_schema(responses={200: dict})
     def get(self, request):
         from .services import list_my_favorite_listing_ids
-        return Response({"listing_ids": [str(lid) for lid in list_my_favorite_listing_ids(request.user)]})
+        from marketplace.services import marketplace_summaries_for_ids
+        listing_ids = list_my_favorite_listing_ids(request.user)
+        return Response({
+            "listing_ids": [str(lid) for lid in listing_ids],
+            "marketplace_listings": marketplace_summaries_for_ids(listing_ids),
+        })
 
 
 class ToggleFavoriteListingView(APIView):
@@ -460,6 +465,8 @@ class RateUserView(APIView):
             rating = create_or_update_rating(author=request.user, score=score, subject_user=subject_user, subject_property_id=subject_property_id)
         except CannotRateSelfError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except RatingNotEarnedError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
         return Response(RatingSerializer(rating).data, status=status.HTTP_201_CREATED)
 
 

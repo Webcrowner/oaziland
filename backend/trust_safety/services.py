@@ -230,6 +230,14 @@ def resolve_content_report(*, report, resolved_by, action_taken: str, issue_stri
             # subject this lookup would ever find — a strike decision
             # on a person-report would have silently done nothing.
             subject = report.target_user
+        elif report.target_listing_id:
+            # A confirmed marketplace-listing report hides the listing and strikes whoever posted it.
+            from marketplace.models import MarketplaceListingBase
+            from marketplace.services import take_down_listing
+            listing = MarketplaceListingBase.objects.select_related("lister_user").filter(pk=report.target_listing_id).first()
+            if listing is not None:
+                take_down_listing(listing.pk)
+                subject = listing.lister_user
         if subject:
             issue_strike_and_apply_consequences(subject=subject, reason=action_taken, issued_by=resolved_by)
 
@@ -256,7 +264,13 @@ def file_content_report(*, reported_by, reason: str, notes: str = "", target_pos
     if target_user is not None and target_user.id == reported_by.id:
         raise CannotReportSelfError("You cannot report yourself.")
 
-    from .models import ContentReport
+    from .models import ContentReport, ReportStatus
+    if target_listing_id:
+        from marketplace.models import MarketplaceListingBase
+        if MarketplaceListingBase.objects.filter(pk=target_listing_id, lister_user=reported_by).exists():
+            raise CannotReportSelfError("You cannot report your own listing.")
+        if ContentReport.objects.filter(reported_by=reported_by, target_listing_id=target_listing_id, status=ReportStatus.OPEN).exists():
+            raise ValueError("You have already reported this listing. Our team is reviewing it.")
     return ContentReport.objects.create(
         reported_by=reported_by, reason=reason, notes=notes,
         target_post=target_post, target_listing_id=target_listing_id, target_comment=target_comment, target_user=target_user,

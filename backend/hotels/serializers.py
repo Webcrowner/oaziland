@@ -30,7 +30,7 @@ class HotelSerializer(OwnerRoleSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Hotel
         fields = [
-            "id", "owner", "owner_name", "lister_role", "lister_average_rating", "lister_rating_count", "star_rating", "amenities", "verified", "quarter", "quarter_name",
+            "id", "owner", "owner_name", "lister_role", "lister_average_rating", "lister_rating_count", "name", "star_rating", "amenities", "verified", "quarter", "quarter_name",
             "latitude", "longitude", "description", "total_rooms", "room_types", "photos",
         ]
         read_only_fields = ["verified", "description"]
@@ -43,6 +43,7 @@ class HotelCreateSerializer(serializers.Serializer):
     least one real room type; a hotel with zero room types isn't
     actually bookable, so isn't a useful thing to create."""
     quarter = serializers.UUIDField()
+    name = serializers.CharField(required=False, allow_blank=True, max_length=200)
     star_rating = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=5)
     latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-90, max_value=90)
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-180, max_value=180)

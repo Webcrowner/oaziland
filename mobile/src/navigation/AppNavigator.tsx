@@ -24,6 +24,9 @@ import CreatePostScreen from "../screens/CreatePostScreen";
 import AdminConsoleScreen from "../screens/AdminConsoleScreen";
 import AgentDashboardScreen from "../screens/AgentDashboardScreen";
 import MarketplaceScreen from "../screens/MarketplaceScreen";
+import MarketplaceListingDetailScreen from "../screens/MarketplaceListingDetailScreen";
+import MarketplaceOrdersScreen from "../screens/MarketplaceOrdersScreen";
+import MyMarketplaceListingsScreen from "../screens/MyMarketplaceListingsScreen";
 import WarehousesScreen from "../screens/WarehousesScreen";
 import StoresScreen from "../screens/StoresScreen";
 import BusinessesScreen from "../screens/BusinessesScreen";
@@ -46,6 +49,7 @@ import TechnicianDashboardScreen from "../screens/TechnicianDashboardScreen";
 import AboutScreen from "../screens/AboutScreen";
 import ContactScreen from "../screens/ContactScreen";
 import HowItWorksScreen from "../screens/HowItWorksScreen";
+import type { MarketplaceCategory } from "../lib/api";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -71,6 +75,9 @@ export type RootStackParamList = {
   AdminConsole: undefined;
   AgentDashboard: undefined;
   Marketplace: undefined;
+  MarketplaceListingDetail: { category: MarketplaceCategory; listingId: string };
+  MarketplaceOrders: undefined;
+  MyMarketplaceListings: undefined;
   Warehouses: undefined;
   Stores: undefined;
   Businesses: undefined;
@@ -137,6 +144,9 @@ export default function AppNavigator() {
         <Stack.Screen name="AdminConsole" component={AdminConsoleScreen} options={{ title: "Admin Console" }} />
         <Stack.Screen name="AgentDashboard" component={AgentDashboardScreen} options={{ title: "My Dashboard" }} />
         <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: "Marketplace" }} />
+        <Stack.Screen name="MarketplaceListingDetail" component={MarketplaceListingDetailScreen} options={{ title: "Listing" }} />
+        <Stack.Screen name="MarketplaceOrders" component={MarketplaceOrdersScreen} options={{ title: "Marketplace Orders" }} />
+        <Stack.Screen name="MyMarketplaceListings" component={MyMarketplaceListingsScreen} options={{ title: "My Listings" }} />
         <Stack.Screen name="Warehouses" component={WarehousesScreen} options={{ title: "Warehouses" }} />
         <Stack.Screen name="Stores" component={StoresScreen} options={{ title: "Stores" }} />
         <Stack.Screen name="Businesses" component={BusinessesScreen} options={{ title: "Businesses" }} />

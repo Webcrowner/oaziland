@@ -1,7 +1,11 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { listMarketplaceListings, createMarketplaceListing, addMarketplaceMedia, listQuarters, type BusinessListing, type Quarter, type MediaUploadResult } from "@/lib/api";
+import { createMarketplaceListing, addMarketplaceMedia, listQuarters, type BusinessListing, type Quarter, type MediaUploadResult } from "@/lib/api";
+import { useMarketplaceListings } from "@/lib/useMarketplaceListings";
+import LoadMoreButton from "@/components/LoadMoreButton";
+import MarketplaceFilterBar, { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "@/components/MarketplaceFilterBar";
+import FavoriteButton from "@/components/FavoriteButton";
 import QuarterOptions from "@/components/QuarterOptions";
 import MissingAreaRequest from "@/components/MissingAreaRequest";
 import PageHeader from "@/components/ui/PageHeader";
@@ -19,9 +23,7 @@ import DirectChatButton from "@/components/DirectChatButton";
 
 export default function BusinessesMarketplacePage() {
   const t = useTranslations("MarketplaceCategoryPage");
-  const [listings, setListings] = useState<BusinessListing[]>([]);
   const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready">("loading");
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [price, setPrice] = useState("");
@@ -33,15 +35,13 @@ export default function BusinessesMarketplacePage() {
   const [gps, setGps] = useState<GpsValue>(EMPTY_GPS);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
 
-  const load = useCallback(() => {
-    listMarketplaceListings<BusinessListing>("businesses")
-      .then((data) => setListings(data.results)).catch(() => setListings([])).finally(() => setStatus("ready"));
-  }, []);
+  const [filters, setFilters] = useState<MarketplaceFilters>(EMPTY_MARKETPLACE_FILTERS);
+  const [reloadKey, setReloadKey] = useState(0);
+  const { items: listings, status, hasMore, loadingMore, loadMore } = useMarketplaceListings<BusinessListing>("businesses", filtersToQuery(filters), reloadKey);
 
   useEffect(() => {
-    load();
     listQuarters().then(setQuarters).catch(() => {});
-  }, [load]);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,7 +60,7 @@ export default function BusinessesMarketplacePage() {
       for (const m of media) await addMarketplaceMedia("businesses", listing.id, m.url, m.media_type, token);
       setShowForm(false);
       setTitle(""); setPrice(""); setAnnualRevenue(""); setIncludesGoodwill(false); setIncludesInventory(false); setMedia([]); setGps(EMPTY_GPS);
-      load();
+      setReloadKey((k) => k + 1);
     } catch {
       setSubmitStatus("error");
       return;
@@ -102,16 +102,21 @@ export default function BusinessesMarketplacePage() {
         </form>
       )}
 
+      <MarketplaceFilterBar value={filters} onChange={setFilters} showPriceBasis={false} />
+
       {status === "loading" ? (
         <p className="text-gray-400">...</p>
       ) : listings.length === 0 ? (
-        <EmptyState icon="💼" title={t("noBusinessesYet")} action={<Button variant="secondary" onClick={() => setShowForm(true)}>{t("listABusiness")}</Button>} />
+        filtersActive(filters)
+          ? <EmptyState icon="💼" title={t("noMatches")} />
+          : <EmptyState icon="💼" title={t("noBusinessesYet")} action={<Button variant="secondary" onClick={() => setShowForm(true)}>{t("listABusiness")}</Button>} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {listings.map((listing) => {
             const photo = listing.media.find((m) => m.media_type === "PHOTO");
             return (
               <Card key={listing.id}>
+                <div className="relative">
                 <Link href={`/marketplace/businesses/${listing.id}`} className="block">
                 {photo ? (
                   <div className="h-40 bg-gray-100"><img src={photo.file_url} alt="" className="w-full h-full object-cover" /></div>
@@ -119,6 +124,8 @@ export default function BusinessesMarketplacePage() {
                   <CardMedia label={t("noPhotoYet")} />
                 )}
                 </Link>
+                <FavoriteButton listingId={listing.id} />
+                </div>
                 <CardBody>
                   <div className="flex items-center justify-between mb-2">
                     <ListerRoleBadge role={listing.lister_role} isSale={listing.price_basis === "SALE"} />
@@ -144,6 +151,7 @@ export default function BusinessesMarketplacePage() {
           })}
         </div>
       )}
+      {status === "ready" && hasMore && <LoadMoreButton onClick={loadMore} loading={loadingMore} />}
     </main>
   );
 }

@@ -20,7 +20,7 @@ import {
 export interface BookingCheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
-  bookingType: "HOTEL" | "HOSTEL_SEMESTER" | "GENERAL_RENTAL" | "EVENT" | "GUEST_HOUSE";
+  bookingType: "HOTEL" | "HOSTEL_SEMESTER" | "GENERAL_RENTAL" | "LAND_RESERVATION" | "EVENT" | "GUEST_HOUSE";
   title: string;
   quarterName: string;
   priceXaf: number | string;

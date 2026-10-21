@@ -57,33 +57,37 @@ export default function TechniciansDirectoryPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {technicians.map((tech) => (
-            <Link
-              key={tech.user_id}
-              href={`/user/${tech.user_id}`}
-              className="flex items-center gap-3 border border-gray-200 rounded-xl p-4 bg-white hover:border-[var(--navy)] transition-colors"
-            >
-              <Avatar
-                src={tech.profile_image_url}
-                name={tech.name}
-                className="w-12 h-12 rounded-xl bg-slate-900 text-amber-400 text-lg font-black"
-              />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{tech.name}</p>
-                <p className="text-xs text-gray-500 truncate">{tech.specialties.map((s) => labels.category(s)).join(", ")}</p>
-                <p className="text-xs text-gray-500">
-                  {tech.avg_rating > 0 ? `${tech.avg_rating.toFixed(1)} ★` : t("noRatings")} · {t("jobsCount", { count: tech.completed_jobs })}
-                  {tech.quarter_name ? ` · ${tech.quarter_name}` : ""}
-                </p>
-                {tech.portfolio_urls.length > 0 && (
-                  <div className="flex gap-1 mt-1.5">
-                    {tech.portfolio_urls.slice(0, 3).map((url) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img key={url} src={url} alt="" className="w-9 h-9 object-cover rounded-md border border-gray-200" />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Link>
+            <div key={tech.user_id} className="border border-gray-200 rounded-xl p-4 bg-white hover:border-[var(--navy)] transition-colors">
+              <Link href={`/user/${tech.user_id}`} className="flex items-center gap-3">
+                <Avatar
+                  src={tech.profile_image_url}
+                  name={tech.name}
+                  className="w-12 h-12 rounded-xl bg-slate-900 text-amber-400 text-lg font-black"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{tech.name}</p>
+                  <p className="text-xs text-gray-500 truncate">{tech.specialties.map((s) => labels.category(s)).join(", ")}</p>
+                  <p className="text-xs text-gray-500">
+                    {tech.avg_rating > 0 ? `${tech.avg_rating.toFixed(1)} ★` : t("noRatings")} · {t("jobsCount", { count: tech.completed_jobs })}
+                    {tech.quarter_name ? ` · ${tech.quarter_name}` : ""}
+                  </p>
+                  {tech.portfolio_urls.length > 0 && (
+                    <div className="flex gap-1 mt-1.5">
+                      {tech.portfolio_urls.slice(0, 3).map((url) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={url} src={url} alt="" className="w-9 h-9 object-cover rounded-md border border-gray-200" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Link>
+              <Link
+                href={`/taskln-service?technician=${tech.user_id}`}
+                className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-amber-400 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 transition-colors"
+              >
+                {t("requestThisTechnician")}
+              </Link>
+            </div>
           ))}
         </div>
       )}

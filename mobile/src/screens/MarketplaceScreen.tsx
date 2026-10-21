@@ -32,6 +32,16 @@ export default function MarketplaceScreen({ navigation }: Props) {
         </TouchableOpacity>
       ))}
 
+      <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceOrders")}>
+        <Text style={styles.cardLabel}>My orders</Text>
+        <Text style={styles.cardDesc}>Track what you bought or sold, confirm receipt, or report a problem.</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MyMarketplaceListings")}>
+        <Text style={styles.cardLabel}>My listings</Text>
+        <Text style={styles.cardDesc}>Edit, pause, mark as sold or delete what you have posted.</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.ridesCard} onPress={() => navigation.navigate("OaziGo")}>
         <Text style={styles.ridesTitle}>OaziGo</Text>
         <Text style={styles.ridesDesc}>Real rides for people, or moving building materials between properties — with a transparent fare and secure Mobile Money payment.</Text>
@@ -50,6 +60,7 @@ const styles = StyleSheet.create({
   cardLabel: { fontSize: 16, fontWeight: "700", color: "#1B2A4A" },
   cardDesc: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   ridesCard: { backgroundColor: "#1B2A4A", borderRadius: 10, padding: 20, marginTop: 12 },
+  ordersCard: { backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: "#C9A227", padding: 16, marginBottom: 12 },
   ridesTitle: { fontSize: 18, fontWeight: "700", color: "#fff", marginBottom: 6 },
   ridesDesc: { fontSize: 13, color: "#D1D5DB", marginBottom: 12 },
   ridesCta: { fontSize: 14, fontWeight: "700", color: "#C9A227" },

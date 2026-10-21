@@ -7,23 +7,50 @@ already existed and is reused here exactly as written, not
 reimplemented at the API layer.
 """
 from rest_framework import viewsets, permissions, status
+from django.http import Http404
+from rest_framework.exceptions import ValidationError
+from decimal import Decimal, InvalidOperation
+import uuid
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile
+from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, PriceBasis
 from .serializers import (
+    PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer,
+    AddMediaSerializer, SetAvailabilitySerializer,
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer,
-    RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer,
+    RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer, RideSosSerializer,
     ListingConditionSerializer, AttachConditionSerializer,
     DriverProfileSerializer, DriverRegistrationSerializer, VehicleSerializer,
 )
 from .services import (
-    search_marketplace_listings, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition,
+    search_marketplace_listings, LISTING_ORDERINGS, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition,
+    trusted_ride_distance_km, cancel_ride, release_ride, raise_sos, RideStateError,
+    moderate_listing_text, moderate_listing_photo,
+    category_models, place_order, mark_handed_over, confirm_receipt, cancel_order, decline_order, dispute_order,
+    OrderError, ListingNotAvailableError, NotPartyToOrderError,
     register_as_driver, register_vehicle, NotARegisteredDriverError, DriverNotVerifiedError, VehicleCategoryMismatchError,
     post_ride_message, NotPartyToRideError,
 )
 from oaziland.permissions import IsAdminRole, IsKycVerified
+from trust_safety.services import ContentBlockedError
+
+MAX_MEDIA_PER_LISTING = 20
+
+
+def _moderate_text(listing_id, title, description):
+    try:
+        moderate_listing_text(listing_id=listing_id, title=title, description=description)
+    except ContentBlockedError as e:
+        raise ValidationError({"detail": str(e)})
+
+
+def _moderate_photo(listing_id, url):
+    try:
+        moderate_listing_photo(listing_id=listing_id, url=url)
+    except ContentBlockedError as e:
+        raise ValidationError({"detail": str(e)})
 
 
 def _get_or_create_owner_profile(user):
@@ -36,6 +63,13 @@ def _get_or_create_owner_profile(user):
     from student_hostels.models import OwnerProfile, OwnerType
     profile, _ = OwnerProfile.objects.get_or_create(account_user=user, defaults={"owner_type": OwnerType.LANDLORD})
     return profile
+
+
+class IsListerOrAdmin(permissions.BasePermission):
+    """Edit, delete and status changes belong to the user who posted the listing (or an admin moderating it)."""
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        return bool(user and user.is_authenticated and (obj.lister_user_id == user.id or hasattr(user, "admin_profile")))
 
 
 class BaseMarketplaceViewSet(viewsets.ModelViewSet):
@@ -51,6 +85,10 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [IsKycVerified()]
+        if self.action in ("update", "partial_update", "destroy", "set_status"):
+            return [permissions.IsAuthenticated(), IsListerOrAdmin()]
+        if self.action == "mine":
+            return [permissions.IsAuthenticated()]
         return super().get_permissions()
 
     def get_queryset(self):
@@ -58,11 +96,37 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
             return self.model_class.objects.none()
         if self.action == "list":
             filters = {}
-            for key in ("min_price", "max_price", "min_size_sqm", "quarter_id"):
+            for key in ("min_price", "max_price", "min_size_sqm"):
                 if key in self.request.query_params:
-                    filters[key] = self.request.query_params[key]
+                    try:
+                        filters[key] = Decimal(self.request.query_params[key])
+                    except InvalidOperation:
+                        raise ValidationError({key: "Enter a number."})
+            if "quarter_id" in self.request.query_params:
+                try:
+                    filters["quarter_id"] = uuid.UUID(self.request.query_params["quarter_id"])
+                except ValueError:
+                    raise ValidationError({"quarter_id": "Enter a valid id."})
+            params = self.request.query_params
+            ordering = params.get("ordering", "newest")
+            if ordering not in LISTING_ORDERINGS:
+                raise ValidationError({"ordering": f"Choose one of: {', '.join(LISTING_ORDERINGS)}."})
+            filters["ordering"] = ordering
+            if params.get("price_basis"):
+                if params["price_basis"] not in PriceBasis.values:
+                    raise ValidationError({"price_basis": "Enter a valid price basis."})
+                filters["price_basis"] = params["price_basis"]
+            if params.get("q", "").strip():
+                filters["q"] = params["q"].strip()
             return search_marketplace_listings(listing_class=self.model_class, filters=filters)
         return self.model_class.objects.all()
+
+    def retrieve(self, request, *args, **kwargs):
+        listing = self.get_object()
+        user = request.user
+        if listing.removed_by_moderation and not (user.is_authenticated and (listing.lister_user_id == user.id or hasattr(user, "admin_profile"))):
+            raise Http404
+        return Response(self.get_serializer(listing).data)
 
     def perform_create(self, serializer):
         owner_profile = _get_or_create_owner_profile(self.request.user)
@@ -71,9 +135,43 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
             lister_role = "OWNER"
         else:
             lister_role = "AGENCY" if agent_profile.agency_id else "AGENT"
-        serializer.save(owner=owner_profile, lister_user=self.request.user, lister_role=lister_role)
+        listing_id = uuid.uuid4()
+        data = serializer.validated_data
+        _moderate_text(listing_id, data.get("title", ""), data.get("description", ""))
+        serializer.save(id=listing_id, owner=owner_profile, lister_user=self.request.user, lister_role=lister_role)
+
+    def perform_update(self, serializer):
+        data = serializer.validated_data
+        instance = serializer.instance
+        _moderate_text(instance.id, data.get("title", instance.title), data.get("description", instance.description))
+        serializer.save()
+
+    @action(detail=False, methods=["get"])
+    def mine(self, request):
+        """Everything the caller has posted, including sold, paused and unavailable listings the public list hides."""
+        queryset = self.model_class.objects.filter(lister_user=request.user).order_by("-created_at")
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="set-status")
+    @extend_schema(request=SetAvailabilitySerializer, responses={200: dict})
+    def set_status(self, request, pk=None):
+        """Mark a listing available, under offer or unavailable (sold, rented, paused)."""
+        listing = self.get_object()
+        input_serializer = SetAvailabilitySerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        is_admin = hasattr(request.user, "admin_profile")
+        if listing.removed_by_moderation and not is_admin:
+            return Response({"detail": "This listing was removed by moderation. Contact support to appeal."}, status=status.HTTP_403_FORBIDDEN)
+        listing.availability_status = input_serializer.validated_data["status"]
+        if is_admin and listing.removed_by_moderation and listing.availability_status == "AVAILABLE":
+            listing.removed_by_moderation = False
+        listing.save(update_fields=["availability_status", "removed_by_moderation"])
+        return Response({"id": str(listing.id), "availability_status": listing.availability_status})
 
     @action(detail=True, methods=["post"], url_path="add-media")
+    @extend_schema(request=AddMediaSerializer, responses={201: dict, 400: dict, 403: dict})
     def add_media(self, request, pk=None):
         """The real gap this closes: MarketplaceMedia and the read-side
         `media` field on every category serializer already existed,
@@ -87,12 +185,16 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         listing = self.get_object()
         if listing.lister_user_id != request.user.id:
             return Response({"detail": "Only the listing's own lister can add media to it."}, status=status.HTTP_403_FORBIDDEN)
-        url = request.data.get("url")
-        if not url:
-            return Response({"detail": "url is required — upload the file to /api/media/upload/ first."}, status=status.HTTP_400_BAD_REQUEST)
-        media_type = request.data.get("media_type", "PHOTO")
-        order = listing.media.count()
-        media = MarketplaceMedia.objects.create(listing=listing, media_type=media_type, file_url=url, order=order)
+        input_serializer = AddMediaSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        if listing.media.count() >= MAX_MEDIA_PER_LISTING:
+            return Response({"detail": f"A listing can have at most {MAX_MEDIA_PER_LISTING} photos and videos."}, status=status.HTTP_400_BAD_REQUEST)
+        if input_serializer.validated_data["media_type"] == MarketplaceMedia.MediaType.PHOTO:
+            _moderate_photo(listing.id, input_serializer.validated_data["url"])
+        media = MarketplaceMedia.objects.create(
+            listing=listing, media_type=input_serializer.validated_data["media_type"],
+            file_url=input_serializer.validated_data["url"], order=listing.media.count(),
+        )
         return Response({"id": media.id, "media_type": media.media_type, "file_url": media.file_url, "order": media.order}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="remove-media")
@@ -129,6 +231,23 @@ class CarListingViewSet(BaseMarketplaceViewSet):
     model_class = CarListing
 
 
+def _is_verified_driver(user) -> bool:
+    profile = getattr(user, "driver_profile", None)
+    return profile is not None and profile.is_verified
+
+
+def _mask_open_ride(data: dict) -> dict:
+    """What a driver browsing open requests sees: the route in words and map points rounded to about 1 km,
+    but not the rider's identity. Exact details are shared once the driver accepts."""
+    masked = dict(data)
+    masked["rider"] = None
+    masked["rider_name"] = (masked.get("rider_name") or "").split(" ")[0]
+    for key in ("pickup_latitude", "pickup_longitude", "dropoff_latitude", "dropoff_longitude"):
+        if masked.get(key) is not None:
+            masked[key] = str(round(float(masked[key]), 2))
+    return masked
+
+
 class RideViewSet(viewsets.ModelViewSet):
     """The real ride-hailing lifecycle — every fare settles through
     the EXACT SAME Booking/PaymentEscrow machinery as a property
@@ -152,12 +271,11 @@ class RideViewSet(viewsets.ModelViewSet):
         from django.db.models import Q
         user = self.request.user
         if self.action == "list":
-            # WHY REQUESTED rides are visible to everyone here, not
-            # just the rider: a prospective driver needs to be able
-            # to find an open ride request in the first place.
-            return RideBooking.objects.filter(
-                Q(rider=user) | Q(driver=user) | Q(status=RideStatus.REQUESTED)
-            ).distinct().order_by("-requested_at")
+            # Open requests are only shown to verified drivers, who are the only people who can take them.
+            visible = Q(rider=user) | Q(driver=user)
+            if _is_verified_driver(user):
+                visible |= Q(status=RideStatus.REQUESTED)
+            return RideBooking.objects.filter(visible).distinct().order_by("-requested_at")
         # WHY detail actions (retrieve/accept/start/complete) are NOT
         # scoped the same way: each action below already has its own
         # explicit real permission check (e.g. "only the ride's own
@@ -167,6 +285,24 @@ class RideViewSet(viewsets.ModelViewSet):
         # deliberate 403 into an uninformative 404 instead. Found by
         # the tests themselves failing with the wrong status code.
         return RideBooking.objects.all()
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        for index, row in enumerate(rows):
+            if request.user.id not in (row["rider"], row["driver"]):
+                rows[index] = _mask_open_ride(row)
+        return response
+
+    def retrieve(self, request, *args, **kwargs):
+        # Detail GET stays hidden from outsiders (404), except open requests a verified driver may take.
+        ride = self.get_object()
+        data = self.get_serializer(ride).data
+        if request.user.id in (ride.rider_id, ride.driver_id):
+            return Response(data)
+        if ride.status == RideStatus.REQUESTED and _is_verified_driver(request.user):
+            return Response(_mask_open_ride(data))
+        raise Http404
 
     @extend_schema(request=RideRequestSerializer, responses={201: RideBookingSerializer})
     def create(self, request, *args, **kwargs):
@@ -181,18 +317,19 @@ class RideViewSet(viewsets.ModelViewSet):
         input_serializer = RideRequestSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data
-        fare = estimate_ride_fare(distance_km=data["distance_km"], ride_category=data["ride_category"])
 
         pickup_coords = None
-        if data.get("pickup_latitude") is not None:
+        if data.get("pickup_latitude") is not None and data.get("pickup_longitude") is not None:
             pickup_coords = (data["pickup_latitude"], data["pickup_longitude"])
         dropoff_coords = None
-        if data.get("dropoff_latitude") is not None:
+        if data.get("dropoff_latitude") is not None and data.get("dropoff_longitude") is not None:
             dropoff_coords = (data["dropoff_latitude"], data["dropoff_longitude"])
+        distance_km = trusted_ride_distance_km(client_distance_km=data["distance_km"], pickup_coords=pickup_coords, dropoff_coords=dropoff_coords)
+        fare = estimate_ride_fare(distance_km=distance_km, ride_category=data["ride_category"])
 
         ride = request_ride(
             rider=request.user, pickup_description=data["pickup_description"], dropoff_description=data["dropoff_description"],
-            fare_estimate_xaf=fare, pickup_coords=pickup_coords, dropoff_coords=dropoff_coords,
+            fare_estimate_xaf=fare, distance_km=round(Decimal(distance_km), 2), pickup_coords=pickup_coords, dropoff_coords=dropoff_coords,
             ride_category=data["ride_category"], transport_type=data["transport_type"],
             has_luggage=data["has_luggage"], cargo_description=data.get("cargo_description", ""),
         )
@@ -221,6 +358,50 @@ class RideViewSet(viewsets.ModelViewSet):
         except (NotARegisteredDriverError, DriverNotVerifiedError, VehicleCategoryMismatchError) as e:
             return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
         return Response(RideBookingSerializer(ride).data)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: RideBookingSerializer, 400: dict, 403: dict})
+    def cancel(self, request, pk=None):
+        """The rider cancels before the trip starts."""
+        ride = self.get_object()
+        try:
+            cancel_ride(ride=ride, rider=request.user)
+        except NotPartyToRideError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except RideStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RideBookingSerializer(ride).data)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: RideBookingSerializer, 400: dict, 403: dict})
+    def release(self, request, pk=None):
+        """The assigned driver pulls out before the trip starts; the request reopens."""
+        ride = self.get_object()
+        try:
+            release_ride(ride=ride, driver=request.user)
+        except NotPartyToRideError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except RideStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RideBookingSerializer(ride).data)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=RideSosSerializer, responses={200: dict, 400: dict, 403: dict})
+    def sos(self, request, pk=None):
+        """The rider or the driver asks for help during a trip. Admins are alerted with the route, the people and
+        the vehicle involved, and the sender's location when the app can share it."""
+        ride = self.get_object()
+        input_serializer = RideSosSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        data = input_serializer.validated_data
+        try:
+            alerted = raise_sos(ride=ride, user=request.user, latitude=data.get("latitude"), longitude=data.get("longitude"), note=data.get("note", ""))
+        except NotPartyToRideError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except RideStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        ride.refresh_from_db()
+        return Response({"sos_raised_at": ride.sos_raised_at, "admins_alerted": alerted})
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
@@ -411,3 +592,97 @@ class AdminDriverViewSet(viewsets.ReadOnlyModelViewSet):
         driver_profile.is_verified = True
         driver_profile.save(update_fields=["is_verified"])
         return Response(DriverProfileSerializer(driver_profile).data)
+
+
+class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """Buying or renting a marketplace listing through escrow: pay, seller hands over, buyer confirms.
+    Only list is scoped to the caller; detail actions use an unscoped queryset with explicit checks so a
+    deliberate 403 is not turned into a 404 (retrieve is overridden to still hide orders from outsiders)."""
+    serializer_class = MarketplaceOrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = MarketplaceOrder.objects.select_related("listing__lister_user", "buyer", "booking")
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, "swagger_fake_view", False):
+            return queryset.none()
+        if self.action != "list":
+            return queryset
+        from django.db.models import Q
+        role = self.request.query_params.get("role")
+        user = self.request.user
+        if role == "buying":
+            return queryset.filter(buyer=user)
+        if role == "selling":
+            return queryset.filter(listing__lister_user=user)
+        return queryset.filter(Q(buyer=user) | Q(listing__lister_user=user))
+
+    def retrieve(self, request, *args, **kwargs):
+        order = self.get_object()
+        if request.user.id not in (order.buyer_id, order.listing.lister_user_id):
+            raise Http404
+        return Response(self.get_serializer(order).data)
+
+    @extend_schema(request=PlaceOrderSerializer, responses={201: MarketplaceOrderSerializer, 400: dict, 404: dict, 409: dict})
+    def create(self, request, *args, **kwargs):
+        from transactions.views import FakeRedisLock
+        from payments.gateways import get_active_gateway
+        input_serializer = PlaceOrderSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        data = input_serializer.validated_data
+        listing = category_models()[data["category"]].objects.filter(pk=data["listing_id"]).first()
+        if listing is None:
+            return Response({"detail": "That listing was not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            order = place_order(
+                listing=listing, buyer=request.user, lock_client=FakeRedisLock(),
+                payment_gateway=get_active_gateway(), phone_number=data["phone_number"],
+            )
+        except ListingNotAvailableError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        except OrderError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [IsKycVerified()]
+        return super().get_permissions()
+
+    def _run(self, request, func, **kwargs):
+        order = self.get_object()
+        try:
+            func(order=order, **kwargs)
+        except NotPartyToOrderError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except OrderError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        order.refresh_from_db()
+        return Response(self.get_serializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="hand-over")
+    @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def hand_over(self, request, pk=None):
+        return self._run(request, mark_handed_over, seller=request.user)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def confirm(self, request, pk=None):
+        return self._run(request, confirm_receipt, buyer=request.user)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def cancel(self, request, pk=None):
+        return self._run(request, cancel_order, buyer=request.user)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def decline(self, request, pk=None):
+        return self._run(request, decline_order, seller=request.user)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=OrderDisputeSerializer, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def dispute(self, request, pk=None):
+        input_serializer = OrderDisputeSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        return self._run(request, dispute_order, user=request.user, reason=input_serializer.validated_data["reason"])

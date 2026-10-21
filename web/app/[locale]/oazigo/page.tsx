@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import {
-  listMyRides, requestRide, acceptRide, startRide, completeRide,
+  listMyRides, requestRide, acceptRide, startRide, completeRide, cancelRide, releaseRide, raiseRideSos,
   getMyDriverProfile, registerAsDriver, listMyVehicles, registerVehicle, getMyProfile,
   type RideBookingItem, type DriverProfileItem, type VehicleItem,
 } from "@/lib/api";
@@ -12,6 +12,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import GpsCaptureButton from "@/components/GpsCaptureButton";
 import RideChat from "@/components/RideChat";
+import RateAndReport from "@/components/RateAndReport";
 import { IconMapPin, IconCompass } from "@/components/Icons";
 
 const STATUS_VARIANT: Record<string, "navy" | "gold" | "green" | "clay"> = {
@@ -76,30 +77,48 @@ export default function OaziGoPage() {
   // Accepting a ride
   const [acceptingRideId, setAcceptingRideId] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
+  const [rideActionError, setRideActionError] = useState("");
+  const [sosMessage, setSosMessage] = useState<{ rideId: string; text: string } | null>(null);
   const [payingRideId, setPayingRideId] = useState<string | null>(null);
   const [phoneNumber, setPhoneNumber] = useState("");
 
-  const load = useCallback(() => {
+  const fetchAll = useCallback(() => {
     const token = localStorage.getItem("access_token");
-    if (!token) {
-      setStatus("signedOut");
-      return;
-    }
-    Promise.all([
+    if (!token) return null;
+    return Promise.all([
       listMyRides(token),
       getMyDriverProfile(token).catch(() => null),
       listMyVehicles(token).catch(() => ({ results: [] })),
       getMyProfile(token).catch(() => null),
-    ]).then(([ridesData, driverData, vehiclesData, profileData]) => {
+    ]).catch(() => undefined);
+  }, []);
+
+  const apply = useCallback((data: Awaited<NonNullable<ReturnType<typeof fetchAll>>> | null) => {
+    if (data === null) {
+      setStatus("signedOut");
+      return;
+    }
+    if (data) {
+      const [ridesData, driverData, vehiclesData, profileData] = data;
       setRides(ridesData.results);
       setDriverProfile(driverData);
       setVehicles(vehiclesData.results);
       if (profileData) setMyUserId(profileData.id);
-      setStatus("ready");
-    }).catch(() => setStatus("ready"));
+    }
+    setStatus("ready");
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(() => {
+    const pending = fetchAll();
+    if (pending) pending.then(apply);
+    else apply(null);
+  }, [fetchAll, apply]);
+
+  useEffect(() => {
+    const pending = fetchAll();
+    if (pending) pending.then(apply);
+    else Promise.resolve().then(() => apply(null));
+  }, [fetchAll, apply]);
 
   async function handleRequest(e: React.FormEvent) {
     e.preventDefault();
@@ -170,6 +189,46 @@ export default function OaziGoPage() {
     if (!token) return;
     await startRide(id, token);
     load();
+  }
+
+  async function runRideAction(action: (token: string) => Promise<unknown>) {
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    setRideActionError("");
+    try {
+      await action(token);
+      load();
+    } catch (err) {
+      setRideActionError(err instanceof Error ? err.message : t("actionFailed"));
+    }
+  }
+
+  function handleCancel(id: string) {
+    if (!window.confirm(t("confirmCancelRide"))) return;
+    runRideAction((token) => cancelRide(id, token));
+  }
+
+  async function handleSos(id: string) {
+    if (!window.confirm(t("sosConfirm"))) return;
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    setRideActionError("");
+    // Send the location when the browser can share it quickly; the alert goes out either way.
+    const coords = await new Promise<{ latitude: number; longitude: number } | undefined>((resolve) => {
+      if (!navigator.geolocation) return resolve(undefined);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        () => resolve(undefined),
+        { timeout: 4000, maximumAge: 60000 },
+      );
+    });
+    try {
+      const result = await raiseRideSos(id, token, coords);
+      setSosMessage({ rideId: id, text: result.admins_alerted > 0 ? t("sosSent") : t("sosNoOperator") });
+      load();
+    } catch (err) {
+      setRideActionError(err instanceof Error ? err.message : t("actionFailed"));
+    }
   }
 
   async function handleComplete(id: string) {
@@ -317,6 +376,7 @@ export default function OaziGoPage() {
         <EmptyState icon="🚕" title={t("noRidesYet")} />
       ) : (
         <div className="flex flex-col gap-3">
+          {rideActionError && <p className="rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">{rideActionError}</p>}
           {rides.map((ride) => (
             <div key={ride.id} className="border border-gray-200 rounded-xl p-4 bg-white">
               <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -331,6 +391,12 @@ export default function OaziGoPage() {
               {ride.cargo_description && <p className="text-xs text-gray-500 mb-2">{ride.cargo_description}</p>}
               <p className="text-sm text-gray-600 mb-3">{Number(ride.fare_estimate_xaf).toLocaleString()} XAF</p>
 
+              {ride.driver && ride.status !== "CANCELLED" && (
+                <p className="text-xs text-gray-600 mb-3">
+                  {ride.rider === myUserId ? t("yourDriver", { name: ride.driver_name ?? "" }) : t("yourRider", { name: ride.rider_name })}
+                  {ride.vehicle_details && ` · ${ride.vehicle_details.make} ${ride.vehicle_details.model} · ${ride.vehicle_details.plate_number}`}
+                </p>
+              )}
               {/* Both-ends GPS navigation for Rider and Driver */}
               {(ride.pickup_latitude && ride.pickup_longitude) || (ride.dropoff_latitude && ride.dropoff_longitude) ? (
                 <div className="flex flex-wrap items-center gap-2 mb-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -374,8 +440,22 @@ export default function OaziGoPage() {
                   <button onClick={() => handleAccept(ride.id)} className="bg-[var(--navy)] text-white font-semibold px-3 py-1.5 rounded text-sm">{t("confirm")}</button>
                 </div>
               )}
-              {ride.status === "ACCEPTED" && ride.driver && (
+              {ride.status === "ACCEPTED" && ride.driver === myUserId && (
                 <button onClick={() => handleStart(ride.id)} className="text-xs text-[var(--navy)] underline">{t("startRide")}</button>
+              )}
+              {ride.status === "ACCEPTED" && ride.driver === myUserId && (
+                <button onClick={() => runRideAction((token) => releaseRide(ride.id, token))} className="ml-3 text-xs text-slate-600 underline">{t("releaseRide")}</button>
+              )}
+              {(ride.status === "REQUESTED" || ride.status === "ACCEPTED") && ride.rider === myUserId && (
+                <button onClick={() => handleCancel(ride.id)} className="ml-3 text-xs text-red-700 underline">{t("cancelRide")}</button>
+              )}
+              {(ride.status === "ACCEPTED" || ride.status === "IN_PROGRESS") && (ride.rider === myUserId || ride.driver === myUserId) && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <button onClick={() => handleSos(ride.id)} className="text-xs font-bold text-white bg-red-700 hover:bg-red-800 rounded-lg px-3 py-1.5 cursor-pointer">
+                    🆘 {t("sosButton")}
+                  </button>
+                  {sosMessage?.rideId === ride.id && <p className="text-xs text-slate-700 mt-2">{sosMessage.text}</p>}
+                </div>
               )}
               {ride.status === "IN_PROGRESS" && payingRideId !== ride.id && (
                 <button onClick={() => setPayingRideId(ride.id)} className="text-xs text-[var(--navy)] underline">{t("completeAndPay")}</button>
@@ -386,6 +466,16 @@ export default function OaziGoPage() {
                   <button onClick={() => handleComplete(ride.id)} className="bg-[var(--gold)] text-[var(--navy)] font-semibold px-3 py-1.5 rounded text-sm">{t("pay")}</button>
                 </div>
               )}
+
+              {ride.status === "COMPLETED" && (() => {
+                const otherId = ride.rider === myUserId ? ride.driver : ride.rider;
+                return otherId ? (
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    <p className="text-xs text-gray-500 mb-1">{t("rateTrip")}</p>
+                    <RateAndReport subjectUserId={otherId} />
+                  </div>
+                ) : null;
+              })()}
 
               {/* Private In-Trip Chat between Rider & Driver */}
               {ride.driver && (ride.status === "ACCEPTED" || ride.status === "IN_PROGRESS") && (

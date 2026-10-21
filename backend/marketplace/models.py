@@ -57,6 +57,8 @@ class MarketplaceListingBase(models.Model):
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     availability_status = models.CharField(max_length=15, choices=AvailabilityStatus.choices, default=AvailabilityStatus.AVAILABLE)
+    # Set when an admin confirms a report; the lister cannot make the listing available again.
+    removed_by_moderation = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -158,6 +160,33 @@ class ListingCondition(models.Model):
         indexes = [models.Index(fields=["target_content_type", "target_id"])]
 
 
+class MarketplaceOrderStatus(models.TextChoices):
+    PAID = "PAID", "Paid into escrow"
+    HANDED_OVER = "HANDED_OVER", "Handed over"
+    COMPLETED = "COMPLETED", "Completed"
+    CANCELLED = "CANCELLED", "Cancelled"
+    DISPUTED = "DISPUTED", "Disputed"
+
+
+class MarketplaceOrder(models.Model):
+    """A buyer's purchase (or first rental period) of one marketplace listing. The money sits in the
+    shared PaymentEscrow until the buyer confirms they got what they paid for, so neither side has to
+    trust the other. Settles through the same Booking/escrow machinery as every other transaction."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    listing = models.ForeignKey(MarketplaceListingBase, on_delete=models.PROTECT, related_name="orders")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="marketplace_orders")
+    booking = models.OneToOneField("transactions.Booking", on_delete=models.PROTECT, related_name="marketplace_order")
+    amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
+    status = models.CharField(max_length=15, choices=MarketplaceOrderStatus.choices, default=MarketplaceOrderStatus.PAID)
+    handed_over_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "marketplace_orders"
+        ordering = ["-created_at"]
+
+
 class RideStatus(models.TextChoices):
     REQUESTED = "REQUESTED", "Requested"
     ACCEPTED = "ACCEPTED", "Accepted"
@@ -239,6 +268,8 @@ class RideBooking(models.Model):
     dropoff_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     dropoff_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     fare_estimate_xaf = models.DecimalField(max_digits=10, decimal_places=2)
+    # Null on rides requested before the distance was stored.
+    distance_km = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=15, choices=RideStatus.choices, default=RideStatus.REQUESTED)
     ride_category = models.CharField(max_length=10, choices=RideCategory.choices, default=RideCategory.STANDARD)
     transport_type = models.CharField(max_length=10, choices=TransportType.choices, default=TransportType.PASSENGER)
@@ -247,6 +278,9 @@ class RideBooking(models.Model):
     booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="ride_booking")
     requested_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    # Set when the rider or the driver presses SOS during a trip; admins are alerted.
+    sos_raised_at = models.DateTimeField(null=True, blank=True)
+    sos_raised_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
 
     class Meta:
         db_table = "ride_bookings"

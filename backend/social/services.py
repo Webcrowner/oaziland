@@ -776,12 +776,30 @@ class CannotRateSelfError(Exception):
     pass
 
 
+class RatingNotEarnedError(Exception):
+    pass
+
+
 class ReviewRequiresCompletedBookingError(Exception):
     pass
 
 
 class AlreadyReviewedError(Exception):
     pass
+
+
+def _author_may_rate(author, subject_user) -> bool:
+    """A driver can only be rated by someone they have driven (and a passenger by their driver), so a rating
+    reflects a trip that really happened. Other people (agents, landlords, owners) stay open to any signed-in user."""
+    if subject_user is None:
+        return True
+    from marketplace.models import RideBooking, RideStatus
+    completed = RideBooking.objects.filter(status=RideStatus.COMPLETED)
+    if completed.filter(driver=author, rider=subject_user).exists():
+        return True
+    if hasattr(subject_user, "driver_profile"):
+        return completed.filter(driver=subject_user, rider=author).exists()
+    return True
 
 
 def create_or_update_rating(*, author, score, subject_user=None, subject_property_id=None):
@@ -794,6 +812,8 @@ def create_or_update_rating(*, author, score, subject_user=None, subject_propert
     (unlike re-applying to the same job)."""
     if subject_user is not None and subject_user.id == author.id:
         raise CannotRateSelfError("You cannot rate yourself.")
+    if not _author_may_rate(author, subject_user):
+        raise RatingNotEarnedError("You can only rate a driver after completing a ride with them.")
 
     from .models import Rating
     rating, _ = Rating.objects.update_or_create(

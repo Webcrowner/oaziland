@@ -5,6 +5,9 @@ import {
   type MarketplaceCategory, type WarehouseListing, type StoreListing, type BusinessListing, type CarListing,
 } from "@/lib/api";
 import AssetDetailView from "@/components/AssetDetailView";
+import MarketplaceBuyBox from "@/components/MarketplaceBuyBox";
+import FavoriteButton from "@/components/FavoriteButton";
+import ReportListingButton from "@/components/ReportListingButton";
 
 const CATEGORIES: MarketplaceCategory[] = ["warehouses", "stores", "businesses", "cars"];
 const SHARE_TITLES: Record<MarketplaceCategory, string> = { warehouses: "warehouse", stores: "store", businesses: "business", cars: "car" };
@@ -44,6 +47,7 @@ export default async function MarketplaceDetailPage({ params }: { params: Promis
 
   const price = Number(listing.price_xaf).toLocaleString();
   const basisKey = PRICE_BASIS_KEYS[listing.price_basis];
+  const statusNote = listing.availability_status === "UNDER_OFFER" ? t("listingUnderOffer") : listing.availability_status === "UNAVAILABLE" ? t("listingUnavailable") : "";
   const media = listing.media.map((m) => ({ id: m.id, url: m.file_url, media_type: m.media_type, is_primary: m.order === 0 }));
 
   return (
@@ -61,13 +65,27 @@ export default async function MarketplaceDetailPage({ params }: { params: Promis
       description={listing.description}
       amenities={extras}
       facts={facts}
-      priceText={`${price} XAF${basisKey ? ` · ${t(basisKey)}` : ""}`}
+      priceText={`${price} XAF${basisKey ? ` · ${t(basisKey)}` : ""}${statusNote ? ` · ${statusNote}` : ""}`}
       latitude={listing.latitude}
       longitude={listing.longitude}
       sharePath={`/marketplace/${cat}/${listing.id}`}
       sharePrice={price}
       mediaEndpoint={cat}
       assetId={listing.id}
+      actionSlot={
+        <div className="flex flex-col gap-3">
+          <MarketplaceBuyBox
+            category={cat}
+            listingId={listing.id}
+            ownerId={listing.lister_user}
+            availability={listing.availability_status}
+            isSale={listing.price_basis === "SALE"}
+            amount={price}
+          />
+          <FavoriteButton listingId={listing.id} variant="detail" />
+          <ReportListingButton listingId={listing.id} />
+        </div>
+      }
     />
   );
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
@@ -52,32 +52,43 @@ export default function DriverDashboardPage() {
   const [plateNumber, setPlateNumber] = useState("");
   const [vehicleError, setVehicleError] = useState("");
 
-  const loadData = () => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-    if (!token) {
-      setStatus("signedOut");
-      return;
-    }
-
-    Promise.all([
+  const fetchData = useCallback(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) return null;
+    return Promise.all([
       getMyDriverProfile(token).catch(() => null),
       listMyVehicles(token).catch(() => ({ results: [] })),
       listMyRides(token).catch(() => ({ results: [] })),
       getMyProfile(token).catch(() => null),
-    ])
-      .then(([prof, vehs, rds, myProf]) => {
-        setProfile(prof);
-        setVehicles(vehs.results || []);
-        setRides(rds.results || []);
-        if (myProf) setUserId(myProf.id);
-        setStatus("ready");
-      })
-      .catch(() => setStatus("ready"));
-  };
+    ]).catch(() => undefined);
+  }, []);
+
+  const applyData = useCallback((data: Awaited<NonNullable<ReturnType<typeof fetchData>>> | null) => {
+    if (data === null) {
+      setStatus("signedOut");
+      return;
+    }
+    if (data) {
+      const [prof, vehs, rds, myProf] = data;
+      setProfile(prof);
+      setVehicles(vehs.results || []);
+      setRides(rds.results || []);
+      if (myProf) setUserId(myProf.id);
+    }
+    setStatus("ready");
+  }, []);
+
+  const loadData = useCallback(() => {
+    const pending = fetchData();
+    if (pending) pending.then(applyData);
+    else applyData(null);
+  }, [fetchData, applyData]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    const pending = fetchData();
+    if (pending) pending.then(applyData);
+    else Promise.resolve().then(() => applyData(null));
+  }, [fetchData, applyData]);
 
   async function handleRegisterDriver(e: React.FormEvent) {
     e.preventDefault();
@@ -395,7 +406,7 @@ export default function DriverDashboardPage() {
                         {ride.status}
                       </span>
                       <span className="text-[11px] text-slate-400">
-                        {new Date(ride.created_at).toLocaleDateString()}
+                        {new Date(ride.requested_at).toLocaleDateString()}
                       </span>
                     </div>
                     <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5 pt-0.5">
@@ -433,7 +444,7 @@ export default function DriverDashboardPage() {
                     <p className="text-sm font-black text-slate-900">
                       {Number(ride.fare_estimate_xaf).toLocaleString()} XAF
                     </p>
-                    <p className="text-[11px] text-slate-400">{ride.distance_km} km journey</p>
+                    {ride.distance_km && <p className="text-[11px] text-slate-400">{Number(ride.distance_km)} km journey</p>}
                   </div>
                 </div>
               ))}

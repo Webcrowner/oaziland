@@ -40,6 +40,7 @@ export interface AssetDetailProps {
   sharePrice?: string;
   mediaEndpoint?: AssetMediaEndpoint;
   assetId?: string;
+  actionSlot?: React.ReactNode;
 }
 
 const humanize = (value: string) => value.replace(/_/g, " ").toLowerCase();
@@ -127,6 +128,7 @@ export default async function AssetDetailView(props: AssetDetailProps) {
         </div>
 
         <div className="lg:sticky lg:top-4 lg:self-start flex flex-col gap-3">
+          {props.actionSlot}
           {props.ownerId && (
             <div className="rounded-lg p-4 bg-gray-50 border border-gray-200">
               <ListerRoleBadge role={props.listerRole} isSale={props.isSale} />

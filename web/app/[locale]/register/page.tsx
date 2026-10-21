@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useRouter, Link } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
-import { registerUser } from "@/lib/api";
+import { registerUser, SIGNUP_ROLES, type SignupRole } from "@/lib/api";
 import Button from "@/components/ui/Button";
 import {
   IconUser,
@@ -30,7 +30,9 @@ function RegisterForm() {
   const t = useTranslations("RegisterPage");
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [form, setForm] = useState({ username: "", phone: "", password: "" });
+  const [form, setForm] = useState<{ username: string; phone: string; password: string; role: SignupRole }>({
+    username: "", phone: "", password: "", role: "renter",
+  });
   const [referralCode, setReferralCode] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -51,6 +53,7 @@ function RegisterForm() {
       // knows to route into the real role/intent picker instead of
       // straight to the homepage — but only once, for this new account.
       sessionStorage.setItem("oaziland_just_registered", "1");
+      sessionStorage.setItem("oaziland_signup_role", form.role);
       router.push("/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("registrationFailed"));
@@ -189,6 +192,23 @@ function RegisterForm() {
                   {showPassword ? <IconEyeOff size={16} /> : <IconEye size={16} />}
                 </button>
               </div>
+            </div>
+
+            <div>
+              <label htmlFor="signup-role" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                {t("roleLabel")}
+              </label>
+              <select
+                id="signup-role"
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value as SignupRole })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+              >
+                {SIGNUP_ROLES.map((role) => (
+                  <option key={role} value={role}>{t(`role_${role}`)}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1.5">{t("roleHint")}</p>
             </div>
 
             {error && (

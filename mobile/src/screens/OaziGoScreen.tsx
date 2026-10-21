@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, ScrollView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Switch, ScrollView, Alert } from "react-native";
 import {
-  listMyRides, requestRide, acceptRide, startRide, completeRide,
+  listMyRides, requestRide, acceptRide, startRide, completeRide, cancelRide, releaseRide, raiseRideSos, getMyUserId,
   getMyDriverProfile, registerAsDriver, listMyVehicles, registerVehicle,
   type RideBookingItem, type DriverProfileItem, type VehicleItem,
 } from "../lib/api";
+import RateAndReport from "../components/RateAndReport";
 
 const STATUS_COLORS: Record<string, string> = {
   REQUESTED: "#C9A227", ACCEPTED: "#1B2A4A", IN_PROGRESS: "#1B2A4A", COMPLETED: "#16A34A", CANCELLED: "#A8502E",
@@ -29,6 +30,7 @@ export default function OaziGoScreen() {
   const [loading, setLoading] = useState(true);
   const [driverProfile, setDriverProfile] = useState<DriverProfileItem | null>(null);
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
 
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
@@ -66,6 +68,8 @@ export default function OaziGoScreen() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => { getMyUserId().then(setMyUserId).catch(() => {}); }, []);
 
   async function handleRequest() {
     setRequesting(true);
@@ -107,7 +111,59 @@ export default function OaziGoScreen() {
     load();
   }
 
-  async function handleStart(id: string) { await startRide(id); load(); }
+  async function handleStart(id: string) {
+    try {
+      await startRide(id);
+      load();
+    } catch (err) {
+      Alert.alert("That did not work", err instanceof Error ? err.message : "Please try again.");
+    }
+  }
+
+  function handleSos(id: string) {
+    Alert.alert(
+      "Send an SOS?",
+      "The Oaziland team will be alerted with your trip details. If you are in immediate danger, also contact your local emergency services.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Send SOS",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const result = await raiseRideSos(id);
+              Alert.alert(
+                result.admins_alerted > 0 ? "SOS sent" : "SOS recorded",
+                result.admins_alerted > 0
+                  ? "The Oaziland team has been alerted. If you are in immediate danger, contact your local emergency services."
+                  : "No Oaziland operator could be alerted right now. Please contact your local emergency services.",
+              );
+              load();
+            } catch (err) {
+              Alert.alert("Could not send the SOS", err instanceof Error ? err.message : "Please try again or contact your local emergency services.");
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  function confirmRideAction(message: string, action: (id: string) => Promise<unknown>, id: string) {
+    Alert.alert("Are you sure?", message, [
+      { text: "No", style: "cancel" },
+      {
+        text: "Yes",
+        onPress: async () => {
+          try {
+            await action(id);
+            load();
+          } catch (err) {
+            Alert.alert("That did not work", err instanceof Error ? err.message : "Please try again.");
+          }
+        },
+      },
+    ]);
+  }
   async function handleComplete(id: string) {
     if (!phoneNumber) return;
     await completeRide(id, phoneNumber);
@@ -223,7 +279,21 @@ export default function OaziGoScreen() {
           </View>
           {item.cargo_description ? <Text style={styles.cargoDesc}>{item.cargo_description}</Text> : null}
           <Text style={styles.fare}>{Number(item.fare_estimate_xaf).toLocaleString()} XAF</Text>
-
+          {item.driver_name && item.status !== "CANCELLED" && (
+            <Text style={styles.cargoDesc}>
+              Driver: {item.driver_name}
+              {item.vehicle_details ? ` · ${item.vehicle_details.make} ${item.vehicle_details.model} · ${item.vehicle_details.plate_number}` : ""}
+            </Text>
+          )}
+          {item.status === "COMPLETED" && myUserId && (() => {
+            const otherId = item.rider === myUserId ? item.driver : item.rider;
+            return otherId ? (
+              <View style={styles.rateBlock}>
+                <Text style={styles.cargoDesc}>How was this trip?</Text>
+                <RateAndReport subjectUserId={otherId} />
+              </View>
+            ) : null;
+          })()}
           {item.status === "REQUESTED" && canDrive && acceptingRideId !== item.id && (
             <TouchableOpacity onPress={() => setAcceptingRideId(item.id)}><Text style={styles.actionLink}>Accept as Driver</Text></TouchableOpacity>
           )}
@@ -237,8 +307,23 @@ export default function OaziGoScreen() {
               <TouchableOpacity style={styles.smallButton} onPress={() => handleAccept(item.id)}><Text style={styles.smallButtonText}>Confirm</Text></TouchableOpacity>
             </View>
           )}
-          {item.status === "ACCEPTED" && (
+          {item.status === "ACCEPTED" && myUserId && item.driver === myUserId && (
             <TouchableOpacity onPress={() => handleStart(item.id)}><Text style={styles.actionLink}>Start Ride</Text></TouchableOpacity>
+          )}
+          {item.status === "ACCEPTED" && myUserId && item.driver === myUserId && (
+            <TouchableOpacity onPress={() => confirmRideAction("Release this ride? It goes back to the open requests for another driver.", releaseRide, item.id)}>
+              <Text style={styles.secondaryLink}>Release ride</Text>
+            </TouchableOpacity>
+          )}
+          {(item.status === "REQUESTED" || item.status === "ACCEPTED") && myUserId && item.rider === myUserId && (
+            <TouchableOpacity onPress={() => confirmRideAction("Cancel this ride?", cancelRide, item.id)}>
+              <Text style={styles.dangerLink}>Cancel ride</Text>
+            </TouchableOpacity>
+          )}
+          {(item.status === "ACCEPTED" || item.status === "IN_PROGRESS") && myUserId && (item.rider === myUserId || item.driver === myUserId) && (
+            <TouchableOpacity style={styles.sosButton} onPress={() => handleSos(item.id)}>
+              <Text style={styles.sosButtonText}>🆘 SOS — I need help</Text>
+            </TouchableOpacity>
           )}
           {item.status === "IN_PROGRESS" && payingId !== item.id && (
             <TouchableOpacity onPress={() => setPayingId(item.id)}><Text style={styles.actionLink}>Complete & Pay</Text></TouchableOpacity>
@@ -285,6 +370,7 @@ const styles = StyleSheet.create({
   pendingText: { fontSize: 13, color: "#6B7280" },
   verifiedText: { fontSize: 13, color: "#16A34A", fontWeight: "700", marginBottom: 8 },
   vehicleLine: { fontSize: 13, color: "#374151", marginBottom: 4 },
+  rateBlock: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#F3F4F6" },
   smallButton: { backgroundColor: "#1B2A4A", borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10, justifyContent: "center" },
   smallButtonText: { color: "#fff", fontWeight: "700", fontSize: 12 },
   card: { backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB", padding: 14, marginBottom: 12 },
@@ -298,6 +384,10 @@ const styles = StyleSheet.create({
   cargoDesc: { fontSize: 12, color: "#6B7280", marginBottom: 6 },
   fare: { fontSize: 14, color: "#374151", marginBottom: 8 },
   actionLink: { fontSize: 13, color: "#1B2A4A", fontWeight: "700", textDecorationLine: "underline" },
+  secondaryLink: { fontSize: 13, color: "#4B5563", fontWeight: "600", textDecorationLine: "underline", marginTop: 6 },
+  dangerLink: { fontSize: 13, color: "#B91C1C", fontWeight: "600", textDecorationLine: "underline", marginTop: 6 },
+  sosButton: { backgroundColor: "#B91C1C", borderRadius: 8, paddingVertical: 10, alignItems: "center", marginTop: 10 },
+  sosButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   acceptRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6, alignItems: "center" },
   payRow: { flexDirection: "row", gap: 8, marginTop: 6 },
   payInput: { flex: 1, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 6, padding: 8, fontSize: 13 },

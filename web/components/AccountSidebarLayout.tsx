@@ -47,6 +47,8 @@ const ACCOUNT_NAV_GROUPS: AccountNavGroup[] = [
       { href: "/bookings", label: "Bookings & Escrow", icon: IconFileText },
       { href: "/wallet", label: "Wallet & Transactions", icon: IconCreditCard },
       { href: "/ratings", label: "Ratings & Reviews", icon: IconStar },
+      { href: "/marketplace/my-listings", label: "My Marketplace Listings", icon: IconFileText },
+      { href: "/marketplace/orders", label: "Marketplace Orders", icon: IconCreditCard },
     ],
   },
   {

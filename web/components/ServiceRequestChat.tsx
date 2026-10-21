@@ -53,7 +53,7 @@ export default function ServiceRequestChat({ requestId, myUserId }: { requestId:
         <input value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} placeholder={t("typeMessage")} className="border rounded px-3 py-1.5 text-sm flex-1" />
         <button disabled={!text.trim()} className="bg-[var(--navy)] text-white font-semibold px-3 py-1.5 rounded text-sm disabled:opacity-50">{t("send")}</button>
       </form>
-      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+      {error ? <p className="text-xs text-red-600 mt-1">{error}</p> : <p className="text-[10px] text-gray-400 mt-1">{t("chatContactHint")}</p>}
     </div>
   );
 }

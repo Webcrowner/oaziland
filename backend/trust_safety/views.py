@@ -226,50 +226,22 @@ class AdminUserManagementViewSet(viewsets.ReadOnlyModelViewSet):
         removes any role the user already has, it only ever adds one
         more on top, so an admin can freely make e.g. an existing Agent
         also a Landlord, or a Student also a Technician."""
-        from decimal import Decimal
-        import uuid as uuid_module
-        from identity.models import (
-            LandlordProfile, AgentProfile, AgencyProfile, StudentProfile,
-            TechnicianProfile, AdminProfile,
-        )
-        from marketplace.models import DriverProfile
+        from identity.services import grant_role
 
         user = self.get_object()
         role = request.data.get("role")
+        try:
+            grant_role(
+                user, role,
+                commission_percent=request.data.get("commission_percent"),
+                registration_number=request.data.get("registration_number"),
+                institution_name=request.data.get("institution_name"),
+                license_number=request.data.get("license_number"),
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if role == "landlord":
-            LandlordProfile.objects.get_or_create(user=user)
-        elif role == "agent":
-            AgentProfile.objects.get_or_create(
-                user=user,
-                defaults={"agent_commission_percent": Decimal(str(request.data.get("commission_percent", "5.00")))},
-            )
-        elif role == "agency":
-            AgencyProfile.objects.get_or_create(
-                user=user,
-                defaults={
-                    "registration_number": request.data.get("registration_number") or f"AGY-{uuid_module.uuid4().hex[:10].upper()}",
-                    "agency_commission_percent": Decimal(str(request.data.get("commission_percent", "10.00"))),
-                },
-            )
-        elif role == "student":
-            StudentProfile.objects.get_or_create(
-                user=user, defaults={"institution_name": request.data.get("institution_name", "Unspecified")},
-            )
-        elif role == "technician":
-            TechnicianProfile.objects.get_or_create(user=user, defaults={"specialties": []})
-        elif role == "driver":
-            DriverProfile.objects.get_or_create(
-                user=user, defaults={"license_number": request.data.get("license_number", "PENDING-ADMIN-ASSIGNED")},
-            )
-        elif role == "admin":
-            AdminProfile.objects.get_or_create(user=user, defaults={"permissions": []})
-            if not user.is_staff:
-                user.is_staff = True
-                user.save(update_fields=["is_staff"])
-        else:
-            return Response({"detail": f"Unknown role '{role}'."}, status=status.HTTP_400_BAD_REQUEST)
-
+        user.refresh_from_db()
         return Response(AdminUserSerializer(user).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="remove-role")

@@ -49,6 +49,18 @@ def test_creating_a_real_hotel_with_a_real_room_type(quarter):
 
 
 @pytest.mark.django_db
+def test_a_hotel_keeps_the_name_its_owner_gave_it(quarter):
+    client = _auth_client(User.objects.create(username="hotel_named_owner", phone="+237699666609"))
+    room = [{"category": "STANDARD", "capacity": 2, "base_rate_xaf": "30000"}]
+
+    named = client.post("/api/hotels/", {"quarter": str(quarter.id), "name": "  Hôtel Mont Fébé  ", "room_types": room}, format="json")
+    unnamed = client.post("/api/hotels/", {"quarter": str(quarter.id), "room_types": room}, format="json")
+
+    assert named.status_code == 201 and named.data["name"] == "Hôtel Mont Fébé"
+    assert unnamed.status_code == 201 and unnamed.data["name"] == ""
+
+
+@pytest.mark.django_db
 def test_an_unverified_hotel_is_hidden_from_public_browsing_but_visible_to_its_owner(quarter):
     owner = User.objects.create(username="hotel_visibility_owner", phone="+237699666602")
     client = _auth_client(owner)

@@ -220,7 +220,7 @@ export default function StudentDashboardPage() {
                     </p>
                   </div>
                   <span className="text-xs font-black text-slate-900">
-                    {Number(b.escrow_amount_xaf || 0).toLocaleString()} XAF
+                    {Number(b.amount_xaf || 0).toLocaleString()} XAF
                   </span>
                 </div>
               ))}
