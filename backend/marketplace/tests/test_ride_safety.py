@@ -66,6 +66,10 @@ def test_a_ride_keeps_the_distance_its_fare_was_charged_on():
     assert Decimal(_request_ride(rider, distance_km="5")["distance_km"]) == Decimal("5.00")
     assert _auth_client(rider).get(f"/api/rides/{far['id']}/").data["distance_km"] == far["distance_km"]
 
+    # A ride created before distance_km existed still reports the distance implied by its fare.
+    RideBooking.objects.filter(pk=far["id"]).update(distance_km=None)
+    assert Decimal(_auth_client(rider).get(f"/api/rides/{far['id']}/").data["distance_km"]) > Decimal("10")
+
 
 @pytest.mark.django_db
 def test_rider_can_cancel_before_the_trip_starts_and_driver_is_told():
@@ -171,11 +175,14 @@ def test_a_driver_can_only_be_rated_after_a_completed_ride_with_them():
     # A ride that has not been completed earns nothing, and strangers never can.
     assert rate(_auth_client(rider), driver.id).status_code == 403
     assert rate(_auth_client(stranger), driver.id).status_code == 403
+    assert rate(driver_client, rider.id).status_code == 403
+    assert rate(_auth_client(stranger), rider.id).status_code == 403
 
     RideBooking.objects.filter(pk=ride["id"]).update(status=RideStatus.COMPLETED)
     assert rate(_auth_client(rider), driver.id).status_code == 201
     assert rate(driver_client, rider.id).status_code == 201
     assert rate(_auth_client(stranger), driver.id).status_code == 403
+    assert rate(_auth_client(stranger), rider.id).status_code == 403
 
 
 @pytest.mark.django_db
@@ -216,52 +223,72 @@ def test_sos_alerts_admins_and_only_works_for_the_people_on_an_active_ride():
 
 
 @pytest.mark.django_db
-def test_sos_also_alerts_the_senders_emergency_contact_and_survives_a_failing_sms(monkeypatch):
+def test_sos_says_plainly_whether_the_emergency_contact_was_really_texted(monkeypatch):
     rider = _verify(User.objects.create(username="rs_rider13", phone="+237699300131", first_name="Marie", last_name="Ngono"))
     driver, driver_client, vehicle_id = _verified_driver("rs_driver13", "+237699300133")
     ride = _request_ride(rider)
     driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
     rider_client = _auth_client(rider)
     url = f"/api/rides/{ride['id']}/sos/"
+    reopen = lambda: RideBooking.objects.filter(pk=ride["id"]).update(sos_raised_at=None)
+    admin_message = lambda: Notification.objects.filter(notification_type="RIDE_SOS", recipient__username="rs_driver13_admin").latest("created_at").message
+    import notifications.services as notification_services
 
     # Without a contact only the admins hear about it.
-    assert rider_client.post(url, {}, format="json").data["emergency_contact_alerted"] is False
+    assert rider_client.post(url, {}, format="json").data["emergency_contact"] is None
 
-    assert rider_client.put("/api/my-emergency-contact/", {"name": "Paul Ngono", "phone": "+237 677 000 111"}, format="json").status_code == 200
-    RideBooking.objects.filter(pk=ride["id"]).update(sos_raised_at=None)
+    rider_client.put("/api/my-emergency-contact/", {"name": "Paul Ngono", "phone": "+237 677 000 111"}, format="json")
+
+    # Today's default: SMS is the sandbox stand-in, so the text is recorded but NOT sent, and everyone is told so.
+    reopen()
     response = rider_client.post(url, {"latitude": "3.8480000", "longitude": "11.5020000"}, format="json")
-    assert response.data["emergency_contact_alerted"] is True and response.data["admins_alerted"] == 1
+    assert response.data["admins_alerted"] == 1
+    assert response.data["emergency_contact"] == {"name": "Paul Ngono", "phone": "+237 677 000 111", "status": "not_delivered"}
     text = Notification.objects.get(notification_type="RIDE_SOS", external_phone_number="+237 677 000 111")
     assert text.channel == "SMS" and "Marie Ngono pressed SOS" in text.message and "LT-r13" in text.message and "3.848" in text.message
     assert "+237699300131" in text.message and "+237699300133" not in text.message
+    assert "Paul Ngono (+237 677 000 111) was NOT texted because SMS delivery is not connected" in admin_message()
 
-    # A provider that cannot send must not stop the admins being alerted.
+    # With a real provider connected it is reported as sent, and the admins are not told to phone anyone.
+    monkeypatch.setattr(notification_services, "is_delivery_live", lambda channel: True)
+    reopen()
+    assert rider_client.post(url, {}, format="json").data["emergency_contact"]["status"] == "sent"
+    assert "NOT texted" not in admin_message()
+
+    # A provider that errors must not stop the admins being alerted, and the failure is reported.
     def broken_sms(**kwargs):
         if kwargs.get("channel") == "SMS":
             raise NotImplementedError("SMS provider not connected")
         return real_notify(**kwargs)
-    import notifications.services as notification_services
     real_notify = notification_services.notify
     monkeypatch.setattr(notification_services, "notify", broken_sms)
-    RideBooking.objects.filter(pk=ride["id"]).update(sos_raised_at=None)
+    reopen()
     failed = rider_client.post(url, {}, format="json")
-    assert failed.status_code == 200 and failed.data["admins_alerted"] == 1 and failed.data["emergency_contact_alerted"] is False
+    assert failed.status_code == 200 and failed.data["admins_alerted"] == 1 and failed.data["emergency_contact"]["status"] == "failed"
+    assert "NOT texted because the SMS provider failed" in admin_message()
 
 
 @pytest.mark.django_db
-def test_a_user_manages_their_own_emergency_contact():
+def test_a_user_manages_their_own_emergency_contact(monkeypatch):
     user = User.objects.create(username="rs_user14", phone="+237699300141")
     other = User.objects.create(username="rs_other14", phone="+237699300142")
     client = _auth_client(user)
 
-    assert client.get("/api/my-emergency-contact/").status_code == 404
+    missing = client.get("/api/my-emergency-contact/")
+    assert missing.status_code == 404 and missing.data["sms_delivery_live"] is False
     assert client.put("/api/my-emergency-contact/", {"name": "Paul", "phone": "abc"}, format="json").status_code == 400
     assert client.put("/api/my-emergency-contact/", {"name": "  ", "phone": "+237677000111"}, format="json").status_code == 400
-    assert client.put("/api/my-emergency-contact/", {"name": " Paul ", "phone": "+237677000111"}, format="json").data == {"name": "Paul", "phone": "+237677000111"}
+    assert client.put("/api/my-emergency-contact/", {"name": " Paul ", "phone": "+237677000111"}, format="json").data == {
+        "name": "Paul", "phone": "+237677000111", "sms_delivery_live": False,
+    }
     assert client.put("/api/my-emergency-contact/", {"name": "Paul", "phone": "+237677000222"}, format="json").status_code == 200
     assert client.get("/api/my-emergency-contact/").data["phone"] == "+237677000222"
     assert _auth_client(other).get("/api/my-emergency-contact/").status_code == 404
     assert APIClient().get("/api/my-emergency-contact/").status_code == 401
+
+    import notifications.services as notification_services
+    monkeypatch.setattr(notification_services, "is_delivery_live", lambda channel: True)
+    assert client.get("/api/my-emergency-contact/").data["sms_delivery_live"] is True
 
     assert client.delete("/api/my-emergency-contact/").status_code == 204
     assert client.get("/api/my-emergency-contact/").status_code == 404

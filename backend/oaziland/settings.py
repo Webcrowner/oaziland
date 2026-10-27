@@ -281,6 +281,8 @@ REST_FRAMEWORK = {
         'presence': '400/hour',
         # The inbox polls messages/typing every few seconds while open.
         'chat': '4000/hour',
+        # Scrolling the video feed fires a page fetch plus a view ping per clip.
+        'videos': '3000/hour',
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',

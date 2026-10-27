@@ -8,11 +8,25 @@ the Django API from Prompt 16.
 2. `/search` — Property search results (server-rendered, for SEO)
 3. `/listing/[id]` — Individual listing detail (server-rendered, with
    schema.org structured data for rich search results)
-4. `/register` and `/login` — Sign up / log in (Google/Facebook buttons
-   are present in the UI but NOT yet connected — same "not yet
-   connected" flag as the rest of this project's external integrations)
+4. `/register` and `/login` — Username/password sign up and sign in.
+   Google/Facebook actions are hidden until OAuth is implemented.
 5. `/list-property` — A basic listing creation form, enforcing the same
    MFA+KYC rule as the backend API
+
+## Public browsing design
+
+- The homepage uses a clean navy hero, without text or controls baked into
+  an image. Featured listings precede the service directory; optional welcome
+  choices are inline rather than a blocking first-visit modal.
+- Property search keeps the current language and submits the actual maximum
+  price in XAF. Hotels and student residences link to their dedicated browsing
+  pages rather than presenting unsupported filters in the homepage form.
+- Failed property/hotel requests show an explicit retry state, not zero results
+  or sample inventory. Hotel examples shown for an empty catalogue are labelled
+  illustrative and cannot open checkout.
+- On phones, the closed support launcher stays in document flow after the
+  footer, so it cannot cover form actions. Opening it displays the chat panel
+  above the bottom navigation. Desktop retains the floating launcher.
 
 ## Offline caching
 `public/sw.js` is a real service worker (network-first, falls back to
@@ -31,7 +45,7 @@ Requires the Django backend (`/backend`) running on the URL configured
 in `.env.local` (defaults to `http://localhost:8000`).
 
 ## What's NOT built yet
-- Google/Facebook OAuth (UI present, backend not connected — needs real
+- Google/Facebook OAuth (actions hidden, backend not connected — needs real
   credentials, per Prompt 2)
 - Property-type-specific listing detail fields (bedrooms, land title
   info, etc.) beyond the basic fields already shown

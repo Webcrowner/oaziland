@@ -28,7 +28,7 @@ export default function NotificationsPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   async function handleMarkRead(id: string) {

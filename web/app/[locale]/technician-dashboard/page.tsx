@@ -66,7 +66,7 @@ export default function TechnicianDashboardPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   async function handleLogVisit(contractId: string) {

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
 import { searchVenues, createVenue, addVenuePhoto, createEventBooking, listQuarters, type Venue, type VenueSpaceSummary, type Quarter, type MediaUploadResult } from "@/lib/api";
 import QuarterOptions from "@/components/QuarterOptions";
 import MissingAreaRequest from "@/components/MissingAreaRequest";
@@ -162,7 +163,9 @@ export default function EventsPage() {
     load();
     // Shared/chatbot links can preselect the area (?quarter=<id>).
     const presetQuarter = new URLSearchParams(window.location.search).get("quarter");
-    if (presetQuarter) setFilterQuarter(presetQuarter);
+    if (presetQuarter) {
+      void Promise.resolve().then(() => setFilterQuarter(presetQuarter));
+    }
     listQuarters()
       .then((data) => {
         setQuarters(data);
@@ -636,12 +639,12 @@ export default function EventsPage() {
                 <h3 className="font-bold text-slate-900 text-lg mb-1.5">{t("bookingConfirmedTitle")}</h3>
                 <p className="text-xs text-slate-500 mb-5">{t("bookingConfirmedBody")}</p>
                 <div className="flex gap-2">
-                  <a
+                  <Link
                     href="/bookings"
                     className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors"
                   >
                     {t("viewMyBookings")}
-                  </a>
+                  </Link>
                   <button
                     onClick={() => setBookingVenue(null)}
                     className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-sm font-bold hover:bg-slate-200 transition-colors"

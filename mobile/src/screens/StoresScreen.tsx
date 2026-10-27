@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, Modal, ScrollView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, Modal, ScrollView, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
@@ -12,6 +12,12 @@ import LoadMoreButton from "../components/LoadMoreButton";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import MarketplaceFilterBar from "../components/MarketplaceFilterBar";
 import { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "../lib/marketplaceFilters";
+import MarketplaceFormLocation from "../components/MarketplaceFormLocation";
+import type { Coords } from "../lib/location";
+import MarketplacePriceFields from "../components/MarketplacePriceFields";
+import MarketplaceConditionsFields, { saveConditions } from "../components/MarketplaceConditionsFields";
+import { conditionsError, EMPTY_CONDITIONS, type ConditionsDraft } from "../lib/marketplaceConditions";
+import { depositFor } from "../lib/marketplacePricing";
 
 /** Stores — mobile parity with the web app's /marketplace/stores page. */
 export default function StoresScreen() {
@@ -22,10 +28,15 @@ export default function StoresScreen() {
   const [showForm, setShowForm] = useState(false);
 
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [sizeSqm, setSizeSqm] = useState("");
+  const [frontage, setFrontage] = useState("");
   const [priceBasis, setPriceBasis] = useState("RENT_MONTHLY");
   const [price, setPrice] = useState("");
+  const [deposit, setDeposit] = useState("");
+  const [conditions, setConditions] = useState<ConditionsDraft>(EMPTY_CONDITIONS);
   const [quarterId, setQuarterId] = useState("");
+  const [coords, setCoords] = useState<Coords | null>(null);
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -57,13 +68,23 @@ export default function StoresScreen() {
   }
 
   async function handleSubmit() {
+    const invalidConditions = conditionsError("stores", conditions);
+    if (invalidConditions) {
+      setError(invalidConditions);
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
-      const listing = await createMarketplaceListing("stores", { title, price_basis: priceBasis, price_xaf: price, size_sqm: sizeSqm, quarter: quarterId || null });
+      const listing = await createMarketplaceListing("stores", {
+        title, description, price_basis: priceBasis, price_xaf: price, security_deposit_xaf: depositFor(priceBasis, deposit), size_sqm: sizeSqm,
+        frontage_meters: frontage || null, quarter: quarterId || null,
+        latitude: coords?.latitude ?? null, longitude: coords?.longitude ?? null,
+      });
       await Promise.all(media.map((m) => addMarketplaceMedia("stores", listing.id, m.url, m.media_type)));
+      await saveConditions("stores", listing.id, conditions, true).catch(() => Alert.alert("Listing posted", "Its conditions could not be saved. Add them from My listings."));
       setShowForm(false);
-      setTitle(""); setSizeSqm(""); setPrice(""); setMedia([]);
+      setTitle(""); setDescription(""); setSizeSqm(""); setFrontage(""); setPrice(""); setDeposit(""); setConditions(EMPTY_CONDITIONS); setCoords(null); setMedia([]);
       reload();
     } catch {
       setError("Could not create listing. Please check your details and try again.");
@@ -113,8 +134,12 @@ export default function StoresScreen() {
         <ScrollView contentContainerStyle={styles.formContainer}>
           <Text style={styles.formTitle}>List a Store</Text>
           <TextInput style={styles.input} placeholder="Title" value={title} onChangeText={setTitle} />
+          <TextInput style={styles.input} placeholder="Description" value={description} onChangeText={setDescription} multiline numberOfLines={3} />
           <TextInput style={styles.input} placeholder="Size (m²)" value={sizeSqm} onChangeText={setSizeSqm} keyboardType="numeric" />
-          <TextInput style={styles.input} placeholder="Price (XAF)" value={price} onChangeText={setPrice} keyboardType="numeric" />
+          <TextInput style={styles.input} placeholder="Frontage (meters, optional)" value={frontage} onChangeText={setFrontage} keyboardType="numeric" />
+          <MarketplacePriceFields price={price} onPriceChange={setPrice} priceBasis={priceBasis} onPriceBasisChange={setPriceBasis} deposit={deposit} onDepositChange={setDeposit} />
+          <MarketplaceFormLocation quarters={quarters} quarterId={quarterId} onQuarterChange={setQuarterId} coords={coords} onCoordsChange={setCoords} />
+          <MarketplaceConditionsFields category="stores" value={conditions} onChange={setConditions} />
 
           <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto} disabled={uploadingMedia}>
             {uploadingMedia ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.photoButtonText}>Add Photo or Video</Text>}

@@ -12,23 +12,7 @@ from .models import Booking
 from .serializers import BookingSerializer
 from .services import reserve_booking, confirm_payment, cancel_booking, InventoryConflictError, WebhookSignatureError, BookingAlreadySettledError
 from oaziland.permissions import IsKycVerified
-
-
-class FakeRedisLock:
-    """A placeholder lock client for this API pass — production wiring
-    connects this to a real Redis client; the reservation SERVICE
-    function itself (already tested) doesn't care which lock
-    implementation it's given, per its own dependency-injection design."""
-    _locked = set()
-
-    def acquire(self, key, ttl_seconds):
-        if key in self._locked:
-            return False
-        self._locked.add(key)
-        return True
-
-    def release(self, key, permanent=False):
-        self._locked.discard(key)
+from .locks import get_booking_lock_client
 
 
 class BookingViewSet(viewsets.ModelViewSet):
@@ -60,7 +44,7 @@ class BookingViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         try:
             booking = reserve_booking(
-                lock_client=FakeRedisLock(),
+                lock_client=get_booking_lock_client(),
                 requester=request.user,
                 booking_type=request.data.get("booking_type"),
                 target_content_type=request.data.get("target_content_type"),
@@ -86,7 +70,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         gateway = get_active_gateway()
         initiate_booking_payment(booking=booking, payment_gateway=gateway, phone_number=phone_number)
         escrow = confirm_payment(
-            lock_client=FakeRedisLock(),
+            lock_client=get_booking_lock_client(),
             booking=booking,
             provider="MTN_MOMO",
             provider_reference=booking.idempotency_key,
@@ -129,7 +113,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         get_queryset) so only the booking's own requester can reach it."""
         booking = self.get_object()
         try:
-            cancel_booking(lock_client=FakeRedisLock(), booking=booking)
+            cancel_booking(lock_client=get_booking_lock_client(), booking=booking)
         except BookingAlreadySettledError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(BookingSerializer(booking).data)
@@ -176,15 +160,28 @@ def payment_webhook_view(request):
         return Response({"detail": "Unknown booking."}, status=status.HTTP_404_NOT_FOUND)
 
     from payments.gateways import get_active_gateway
-    from transactions.views import FakeRedisLock  # see FakeRedisLock's own docstring re: real Redis wiring
-
+    if booking.status not in ("PAYMENT_PROCESSING", "CONFIRMED"):
+        return Response(
+            {"detail": f"Payment confirmation is not valid while this booking is {booking.status}."},
+            status=status.HTTP_409_CONFLICT,
+        )
     try:
         confirm_payment(
-            lock_client=FakeRedisLock(), booking=booking, provider=provider, provider_reference=provider_reference,
+            lock_client=get_booking_lock_client(), booking=booking, provider=provider, provider_reference=provider_reference,
             payment_gateway=get_active_gateway(), raw_webhook_payload=raw_body,
             webhook_signature_header=signature_header,
         )
     except WebhookSignatureError:
         return Response({"detail": "Invalid webhook signature."}, status=status.HTTP_403_FORBIDDEN)
+    except BookingAlreadySettledError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+    except ValueError:
+        from marketplace.services import fail_marketplace_order_payment
+
+        fail_marketplace_order_payment(booking=booking)
+        return Response({"detail": "Payment failure recorded."}, status=status.HTTP_200_OK)
+
+    from marketplace.services import confirm_marketplace_order_payment
+    confirm_marketplace_order_payment(booking=booking)
 
     return Response({"detail": "Payment confirmed."}, status=status.HTTP_200_OK)

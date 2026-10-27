@@ -23,7 +23,7 @@ export default function ParentPortalPage() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      setStatus("idle");
+      void Promise.resolve().then(() => setStatus("idle"));
       return;
     }
     getMyGuardianAccesses(token)

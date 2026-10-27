@@ -7,7 +7,7 @@ extension alone, since that's trivial to fake.
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime"}
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
-MAX_VIDEO_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+MAX_VIDEO_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
 
 
 class UnsupportedMediaTypeError(Exception):

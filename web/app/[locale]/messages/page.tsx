@@ -4,6 +4,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import Button from "@/components/ui/Button";
 import Avatar from "@/components/Avatar";
+import ChatLinkText from "@/components/ChatLinkText";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import {
   listConversations,
@@ -61,7 +62,7 @@ export default function MessagesPage() {
       const params = new URLSearchParams(window.location.search);
       const convParam = params.get("conversation");
       if (convParam) {
-        setSelectedId(convParam);
+        void Promise.resolve().then(() => setSelectedId(convParam));
       }
     }
   }, []);
@@ -69,7 +70,7 @@ export default function MessagesPage() {
   // Fetch current user's profile to identify incoming vs outgoing messages
   useEffect(() => {
     if (!token) {
-      setLoggedIn(false);
+      void Promise.resolve().then(() => setLoggedIn(false));
       return;
     }
     getMyProfile(token)
@@ -77,8 +78,11 @@ export default function MessagesPage() {
       .catch(() => {});
   }, [token]);
 
+  const [nowMs, setNowMs] = useState<number>(0);
+
   // Load conversations list
   const loadConversations = useCallback(() => {
+    setNowMs(Date.now());
     if (!token) {
       setLoggedIn(false);
       return;
@@ -89,7 +93,7 @@ export default function MessagesPage() {
   }, [token]);
 
   useEffect(() => {
-    loadConversations();
+    void Promise.resolve().then(() => loadConversations());
     // Refresh so other people's online/last-seen status stays real.
     const interval = setInterval(loadConversations, 20_000);
     return () => clearInterval(interval);
@@ -98,8 +102,10 @@ export default function MessagesPage() {
   // Fetch active conversation messages and mark as seen
   useEffect(() => {
     if (!selectedId || !token) return;
-    setLoadingMessages(true);
-    setSendError("");
+    void Promise.resolve().then(() => {
+      setLoadingMessages(true);
+      setSendError("");
+    });
     getConversationMessages(selectedId, token)
       .then((msgs) => {
         setThread(msgs);
@@ -203,22 +209,15 @@ export default function MessagesPage() {
   }, [conversations, selectedId]);
 
   // Name and avatar of other participant
-  const otherParticipantName = useMemo(() => {
-    if (!activeConversation) return "";
-    return activeConversation.participant_usernames.join(", ") || "Chat";
-  }, [activeConversation]);
-
-  const otherParticipantDetail = useMemo(() => {
-    if (!activeConversation?.participants_details?.length) return null;
-    return activeConversation.participants_details[0];
-  }, [activeConversation]);
+  const otherParticipantName = activeConversation ? activeConversation.participant_usernames.join(", ") || "Chat" : "";
+  const otherParticipantDetail = activeConversation?.participants_details?.[0] ?? null;
 
   // Format date header nicely
   function presenceLabel(detail?: { is_online: boolean; last_seen_at: string | null } | null) {
     if (!detail) return "";
     if (detail.is_online) return t("online");
-    if (!detail.last_seen_at) return t("offline");
-    const seconds = Math.round((new Date(detail.last_seen_at).getTime() - Date.now()) / 1000);
+    if (!detail.last_seen_at || !nowMs) return t("offline");
+    const seconds = Math.round((new Date(detail.last_seen_at).getTime() - nowMs) / 1000);
     const rtf = new Intl.RelativeTimeFormat(locale === "fr" ? "fr-FR" : "en-US", { numeric: "auto" });
     const abs = Math.abs(seconds);
     const time =
@@ -543,9 +542,9 @@ export default function MessagesPage() {
                               </p>
                             )}
 
-                            <p className="text-xs sm:text-[13px] leading-relaxed break-words whitespace-pre-wrap">
-                              {msg.text}
-                            </p>
+                            <div className="text-xs sm:text-[13px] leading-relaxed break-words whitespace-pre-wrap">
+                              <ChatLinkText text={msg.text} />
+                            </div>
 
                             <div className="flex items-center justify-end gap-1.5 mt-1 -mb-1 select-none">
                               <span className={`text-[10px] font-medium ${isMe ? "text-slate-400" : "text-slate-400"}`}>

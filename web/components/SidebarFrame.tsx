@@ -62,7 +62,8 @@ export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
   const [devRoleError, setDevRoleError] = useState("");
 
   useEffect(() => {
-    setDevRole(localStorage.getItem(DEV_ROLE_KEY));
+    const storedRole = localStorage.getItem(DEV_ROLE_KEY);
+    void Promise.resolve().then(() => setDevRole(storedRole));
     const token = localStorage.getItem("access_token");
     if (!token) return;
     getMyProfile(token)

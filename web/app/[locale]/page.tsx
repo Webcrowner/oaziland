@@ -30,6 +30,7 @@ import FeaturedListings from "@/components/home/FeaturedListings";
 import PopularNeighborhoods from "@/components/home/PopularNeighborhoods";
 import InteractiveAffordabilityCalculator from "@/components/home/InteractiveAffordabilityCalculator";
 import InteractiveFaqAccordion from "@/components/home/InteractiveFaqAccordion";
+import WelcomeChoices from "@/components/home/WelcomeChoices";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params;
@@ -45,8 +46,8 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
 
 export default async function HomePage() {
   const t = await getTranslations("HomePage");
-  const quarters = await listQuarters().catch(() => []);
-  const featuredListings = await searchListings({}).then((data) => data.results.slice(0, 6)).catch(() => []);
+  const quarters = await listQuarters().catch(() => null);
+  const featuredListings = await searchListings({}).then((data) => data.results.slice(0, 6)).catch(() => null);
   const testimonials = await listTestimonials().then((data) => data.results.slice(0, 3)).catch(() => []);
   const stats = await getHomeStats().catch(() => null);
   const faqs = await listPublicFaqs(await getLocale(), true).catch(() => []);
@@ -69,15 +70,13 @@ export default async function HomePage() {
   return (
     <main className="bg-slate-50 min-h-screen">
       {/* ================= HERO WITH DYNAMIC SEARCH CONSOLE ================= */}
-      <section className="relative overflow-hidden hero-gradient text-white pt-10 pb-28 md:pt-16 md:pb-36 border-b border-slate-800">
-        {/* Real photo background — a trusted Cameroon home/stay behind the
-            headline, shown at full brightness with no dark/blur overlay. */}
-        <div className="absolute inset-0">
+      <section className="relative overflow-hidden hero-gradient text-white pt-8 pb-20 md:pt-14 md:pb-24 border-b border-slate-800">
+        <div className="absolute inset-0 pointer-events-none">
           <Image
             src="/images/hero-trust-cameroon.png"
             alt=""
             fill
-            priority
+            preload
             sizes="100vw"
             className="object-cover object-center"
           />
@@ -110,7 +109,7 @@ export default async function HomePage() {
           </p>
 
           {/* Interactive Dynamic Search Console (Client Component) */}
-          <HeroSearchConsole quarters={quarters} popularQuarters={stats?.popular_quarters ?? []} />
+          <HeroSearchConsole quarters={quarters ?? []} areasFailed={quarters === null} popularQuarters={stats?.popular_quarters ?? []} />
         </div>
       </section>
 
@@ -171,6 +170,9 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      <FeaturedListings liveListings={featuredListings ?? []} loadFailed={featuredListings === null} />
+      <WelcomeChoices />
 
       {/* ================= EXPLORE CATEGORIES (SUPER-APP) ================= */}
       <section className="py-16 sm:py-20 px-4 sm:px-6">
@@ -298,9 +300,6 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
-
-      {/* ================= DYNAMIC PROPERTY EXPLORER (CLIENT COMPONENT WITH TABS & CURRENCY CONVERTER) ================= */}
-      <FeaturedListings liveListings={featuredListings} />
 
       {/* ================= INTERACTIVE NEIGHBORHOOD EXPLORER (CITY TABS & STATS) ================= */}
       <PopularNeighborhoods quarters={stats?.popular_quarters ?? []} />

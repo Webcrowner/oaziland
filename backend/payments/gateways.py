@@ -43,6 +43,8 @@ class WebhookVerificationResult:
     is_valid_signature: bool
     provider_reference: str
     payment_succeeded: bool
+    external_id: str = ""
+    amount_xaf: Decimal | None = None
 
 
 @dataclass
@@ -94,8 +96,16 @@ class SandboxGateway(PaymentGateway):
         )
 
     def verify_webhook(self, *, raw_payload: bytes, signature_header: str) -> WebhookVerificationResult:
+        try:
+            data = json.loads(raw_payload.decode("utf-8")) if raw_payload else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            data = {}
         return WebhookVerificationResult(
-            is_valid_signature=True, provider_reference="SANDBOX-REF", payment_succeeded=True,
+            is_valid_signature=signature_header != "invalid",
+            provider_reference=data.get("transId") or data.get("provider_reference") or "",
+            payment_succeeded=data.get("status", "SUCCESSFUL") in ("SUCCESSFUL", "PAID", "CONFIRMED"),
+            external_id=data.get("externalId") or data.get("booking_id") or "",
+            amount_xaf=Decimal(str(data["amount"])) if data.get("amount") is not None else None,
         )
 
     def initiate_disbursement(self, *, phone_number: str, amount_xaf, idempotency_key: str) -> DisbursementResult:
@@ -188,8 +198,7 @@ class FapshiGateway(PaymentGateway):
         self.api_key = os.environ.get("FAPSHI_API_KEY", "").strip()
         self.base_url = os.environ.get("FAPSHI_BASE_URL", "https://live.fapshi.com").strip().rstrip("/")
         self.timeout = int(os.environ.get("FAPSHI_TIMEOUT", "15"))
-        # Allow test fallback only in local automated test runs without credentials
-        self.allow_test_fallback = bool(os.environ.get("FAPSHI_ALLOW_TEST_FALLBACK", "True").lower() in ("true", "1"))
+        self.allow_test_fallback = os.environ.get("FAPSHI_ALLOW_TEST_FALLBACK", "False").lower() in ("true", "1")
 
     @staticmethod
     def normalize_phone(phone_number: str) -> str:
@@ -285,37 +294,33 @@ class FapshiGateway(PaymentGateway):
 
         trans_id = data.get("transId") or data.get("provider_reference") or ""
         external_id = data.get("externalId") or data.get("booking_id") or ""
-        status = data.get("status", "")
+        if not self.api_user or not self.api_key or not trans_id:
+            logger.error("Cannot verify Fapshi webhook without credentials and a transaction id.")
+            return WebhookVerificationResult(False, trans_id, False, external_id=external_id)
 
-        # If explicit test invalid signature passed in tests, reject it
-        if signature_header == "invalid":
-            return WebhookVerificationResult(is_valid_signature=False, provider_reference=trans_id, payment_succeeded=False)
+        try:
+            resp = requests.get(
+                f"{self.base_url}/payment-status/{trans_id}",
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+            if resp.status_code != 200:
+                logger.warning("Fapshi status verification returned HTTP %s.", resp.status_code)
+                return WebhookVerificationResult(False, trans_id, False, external_id=external_id)
+            status_data = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("Fapshi status verification failed: %s", exc)
+            return WebhookVerificationResult(False, trans_id, False, external_id=external_id)
 
-        # Real verification with Fapshi API if configured and transId is real
-        if self.api_user and self.api_key and trans_id and not trans_id.startswith("SANDBOX"):
-            try:
-                resp = requests.get(
-                    f"{self.base_url}/payment-status/{trans_id}",
-                    headers=self._headers(),
-                    timeout=self.timeout,
-                )
-                if resp.status_code == 200:
-                    status_data = resp.json()
-                    is_successful = status_data.get("status") in ("SUCCESSFUL", "PAID")
-                    return WebhookVerificationResult(
-                        is_valid_signature=True,
-                        provider_reference=trans_id,
-                        payment_succeeded=is_successful,
-                    )
-            except Exception as e:
-                logger.warning("Fapshi status verification failed: %s", e)
-
-        # Fallback to payload status
-        is_successful = status in ("SUCCESSFUL", "PAID", "CONFIRMED", "")
+        verified_reference = status_data.get("transId") or trans_id
+        verified_external_id = status_data.get("externalId") or external_id
+        verified_amount = status_data.get("amount")
         return WebhookVerificationResult(
-            is_valid_signature=True,
-            provider_reference=trans_id or external_id or "FAPSHI-REF",
-            payment_succeeded=is_successful,
+            is_valid_signature=verified_reference == trans_id,
+            provider_reference=verified_reference,
+            payment_succeeded=status_data.get("status") in ("SUCCESSFUL", "PAID"),
+            external_id=str(verified_external_id or ""),
+            amount_xaf=Decimal(str(verified_amount)) if verified_amount is not None else None,
         )
 
     def get_balance(self) -> dict:
@@ -424,8 +429,8 @@ def get_active_gateway() -> PaymentGateway:
     if "PYTEST_CURRENT_TEST" in os.environ:
         return SandboxGateway()
 
-    provider = os.environ.get("PAYMENT_GATEWAY_PROVIDER", "").upper()
-    if provider == "FAPSHI" or (not provider and os.environ.get("FAPSHI_API_USER")):
+    provider = os.environ.get("PAYMENT_GATEWAY_PROVIDER", "").strip().upper()
+    if provider == "FAPSHI":
         return FapshiGateway()
     elif provider == "CINETPAY":
         return CinetPayGateway()
@@ -433,4 +438,9 @@ def get_active_gateway() -> PaymentGateway:
         return MonetbilGateway()
     elif provider == "FLUTTERWAVE":
         return FlutterwaveGateway()
-    return SandboxGateway()
+    if provider == "SANDBOX":
+        return SandboxGateway()
+    raise RuntimeError(
+        "PAYMENT_GATEWAY_PROVIDER must name a configured production gateway. "
+        "Use SANDBOX explicitly only for local development."
+    )

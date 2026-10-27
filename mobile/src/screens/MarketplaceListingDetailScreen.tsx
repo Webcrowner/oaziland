@@ -4,16 +4,39 @@ import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import {
-  getMarketplaceListing, getMyUserId, getMyFavorites, toggleFavoriteListing, placeMarketplaceOrder,
+  getMarketplaceListing, getMyUserId, getMyFavorites, toggleFavoriteListing, placeMarketplaceOrder, getOrCreateConversation, getListingConditions,
+  type ListingConditionItem,
   type WarehouseListing, type StoreListing, type BusinessListing, type CarListing,
 } from "../lib/api";
 import { PRICE_BASIS_LABELS } from "../lib/marketplaceFilters";
+import { CONDITION_TARGETS } from "../lib/marketplaceConditions";
 import RateAndReport from "../components/RateAndReport";
 import ReportListingButton from "../components/ReportListingButton";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceListingDetail">;
 type AnyListing = WarehouseListing & Partial<StoreListing> & Partial<BusinessListing> & Partial<CarListing>;
 type Viewer = "loading" | "signedOut" | "owner" | "buyer";
+
+const CONDITION_FLAGS: [string, string][] = [
+  ["deposit_required", "A security deposit is required"],
+  ["insurance_required", "Insurance is required"],
+  ["driver_required", "A driver is required"],
+  ["no_subletting", "No subletting"],
+  ["viewing_appointment_only", "Viewing by appointment only"],
+];
+
+/** The terms a lister set, in the order a buyer should read them. */
+function conditionLines(items: ListingConditionItem[]): string[] {
+  const lines: string[] = [];
+  for (const item of items) {
+    const c = item.structured_conditions;
+    if (typeof c.min_lease_months === "number") lines.push(`Minimum lease: ${c.min_lease_months} months`);
+    if (typeof c.mileage_cap_km === "number") lines.push(`Mileage cap: ${c.mileage_cap_km.toLocaleString()} km`);
+    for (const [key, label] of CONDITION_FLAGS) if (c[key] === true) lines.push(label);
+    if (item.free_text_clause) lines.push(item.free_text_clause);
+  }
+  return lines;
+}
 
 /** One marketplace listing: photos, details, save, buy or rent into escrow, and report. */
 export default function MarketplaceListingDetailScreen({ route, navigation }: Props) {
@@ -27,6 +50,13 @@ export default function MarketplaceListingDetailScreen({ route, navigation }: Pr
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState("");
   const [placed, setPlaced] = useState(false);
+  const [openingChat, setOpeningChat] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const [conditions, setConditions] = useState<string[]>([]);
+
+  useEffect(() => {
+    getListingConditions(CONDITION_TARGETS[category], listingId).then((items) => setConditions(conditionLines(items))).catch(() => {});
+  }, [category, listingId]);
 
   const loadListing = useCallback(() => {
     getMarketplaceListing<AnyListing>(category, listingId)
@@ -86,11 +116,35 @@ export default function MarketplaceListingDetailScreen({ route, navigation }: Pr
     }
   }
 
+  async function handleChat() {
+    if (!listing) return;
+    if (viewer === "signedOut") {
+      navigation.navigate("Login");
+      return;
+    }
+    setOpeningChat(true);
+    setChatError("");
+    try {
+      const conversation = await getOrCreateConversation(listing.lister_user);
+      navigation.navigate("Conversation", {
+        conversationId: conversation.id,
+        participantNames: listing.lister_name || "Seller",
+      });
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : "Could not open the conversation.");
+    } finally {
+      setOpeningChat(false);
+    }
+  }
+
   if (loading) return <View style={styles.centered}><ActivityIndicator color="#1B2A4A" size="large" /></View>;
   if (!listing) return <View style={styles.centered}><Text>This listing could not be found.</Text></View>;
 
   const isSale = listing.price_basis === "SALE";
   const price = Number(listing.price_xaf).toLocaleString();
+  const depositValue = Number(listing.security_deposit_xaf ?? 0);
+  // The buyer is charged the price plus any refundable rental deposit in a single payment.
+  const payTotal = (Number(listing.price_xaf) + depositValue).toLocaleString();
   const facts: string[] = [];
   if (listing.size_sqm) facts.push(`${listing.size_sqm} m²`);
   if (listing.frontage_meters) facts.push(`Frontage ${listing.frontage_meters} m`);
@@ -126,13 +180,24 @@ export default function MarketplaceListingDetailScreen({ route, navigation }: Pr
         {listing.availability_status === "UNDER_OFFER" && <Text style={styles.notice}>This listing is under offer.</Text>}
         {facts.length > 0 && <View style={styles.factsRow}>{facts.map((f) => <Text key={f} style={styles.fact}>{f}</Text>)}</View>}
         {listing.description ? <Text style={styles.description}>{listing.description}</Text> : null}
+        {conditions.length > 0 || depositValue > 0 ? (
+          <View style={styles.conditions}>
+            <Text style={styles.boxTitle}>Conditions & rules</Text>
+            {depositValue > 0 && (
+              <Text style={styles.conditionLine}>
+                • Refundable security deposit: {depositValue.toLocaleString()} XAF. Paid with the rent and held in escrow; the seller returns it when the rental comes back in good order, or it returns to you automatically a few days after the rental ends.
+              </Text>
+            )}
+            {conditions.map((line) => <Text key={line} style={styles.conditionLine}>• {line}</Text>)}
+          </View>
+        ) : null}
 
         {viewer === "loading" ? null : viewer === "owner" ? (
           <View style={styles.box}><Text style={styles.boxText}>This is your listing.</Text></View>
         ) : placed ? (
           <View style={[styles.box, styles.boxSuccess]}>
-            <Text style={styles.boxTitle}>Payment received in escrow</Text>
-            <Text style={styles.boxText}>The seller has been notified. Confirm receipt from your orders once you have the item.</Text>
+            <Text style={styles.boxTitle}>Payment request sent</Text>
+            <Text style={styles.boxText}>Approve the Mobile Money prompt. Your order will update after the payment provider confirms it.</Text>
             <TouchableOpacity onPress={() => navigation.navigate("MarketplaceOrders")}><Text style={styles.link}>View my orders</Text></TouchableOpacity>
           </View>
         ) : listing.availability_status !== "AVAILABLE" ? (
@@ -150,14 +215,22 @@ export default function MarketplaceListingDetailScreen({ route, navigation }: Pr
                 <TextInput style={styles.input} placeholder="Mobile money phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
                 {payError ? <Text style={styles.error}>{payError}</Text> : null}
                 <TouchableOpacity style={[styles.payButton, (paying || !phone.trim()) && styles.payButtonDisabled]} onPress={handlePay} disabled={paying || !phone.trim()}>
-                  {paying ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.payButtonText}>Pay {price} XAF</Text>}
+                  {paying ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.payButtonText}>Pay {payTotal} XAF</Text>}
                 </TouchableOpacity>
               </>
             )}
           </View>
         )}
 
-        {viewer !== "owner" && <ReportListingButton listingId={listing.id} />}
+        {viewer !== "owner" && viewer !== "loading" && (
+          <>
+            <TouchableOpacity style={styles.chatButton} onPress={handleChat} disabled={openingChat}>
+              {openingChat ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.chatButtonText}>Chat with seller</Text>}
+            </TouchableOpacity>
+            {chatError ? <Text style={styles.error}>{chatError}</Text> : null}
+            <ReportListingButton listingId={listing.id} />
+          </>
+        )}
 
         <View style={styles.lister}>
           <Text style={styles.listerLabel}>Listed by {listing.lister_name}</Text>
@@ -184,6 +257,8 @@ const styles = StyleSheet.create({
   factsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12 },
   fact: { fontSize: 12, color: "#374151", backgroundColor: "#E5E7EB", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, overflow: "hidden" },
   description: { fontSize: 14, color: "#374151", marginTop: 12, lineHeight: 20 },
+  conditions: { backgroundColor: "#F3F4F6", borderRadius: 10, padding: 14, marginTop: 16, borderWidth: 1, borderColor: "#E5E7EB" },
+  conditionLine: { fontSize: 13, color: "#374151", marginTop: 4, lineHeight: 18 },
   box: { backgroundColor: "#F3F4F6", borderRadius: 10, padding: 14, marginTop: 16, borderWidth: 1, borderColor: "#E5E7EB" },
   boxSuccess: { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" },
   buyBox: { backgroundColor: "#fff", borderRadius: 10, padding: 14, marginTop: 16, borderWidth: 1, borderColor: "#C9A227" },
@@ -195,6 +270,8 @@ const styles = StyleSheet.create({
   payButton: { backgroundColor: "#C9A227", borderRadius: 8, paddingVertical: 12, alignItems: "center" },
   payButtonDisabled: { opacity: 0.5 },
   payButtonText: { color: "#1B2A4A", fontWeight: "700", fontSize: 15 },
+  chatButton: { backgroundColor: "#1B2A4A", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginTop: 16, marginBottom: 8 },
+  chatButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
   lister: { marginTop: 20, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#E5E7EB" },
   listerLabel: { fontSize: 13, color: "#6B7280" },
 });

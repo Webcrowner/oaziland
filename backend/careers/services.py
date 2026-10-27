@@ -49,23 +49,44 @@ class AlreadyEnrolledError(Exception):
     pass
 
 
+class InvalidEnrollmentTransitionError(Exception):
+    pass
+
+
 def enroll_in_training(*, program, student):
     """unique_together on (program, student) already prevents a
     duplicate row at the database level — this turns that into a
     clear, catchable error instead of a raw IntegrityError reaching
-    an API caller. (This upgrades the original version of this
-    function, which let that IntegrityError propagate raw.)"""
-    from django.db import IntegrityError
-    from .models import TrainingEnrollment
+    an API caller. A student who previously DROPPED the program is
+    allowed to come back: their existing enrollment is reactivated
+    (the unique constraint means a second row is impossible)."""
+    from django.db import IntegrityError, transaction
+    from .models import TrainingEnrollment, TrainingEnrollmentStatus
 
     try:
-        return TrainingEnrollment.objects.create(program=program, student=student)
+        with transaction.atomic():
+            return TrainingEnrollment.objects.create(program=program, student=student)
     except IntegrityError:
-        raise AlreadyEnrolledError("This student is already enrolled in this program.")
+        enrollment = TrainingEnrollment.objects.get(program=program, student=student)
+        if enrollment.status != TrainingEnrollmentStatus.DROPPED:
+            raise AlreadyEnrolledError("This student is already enrolled in this program.")
+        enrollment.status = TrainingEnrollmentStatus.ENROLLED
+        enrollment.completed_at = None
+        enrollment.certificate_issued_at = None
+        enrollment.save(update_fields=["status", "completed_at", "certificate_issued_at"])
+        return enrollment
+
+
+def _require_status(enrollment, allowed, action: str):
+    if enrollment.status not in allowed:
+        raise InvalidEnrollmentTransitionError(
+            f"Cannot {action} an enrollment that is {enrollment.get_status_display().lower()}."
+        )
 
 
 def mark_training_in_progress(enrollment):
     from .models import TrainingEnrollmentStatus
+    _require_status(enrollment, {TrainingEnrollmentStatus.ENROLLED}, "start")
     enrollment.status = TrainingEnrollmentStatus.IN_PROGRESS
     enrollment.save(update_fields=["status"])
     return enrollment
@@ -75,10 +96,15 @@ def mark_training_completed(enrollment):
     """Issues a certificate automatically ONLY if the program actually
     offers one — completion and certification are tracked as distinct
     events, since a program might complete without ever having promised
-    a certificate."""
+    a certificate. A finished or dropped enrollment can't be completed
+    again, so the completion/certificate timestamps are never rewritten."""
     from django.utils import timezone
     from .models import TrainingEnrollmentStatus
 
+    _require_status(enrollment, {TrainingEnrollmentStatus.ENROLLED, TrainingEnrollmentStatus.IN_PROGRESS}, "complete")
+    from .course_services import course_is_finished
+    if not course_is_finished(enrollment):
+        raise InvalidEnrollmentTransitionError("Finish every lesson and pass every quiz to complete this course.")
     enrollment.status = TrainingEnrollmentStatus.COMPLETED
     enrollment.completed_at = timezone.now()
     if enrollment.program.issues_certification:
@@ -89,6 +115,7 @@ def mark_training_completed(enrollment):
 
 def drop_training(enrollment):
     from .models import TrainingEnrollmentStatus
+    _require_status(enrollment, {TrainingEnrollmentStatus.ENROLLED, TrainingEnrollmentStatus.IN_PROGRESS}, "drop")
     enrollment.status = TrainingEnrollmentStatus.DROPPED
     enrollment.save(update_fields=["status"])
     return enrollment

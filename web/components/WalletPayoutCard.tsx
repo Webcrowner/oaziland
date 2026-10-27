@@ -71,7 +71,7 @@ export default function WalletPayoutCard({
   }, [onBalanceUpdated]);
 
   useEffect(() => {
-    loadWallet();
+    void Promise.resolve().then(() => loadWallet());
   }, [loadWallet]);
 
   async function handleWithdraw(e: React.FormEvent) {

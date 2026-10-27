@@ -59,6 +59,12 @@ def test_a_hotel_keeps_the_name_its_owner_gave_it(quarter):
     assert named.status_code == 201 and named.data["name"] == "Hôtel Mont Fébé"
     assert unnamed.status_code == 201 and unnamed.data["name"] == ""
 
+    # An owner can add or change the name of an existing hotel; strangers cannot.
+    stranger = _auth_client(User.objects.create(username="hotel_name_stranger", phone="+237699666699"))
+    assert stranger.post(f"/api/hotels/{unnamed.data['id']}/set-name/", {"name": "Hijacked"}, format="json").status_code == 403
+    renamed = client.post(f"/api/hotels/{unnamed.data['id']}/set-name/", {"name": "  Hôtel Franco  "}, format="json")
+    assert renamed.status_code == 200 and renamed.data["name"] == "Hôtel Franco"
+
 
 @pytest.mark.django_db
 def test_an_unverified_hotel_is_hidden_from_public_browsing_but_visible_to_its_owner(quarter):

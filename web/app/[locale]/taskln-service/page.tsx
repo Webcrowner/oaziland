@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
   listMyServiceRequests, createServiceRequest, acceptServiceRequest, startServiceRequest, completeServiceRequest,
@@ -22,12 +22,13 @@ import GpsCaptureButton from "@/components/GpsCaptureButton";
 import { IconMapPin, IconWrench, IconCheckCircle, IconAlertCircle, IconChevronRight } from "@/components/Icons";
 import { useTasklnLabels, TASKLN_CATEGORY_CODES } from "@/lib/useTasklnLabels";
 
+// text-base on phones stops iOS Safari from zooming into focused fields; min-h keeps touch targets comfortable.
 const inputCls =
-  "w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 transition focus:bg-white focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-400/15";
+  "w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-base sm:text-sm text-slate-900 placeholder:text-slate-400 transition focus:bg-white focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-400/15";
 const cardCls = "rounded-3xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-sm";
-const pillBtnCls = "rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
-const solidBtnCls = "rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-amber-300 hover:bg-slate-800 transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50";
-const dangerBtnCls = "rounded-xl border border-red-200 bg-white px-3.5 py-2 text-xs font-bold text-red-700 hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-50";
+const pillBtnCls = "rounded-xl border border-slate-200 bg-white px-3.5 py-2 min-h-10 sm:min-h-0 text-xs font-bold text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+const solidBtnCls = "rounded-xl bg-slate-900 px-4 py-2 min-h-10 sm:min-h-0 text-xs font-bold text-amber-300 hover:bg-slate-800 active:scale-[0.98] transition whitespace-nowrap cursor-pointer disabled:opacity-50";
+const dangerBtnCls = "rounded-xl border border-red-200 bg-white px-3.5 py-2 min-h-10 sm:min-h-0 text-xs font-bold text-red-700 hover:bg-red-50 active:scale-[0.98] transition cursor-pointer disabled:opacity-50";
 
 const STATUS_VARIANT: Record<string, "navy" | "gold" | "green" | "clay"> = {
   REQUESTED: "gold", ACCEPTED: "navy", EN_ROUTE: "navy", IN_PROGRESS: "navy", COMPLETED: "green", CANCELLED: "clay", DISPUTED: "clay",
@@ -45,7 +46,16 @@ const STATUS_VARIANT: Record<string, "navy" | "gold" | "green" | "clay"> = {
  */
 export default function TasklnServicePage() {
   const t = useTranslations("TasklnServicePage");
+  const locale = useLocale();
   const labels = useTasklnLabels();
+  const formatDate = (value: string) => new Date(value).toLocaleDateString(locale);
+  const formatDateTime = (value: string) => new Date(value).toLocaleString(locale);
+  // Earliest selectable schedule time, in the local format datetime-local expects.
+  const nowLocalInput = () => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().slice(0, 16);
+  };
   const [requests, setRequests] = useState<ServiceRequestItem[]>([]);
   const [status, setStatus] = useState<"loading" | "signedOut" | "ready">("loading");
   const [category, setCategory] = useState("PLUMBING");
@@ -72,6 +82,10 @@ export default function TasklnServicePage() {
   const [disputeId, setDisputeId] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState("");
   const [actionError, setActionError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState(false);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [registerError, setRegisterError] = useState("");
 
   // Technician self-registration — the real gap this closes:
   // previously ANY signed-in user could accept a job with zero
@@ -109,8 +123,12 @@ export default function TasklnServicePage() {
       setTotalCount(requestsData.count);
       setTechnicianProfile(profile);
       setMyUserId(myProfile.id);
+      setLoadError(false);
       setStatus("ready");
-    }).catch(() => setStatus("ready")).finally(() => setListLoading(false));
+    }).catch(() => {
+      setLoadError(true);
+      setStatus("ready");
+    }).finally(() => setListLoading(false));
   }, [tab, boardRadius]);
 
   function changeTab(next: ServiceRequestScope) {
@@ -136,7 +154,9 @@ export default function TasklnServicePage() {
     }
   }
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void Promise.resolve().then(() => load());
+  }, [load]);
 
   useEffect(() => {
     const technicianId = new URLSearchParams(window.location.search).get("technician");
@@ -158,10 +178,14 @@ export default function TasklnServicePage() {
     const token = localStorage.getItem("access_token");
     if (!token || selectedSpecialties.length === 0) return;
     setRegisteringTechnician(true);
+    setRegisterError("");
     try {
       await registerAsTechnician(selectedSpecialties, undefined, token);
       setShowTechnicianForm(false);
+      setSelectedSpecialties([]);
       load();
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : t("actionFailed"));
     } finally {
       setRegisteringTechnician(false);
     }
@@ -203,11 +227,12 @@ export default function TasklnServicePage() {
     if (!token) return;
     setRequesting(true);
     setActionError("");
+    setNotice("");
     try {
       await createServiceRequest(
         {
           category,
-          description,
+          description: description.trim(),
           priority,
           scheduled_for: priority !== "URGENT" && newScheduledFor ? new Date(newScheduledFor).toISOString() : undefined,
           address_note: addressNote.trim() || undefined,
@@ -226,6 +251,7 @@ export default function TasklnServicePage() {
       setProblemPhotos([]);
       setGpsCoords({ latitude: null, longitude: null });
       setChosenTechnician(null);
+      setNotice(t("requestCreated"));
       if (tab === "mine") load();
       else changeTab("mine");
     } catch (err) {
@@ -236,15 +262,19 @@ export default function TasklnServicePage() {
   }
 
   // Runs a job action with the stored token, surfacing any server error instead of failing silently.
-  async function runAction(fn: (token: string) => Promise<unknown>) {
+  // Resolves to whether the action succeeded so callers keep their form open on failure.
+  async function runAction(fn: (token: string) => Promise<unknown>): Promise<boolean> {
     const token = localStorage.getItem("access_token");
-    if (!token) return;
+    if (!token) return false;
     setActionError("");
+    setNotice("");
     try {
       await fn(token);
       load();
+      return true;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t("actionFailed"));
+      return false;
     }
   }
 
@@ -268,8 +298,8 @@ export default function TasklnServicePage() {
   async function handleSubmitReview(request: ServiceRequestItem, asRequester: boolean) {
     const draft = reviewDrafts[request.id];
     if (!draft?.score) return;
-    await (asRequester ? handleRate : handleRateClient)(request.id, draft.score, draft.comment.trim());
-    setReviewEditId(null);
+    const ok = await (asRequester ? handleRate : handleRateClient)(request.id, draft.score, draft.comment.trim());
+    if (ok) setReviewEditId(null);
   }
 
   function handleEnRoute(id: string) {
@@ -287,7 +317,8 @@ export default function TasklnServicePage() {
   async function handleSendQuote(id: string) {
     const value = quoteInputs[id];
     if (!value) return;
-    await runAction((token) => proposeServiceQuote(id, { laborXaf: value, materialsXaf: materialsInputs[id] }, token));
+    const ok = await runAction((token) => proposeServiceQuote(id, { laborXaf: value, materialsXaf: materialsInputs[id] }, token));
+    if (!ok) return;
     setQuoteInputs((prev) => ({ ...prev, [id]: "" }));
     setMaterialsInputs((prev) => ({ ...prev, [id]: "" }));
   }
@@ -304,35 +335,52 @@ export default function TasklnServicePage() {
   }
 
   async function handleDispute(id: string) {
-    await runAction((token) => disputeServiceRequest(id, disputeReason, token));
-    setDisputeId(null);
-    setDisputeReason("");
+    if (await runAction((token) => disputeServiceRequest(id, disputeReason.trim(), token))) {
+      setDisputeId(null);
+      setDisputeReason("");
+    }
   }
 
   async function handleCancel(id: string) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
+    if (!window.confirm(t("confirmCancelQuestion"))) return;
     setCancellingId(id);
+    setActionError("");
     try {
       await cancelServiceRequest(id, token);
       load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t("actionFailed"));
     } finally {
       setCancellingId(null);
     }
   }
 
   async function handleComplete(id: string) {
-    if (!phoneNumber) return;
-    await runAction((token) => completeServiceRequest(id, phoneNumber, token));
-    setPayingId(null);
-    setPhoneNumber("");
+    if (!phoneNumber.trim() || submittingPayment) return;
+    setSubmittingPayment(true);
+    try {
+      if (await runAction((token) => completeServiceRequest(id, phoneNumber.trim(), token))) {
+        setPayingId(null);
+        setPhoneNumber("");
+      }
+    } finally {
+      setSubmittingPayment(false);
+    }
   }
 
   async function handleFund(id: string) {
-    if (!phoneNumber) return;
-    await runAction((token) => fundServiceRequest(id, phoneNumber, token));
-    setFundingId(null);
-    setPhoneNumber("");
+    if (!phoneNumber.trim() || submittingPayment) return;
+    setSubmittingPayment(true);
+    try {
+      if (await runAction((token) => fundServiceRequest(id, phoneNumber.trim(), token))) {
+        setFundingId(null);
+        setPhoneNumber("");
+      }
+    } finally {
+      setSubmittingPayment(false);
+    }
   }
 
   function handleConfirmAndRelease(id: string) {
@@ -343,8 +391,13 @@ export default function TasklnServicePage() {
   async function handlePhotoUploaded(requestId: string, photoType: "BEFORE" | "AFTER", result: MediaUploadResult) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
-    await uploadServiceRequestPhoto(requestId, photoType, result.url, token);
-    load();
+    setActionError("");
+    try {
+      await uploadServiceRequestPhoto(requestId, photoType, result.url, token);
+      load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t("actionFailed"));
+    }
   }
 
   if (status === "signedOut") {
@@ -352,18 +405,18 @@ export default function TasklnServicePage() {
       <main className="max-w-md mx-auto px-4 py-16">
         <div className={`${cardCls} text-center`}>
           <p className="text-slate-600 mb-4 font-semibold text-sm">{t("signInRequired")}</p>
-          <Button href="/login">{t("signInRequired")}</Button>
+          <Button href="/login">{t("signIn")}</Button>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+    <main className="max-w-3xl mx-auto px-4 sm:px-6 py-5 sm:py-8">
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 text-white shadow-xl shadow-slate-900/10 mb-6">
         <div className="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full bg-amber-400/20 blur-3xl" />
-        <div className="relative p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center gap-5">
-          <div className="flex items-center gap-5 min-w-0 flex-1">
+        <div className="relative p-5 sm:p-8 flex flex-col sm:flex-row sm:items-center gap-5">
+          <div className="flex items-center gap-4 sm:gap-5 min-w-0 flex-1">
             <div className="flex h-14 w-14 sm:h-16 sm:w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 shadow-lg shadow-amber-500/25">
               <IconWrench size={28} />
             </div>
@@ -393,15 +446,15 @@ export default function TasklnServicePage() {
           <p className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">{t("chosenTechnicianUnavailable")}</p>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
+          <select aria-label={t("categoryLabel")} value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
             {(chosenTechnician ? chosenTechnician.specialties : TASKLN_CATEGORY_CODES).map((value) => <option key={value} value={value}>{labels.category(value)}</option>)}
           </select>
-          <select value={priority} onChange={(e) => setPriority(e.target.value)} className={inputCls}>
+          <select aria-label={t("priorityLabel")} value={priority} onChange={(e) => setPriority(e.target.value)} className={inputCls}>
             <option value="SCHEDULED">{t("scheduled")}</option>
             <option value="URGENT">{t("urgent")}</option>
           </select>
         </div>
-        <textarea required rows={3} placeholder={t("descriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className={inputCls} />
+        <textarea required aria-label={t("descriptionLabel")} rows={3} minLength={10} maxLength={2000} placeholder={t("descriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className={inputCls} />
         <div className="flex flex-col gap-2">
           {problemPhotos.length > 0 && (
             <div className="flex flex-wrap gap-2">
@@ -422,7 +475,7 @@ export default function TasklnServicePage() {
         ) : (
           <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
             {t("whenNeeded")}
-            <input type="datetime-local" value={newScheduledFor} onChange={(e) => setNewScheduledFor(e.target.value)} className={`${inputCls} mt-1.5 normal-case font-normal tracking-normal`} />
+            <input type="datetime-local" min={nowLocalInput()} value={newScheduledFor} onChange={(e) => setNewScheduledFor(e.target.value)} className={`${inputCls} mt-1.5 normal-case font-normal tracking-normal`} />
           </label>
         )}
         <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -441,11 +494,22 @@ export default function TasklnServicePage() {
             onCapture={(coords) => setGpsCoords(coords)}
             currentCoords={gpsCoords}
             label={t("captureSiteGps")}
+            hint={t("siteGpsHint")}
+            onClear={() => setGpsCoords({ latitude: null, longitude: null })}
+            clearLabel={t("remove")}
           />
         </div>
-        <Button size="lg" disabled={requesting || (gpsCoords.latitude === null && !areaLabel.trim())}>{requesting ? t("requesting") : t("requestTaskln")}</Button>
+        <Button size="lg" disabled={requesting || !description.trim() || (gpsCoords.latitude === null && !areaLabel.trim())}>{requesting ? t("requesting") : t("requestTaskln")}</Button>
         {gpsCoords.latitude === null && !areaLabel.trim() && <p className="text-xs text-slate-500">{t("captureGpsHint")}</p>}
       </form>
+
+      {notice && <p role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800"><IconCheckCircle size={16} className="shrink-0" /> {notice}</p>}
+      {loadError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
+          <span className="flex items-center gap-2"><IconAlertCircle size={16} className="shrink-0" /> {t("loadFailed")}</span>
+          <button type="button" onClick={() => { setListLoading(true); load(); }} className={pillBtnCls}>{t("retry")}</button>
+        </div>
+      )}
 
       <div className={`${cardCls} mb-6`}>
         {technicianProfile ? (
@@ -470,10 +534,12 @@ export default function TasklnServicePage() {
                 <span className="text-slate-500">{t("shareLocationHint")}</span>
               </div>
             )}
-            <TechnicianDocuments profile={technicianProfile} onSaved={setTechnicianProfile} />          </>
+            <TechnicianDocuments profile={technicianProfile} onSaved={setTechnicianProfile} />
+          </>
         ) : showTechnicianForm ? (
           <form onSubmit={handleRegisterTechnician} className="flex flex-col gap-3">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("selectSpecialties")}</p>
+            {registerError && <p role="alert" className="rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">{registerError}</p>}
             <div className="flex flex-wrap gap-2">
               {TASKLN_CATEGORY_CODES.map((value) => (
                 <button
@@ -505,7 +571,7 @@ export default function TasklnServicePage() {
             <button onClick={() => setReceipt(null)} className={pillBtnCls}>{t("close")}</button>
           </div>
           <p className="text-slate-600">{labels.category(receipt.category_code)}: {receipt.description}</p>
-          <p className="text-xs text-slate-500 mb-3">{t("receiptParties", { requester: receipt.requester_name, technician: receipt.technician_name || t("technicianFallback") })}{receipt.completed_at ? ` · ${new Date(receipt.completed_at).toLocaleDateString()}` : ""}</p>
+          <p className="text-xs text-slate-500 mb-3">{t("receiptParties", { requester: receipt.requester_name, technician: receipt.technician_name || t("technicianFallback") })}{receipt.completed_at ? ` · ${formatDate(receipt.completed_at)}` : ""}</p>
           {receipt.labor_xaf && <p className="flex justify-between"><span>{t("receiptLabor")}</span><span>{Number(receipt.labor_xaf).toLocaleString()} XAF</span></p>}
           {receipt.materials_xaf && <p className="flex justify-between"><span>{t("receiptMaterials")}</span><span>{Number(receipt.materials_xaf).toLocaleString()} XAF</span></p>}
           <p className="flex justify-between font-black border-t border-slate-100 mt-2 pt-2"><span>{t("receiptTotal")}</span><span>{Number(receipt.total_xaf).toLocaleString()} XAF</span></p>
@@ -514,7 +580,7 @@ export default function TasklnServicePage() {
         </div>
       )}
       {(technicianProfile || tab !== "mine") && (
-        <div className="flex flex-wrap gap-2 mb-4" role="tablist">
+        <div className="flex gap-2 mb-4 overflow-x-auto sm:flex-wrap -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 [scrollbar-width:none]" role="tablist">
           {(["mine", "jobs", "board"] as ServiceRequestScope[])
             .filter((value) => value === "mine" || (value === "jobs" && technicianProfile) || (value === "board" && technicianProfile?.is_verified))
             .map((value) => (
@@ -524,7 +590,7 @@ export default function TasklnServicePage() {
                 role="tab"
                 aria-selected={tab === value}
                 onClick={() => changeTab(value)}
-                className={`text-xs font-bold px-4 py-2 rounded-full border transition-colors cursor-pointer ${tab === value ? "bg-slate-900 text-amber-300 border-slate-900" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                className={`shrink-0 whitespace-nowrap text-xs font-bold px-4 py-2.5 sm:py-2 rounded-full border transition-colors cursor-pointer ${tab === value ? "bg-slate-900 text-amber-300 border-slate-900" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
               >
                 {t(`tab_${value}`)}
               </button>
@@ -568,7 +634,7 @@ export default function TasklnServicePage() {
                 <p className="text-xs text-slate-700 mb-3"><span className="font-semibold">{t("addressShown")}:</span> {request.address_note}</p>
               )}
               {request.scheduled_for && (
-                <p className="text-xs text-slate-600 mb-3">{t("scheduledFor", { date: new Date(request.scheduled_for).toLocaleString() })}</p>
+                <p className="text-xs text-slate-600 mb-3">{t("scheduledFor", { date: formatDateTime(request.scheduled_for) })}</p>
               )}
 
               {request.latitude && request.longitude && request.requester !== myUserId && request.technician !== myUserId && (
@@ -603,12 +669,12 @@ export default function TasklnServicePage() {
                 </p>
               )}
               {request.quote_deadline && (
-                <p className="text-xs text-slate-600 mb-3">{t("quoteDueBy", { date: new Date(request.quote_deadline).toLocaleString() })}</p>
+                <p className="text-xs text-slate-600 mb-3">{t("quoteDueBy", { date: formatDateTime(request.quote_deadline) })}</p>
               )}
               {request.status === "IN_PROGRESS" && request.work_completed_at && (
                 <p className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg p-2 mb-3">
                   {request.requester === myUserId ? t("workDoneRequester") : t("workDoneTechnician")}
-                  {request.auto_release_at ? ` ${t("autoReleaseAt", { date: new Date(request.auto_release_at).toLocaleString() })}` : ""}
+                  {request.auto_release_at ? ` ${t("autoReleaseAt", { date: formatDateTime(request.auto_release_at) })}` : ""}
                 </p>
               )}
               {request.status === "DISPUTED" && request.dispute_reason && (
@@ -705,8 +771,8 @@ export default function TasklnServicePage() {
                       <div className="flex flex-col gap-2 rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
                         <p className="text-xs text-slate-600">{t("payIntoEscrowHint")}</p>
                         <div className="flex flex-col sm:flex-row gap-2">
-                          <input placeholder={t("phoneNumberPlaceholder")} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className={`${inputCls} flex-1`} />
-                          <button onClick={() => handleFund(request.id)} disabled={!phoneNumber} className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-amber-300 transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50">{t("pay")} {Number(request.quoted_amount_xaf).toLocaleString()} XAF</button>
+                          <input type="tel" inputMode="tel" autoComplete="tel" aria-label={t("phoneNumberPlaceholder")} placeholder={t("phoneNumberPlaceholder")} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className={`${inputCls} flex-1`} />
+                          <button onClick={() => handleFund(request.id)} disabled={!phoneNumber.trim() || submittingPayment} className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-amber-300 transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50">{t("pay")} {Number(request.quoted_amount_xaf).toLocaleString()} XAF</button>
                           <button onClick={() => setFundingId(null)} className="text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer">{t("cancel")}</button>
                         </div>
                       </div>
@@ -714,8 +780,8 @@ export default function TasklnServicePage() {
 
                     {payingId === request.id && (
                       <div className="flex flex-col sm:flex-row gap-2 rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
-                        <input placeholder={t("phoneNumberPlaceholder")} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className={`${inputCls} flex-1`} />
-                        <button onClick={() => handleComplete(request.id)} className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-amber-300 transition-colors whitespace-nowrap cursor-pointer">{t("pay")} {Number(request.quoted_amount_xaf).toLocaleString()} XAF</button>
+                        <input type="tel" inputMode="tel" autoComplete="tel" aria-label={t("phoneNumberPlaceholder")} placeholder={t("phoneNumberPlaceholder")} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className={`${inputCls} flex-1`} />
+                        <button onClick={() => handleComplete(request.id)} disabled={!phoneNumber.trim() || submittingPayment} className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-amber-300 transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50">{t("pay")} {Number(request.quoted_amount_xaf).toLocaleString()} XAF</button>
                       </div>
                     )}
 
@@ -747,7 +813,7 @@ export default function TasklnServicePage() {
 
                     {rescheduleId === request.id && (
                       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-100 bg-slate-50/60 p-3">
-                        <input type="datetime-local" value={rescheduleValue} onChange={(e) => setRescheduleValue(e.target.value)} className={`${inputCls} flex-1 min-w-44 !w-auto`} />
+                        <input type="datetime-local" min={nowLocalInput()} aria-label={t("reschedule")} value={rescheduleValue} onChange={(e) => setRescheduleValue(e.target.value)} className={`${inputCls} flex-1 min-w-44 !w-auto`} />
                         <button
                           disabled={!rescheduleValue}
                           onClick={async () => { await runAction((token) => rescheduleServiceRequest(request.id, new Date(rescheduleValue).toISOString(), token)); setRescheduleId(null); setRescheduleValue(""); }}
@@ -779,7 +845,7 @@ export default function TasklnServicePage() {
                                   onClick={() => setReviewDrafts((prev) => ({ ...prev, [request.id]: { score, comment: prev[request.id]?.comment ?? "" } }))}
                                   aria-pressed={reviewDrafts[request.id]?.score === score}
                                   className={`rounded-lg border px-2.5 py-1 font-bold transition-colors cursor-pointer ${reviewDrafts[request.id]?.score === score ? "bg-amber-400 border-amber-400 text-slate-950" : "border-slate-200 bg-white hover:bg-amber-50 hover:border-amber-300"}`}
-                                  aria-label={`${score} stars`}
+                                  aria-label={t("starsLabel", { score })}
                                 >{score}★</button>
                               ))}
                             </div>
@@ -818,7 +884,7 @@ export default function TasklnServicePage() {
                     <div className="flex flex-wrap gap-2 mb-2">
                       {request.photos.map((photo) => (
                         <a key={photo.id} href={photo.file_url} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={photo.file_url} alt={photo.photo_type} className="w-16 h-16 object-cover rounded-xl border border-slate-200" />
+                          <img src={photo.file_url} alt={photo.photo_type === "BEFORE" ? t("photoBefore") : t("photoAfter")} className="w-16 h-16 object-cover rounded-xl border border-slate-200" />
                           <span className="text-[10px] text-gray-400">{photo.photo_type === "BEFORE" ? t("photoBefore") : t("photoAfter")}</span>
                         </a>
                       ))}

@@ -15,6 +15,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import MediaUploader from "@/components/MediaUploader";
 import MediaThumbs from "@/components/MediaThumbs";
+import MarketplaceConditionsFields, { EMPTY_CONDITIONS, saveConditions, type ConditionsDraft } from "@/components/MarketplaceConditionsFields";
 import LocationCapture, { EMPTY_GPS, type GpsValue } from "@/components/LocationCapture";
 import ListerRoleBadge from "@/components/ListerRoleBadge";
 import WhatsAppShareButton from "@/components/WhatsAppShareButton";
@@ -27,11 +28,16 @@ const PRICE_BASIS_LABELS: Record<string, string> = {
 
 export default function StoresMarketplacePage() {
   const t = useTranslations("MarketplaceCategoryPage");
+  const tc = useTranslations("MarketplaceConditions");
+  const [conditions, setConditions] = useState<ConditionsDraft>(EMPTY_CONDITIONS);
+  const [notice, setNotice] = useState("");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [priceBasis, setPriceBasis] = useState("RENT_MONTHLY");
   const [price, setPrice] = useState("");
+  const [deposit, setDeposit] = useState("");
   const [sizeSqm, setSizeSqm] = useState("");
   const [frontage, setFrontage] = useState("");
   const [quarterId, setQuarterId] = useState("");
@@ -45,6 +51,8 @@ export default function StoresMarketplacePage() {
 
   useEffect(() => {
     listQuarters().then(setQuarters).catch(() => {});
+    // The "Sell" page links here with ?post=1 to open the posting form straight away.
+    if (new URLSearchParams(window.location.search).has("post")) Promise.resolve().then(() => setShowForm(true));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -55,15 +63,19 @@ export default function StoresMarketplacePage() {
       return;
     }
     setSubmitStatus("submitting");
+    setNotice("");
     try {
       const listing = await createMarketplaceListing("stores", {
-        title, price_basis: priceBasis, price_xaf: price, size_sqm: sizeSqm,
+        title, description, price_basis: priceBasis, price_xaf: price, security_deposit_xaf: priceBasis === "SALE" ? "0" : deposit || "0", size_sqm: sizeSqm,
         frontage_meters: frontage || null, quarter: quarterId || null,
         latitude: gps.latitude, longitude: gps.longitude,
       }, token);
       for (const m of media) await addMarketplaceMedia("stores", listing.id, m.url, m.media_type, token);
+      // The listing already exists at this point, so a conditions failure must not make the lister post it twice.
+      await saveConditions("stores", listing.id, conditions, token, true).catch(() => setNotice(tc("savedWithoutConditions")));
+      setConditions(EMPTY_CONDITIONS);
       setShowForm(false);
-      setTitle(""); setPrice(""); setSizeSqm(""); setFrontage(""); setMedia([]); setGps(EMPTY_GPS);
+      setTitle(""); setDescription(""); setPrice(""); setDeposit(""); setSizeSqm(""); setFrontage(""); setMedia([]); setGps(EMPTY_GPS);
       setReloadKey((k) => k + 1);
     } catch {
       setSubmitStatus("error");
@@ -79,15 +91,21 @@ export default function StoresMarketplacePage() {
         action={<Button onClick={() => setShowForm(!showForm)}>{showForm ? t("cancel") : t("listAStore")}</Button>}
       />
 
+      {notice && <p className="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800">{notice}</p>}
+
       {showForm && (
         <form onSubmit={handleSubmit} className="border border-gray-200 rounded-xl p-6 bg-white mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
           <input required placeholder={t("titlePlaceholder")} value={title} onChange={(e) => setTitle(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
-          <input required type="number" placeholder={t("sizeSqmPlaceholder")} value={sizeSqm} onChange={(e) => setSizeSqm(e.target.value)} className="border rounded-lg px-3 py-2" />
-          <input type="number" placeholder={t("frontagePlaceholder")} value={frontage} onChange={(e) => setFrontage(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <textarea rows={3} placeholder={t("listingDescriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
+          <input required type="number" min="0.01" step="0.01" placeholder={t("sizeSqmPlaceholder")} value={sizeSqm} onChange={(e) => setSizeSqm(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input type="number" min="0.01" step="0.01" placeholder={t("frontagePlaceholder")} value={frontage} onChange={(e) => setFrontage(e.target.value)} className="border rounded-lg px-3 py-2" />
           <select value={priceBasis} onChange={(e) => setPriceBasis(e.target.value)} className="border rounded-lg px-3 py-2">
             {Object.entries(PRICE_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <input required type="number" placeholder={t("pricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input required type="number" min="0.01" step="0.01" placeholder={t("pricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
+          {priceBasis !== "SALE" && (
+            <input type="number" min="0" step="0.01" placeholder={t("depositPlaceholder")} value={deposit} onChange={(e) => setDeposit(e.target.value)} className="border rounded-lg px-3 py-2" />
+          )}
           <select value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" required>
             <option value="" disabled>{t("chooseNeighborhood")}</option>
             <QuarterOptions quarters={quarters} />
@@ -99,12 +117,13 @@ export default function StoresMarketplacePage() {
             {media.length > 0 && <p className="text-xs text-gray-500 mt-1">{t("mediaAttached", { count: media.length })}</p>}
             <MediaThumbs items={media.map((m) => ({ url: m.url, media_type: m.media_type }))} onRemove={(i) => setMedia((prev) => prev.filter((_, idx) => idx !== i))} />
           </div>
+          <MarketplaceConditionsFields category="stores" value={conditions} onChange={setConditions} className="md:col-span-2" />
           {submitStatus === "error" && <p className="text-red-600 text-sm md:col-span-2">{t("submitFailed")}</p>}
           <Button className="md:col-span-2" size="lg">{submitStatus === "submitting" ? t("submitting") : t("submitListing")}</Button>
         </form>
       )}
 
-      <MarketplaceFilterBar value={filters} onChange={setFilters} />
+      <MarketplaceFilterBar value={filters} onChange={setFilters} quarters={quarters} showMinSize />
 
       {status === "loading" ? (
         <p className="text-gray-400">...</p>

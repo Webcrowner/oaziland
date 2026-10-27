@@ -139,9 +139,14 @@ export default function ListPropertyPage() {
   useEffect(() => {
     if (!quarterId) return;
     listPointsOfInterest(quarterId)
-      .then(setPointsOfInterest)
-      .catch(() => setPointsOfInterest([]));
-    setSelectedFacilities([]);
+      .then((pois) => {
+        setPointsOfInterest(pois);
+        setSelectedFacilities([]);
+      })
+      .catch(() => {
+        setPointsOfInterest([]);
+        setSelectedFacilities([]);
+      });
   }, [quarterId]);
 
   function handleMediaUploaded(result: MediaUploadResult) {

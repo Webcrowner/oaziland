@@ -32,8 +32,10 @@ export default function ShareAndQrModal({
 
   useEffect(() => {
     if (!isOpen || !url) return;
-    setCopied(false);
-    setQrGenerated(false);
+    void Promise.resolve().then(() => {
+      setCopied(false);
+      setQrGenerated(false);
+    });
 
     // Wait for modal DOM to be ready
     const timer = setTimeout(() => {

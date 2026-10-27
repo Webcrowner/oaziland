@@ -53,6 +53,8 @@ class MarketplaceListingBase(models.Model):
     description = models.TextField(blank=True)
     price_basis = models.CharField(max_length=15, choices=PriceBasis.choices)
     price_xaf = models.DecimalField(max_digits=14, decimal_places=2)
+    # Refundable security deposit for rentals, held separately from the rent and returned when the rental ends.
+    security_deposit_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     quarter = models.ForeignKey("geo.Quarter", on_delete=models.SET_NULL, null=True, blank=True)
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
@@ -102,6 +104,38 @@ class CarListing(MarketplaceListingBase):
 
     class Meta:
         db_table = "car_listings"
+
+
+class GoodsCategory(models.TextChoices):
+    ELECTRONICS = "ELECTRONICS", "Electronics"
+    PHONES = "PHONES", "Phones & Tablets"
+    FASHION = "FASHION", "Fashion & Beauty"
+    HOME = "HOME", "Home & Furniture"
+    APPLIANCES = "APPLIANCES", "Appliances"
+    FOOD = "FOOD", "Food & Farm Produce"
+    BUILDING = "BUILDING", "Building Materials"
+    TOOLS = "TOOLS", "Tools & Machinery"
+    VEHICLE_PARTS = "VEHICLE_PARTS", "Vehicle Parts"
+    BABY = "BABY", "Baby & Kids"
+    SPORTS = "SPORTS", "Sports & Leisure"
+    OTHER = "OTHER", "Other"
+
+
+class GoodsCondition(models.TextChoices):
+    NEW = "NEW", "New"
+    LIKE_NEW = "LIKE_NEW", "Like new"
+    USED = "USED", "Used"
+
+
+class GoodsListing(MarketplaceListingBase):
+    """An everyday item for sale — a phone, a sofa, a sack of rice. Always a sale (never a rental), so the
+    price basis is fixed by the serializer; the item's own details are the category, condition and quantity."""
+    item_category = models.CharField(max_length=20, choices=GoodsCategory.choices, default=GoodsCategory.OTHER)
+    condition = models.CharField(max_length=10, choices=GoodsCondition.choices, default=GoodsCondition.USED)
+    quantity = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "goods_listings"
 
 
 class VehicleSpec(models.Model):
@@ -161,6 +195,7 @@ class ListingCondition(models.Model):
 
 
 class MarketplaceOrderStatus(models.TextChoices):
+    PAYMENT_PENDING = "PAYMENT_PENDING", "Payment pending"
     PAID = "PAID", "Paid into escrow"
     HANDED_OVER = "HANDED_OVER", "Handed over"
     COMPLETED = "COMPLETED", "Completed"
@@ -168,19 +203,41 @@ class MarketplaceOrderStatus(models.TextChoices):
     DISPUTED = "DISPUTED", "Disputed"
 
 
+class DepositStatus(models.TextChoices):
+    NONE = "NONE", "No deposit"
+    HELD = "HELD", "Held"
+    CLAIMED = "CLAIMED", "Claimed by the seller"
+    RETURNED = "RETURNED", "Returned to the renter"
+    FORFEITED = "FORFEITED", "Paid to the seller"
+
+
 class MarketplaceOrder(models.Model):
     """A buyer's purchase (or first rental period) of one marketplace listing. The money sits in the
     shared PaymentEscrow until the buyer confirms they got what they paid for, so neither side has to
-    trust the other. Settles through the same Booking/escrow machinery as every other transaction."""
+    trust the other. Settles through the same Booking/escrow machinery as every other transaction.
+
+    A rental with a security deposit is paid in one charge, then split on confirmation: the rent stays in
+    `booking`'s escrow, and the deposit gets its own booking and escrow so it can be returned or paid to the
+    seller independently of the rent."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     listing = models.ForeignKey(MarketplaceListingBase, on_delete=models.PROTECT, related_name="orders")
     buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="marketplace_orders")
     booking = models.OneToOneField("transactions.Booking", on_delete=models.PROTECT, related_name="marketplace_order")
     amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
-    status = models.CharField(max_length=15, choices=MarketplaceOrderStatus.choices, default=MarketplaceOrderStatus.PAID)
+    status = models.CharField(max_length=15, choices=MarketplaceOrderStatus.choices, default=MarketplaceOrderStatus.PAYMENT_PENDING)
     handed_over_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Rentals only: the rental runs from the handover for one period of the listing's price basis.
+    rental_starts_on = models.DateField(null=True, blank=True)
+    rental_ends_on = models.DateField(null=True, blank=True)
+    relisted_at = models.DateTimeField(null=True, blank=True)
+    deposit_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    deposit_status = models.CharField(max_length=10, choices=DepositStatus.choices, default=DepositStatus.NONE)
+    deposit_booking = models.OneToOneField(
+        "transactions.Booking", on_delete=models.PROTECT, null=True, blank=True, related_name="marketplace_deposit_order",
+    )
+    deposit_settled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "marketplace_orders"
@@ -229,6 +286,11 @@ class DriverProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="driver_profile")
     license_number = models.CharField(max_length=50)
     is_verified = models.BooleanField(default=False)
+    # Where the driver last reported being; online drivers only see open requests near them.
+    is_online = models.BooleanField(default=False)
+    last_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    last_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

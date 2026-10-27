@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { getMyProfile, listMyHotels, getHotelFinancialDashboard, type Hotel, type HotelFinancialDashboard } from "@/lib/api";
+import { getMyProfile, listMyHotels, getHotelFinancialDashboard, setHotelName, type Hotel, type HotelFinancialDashboard } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
@@ -25,40 +25,82 @@ export default function HotelDashboardPage() {
   const [userId, setUserId] = useState<string>("");
   const [myHotels, setMyHotels] = useState<Hotel[]>([]);
   const [selectedHotelId, setSelectedHotelId] = useState("");
+  const [hotelNameDraft, setHotelNameDraft] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameMessage, setNameMessage] = useState("");
   const [dashboard, setDashboard] = useState<HotelFinancialDashboard | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
 
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-      setStatus("signedOut");
-      return;
-    }
-    Promise.all([getMyProfile(token), listMyHotels(token)])
-      .then(([profile, hotelsData]) => {
-        setUserId(profile.id);
-        const owned = hotelsData.results.filter((h) => h.owner === profile.id);
-        setMyHotels(owned);
-        if (owned.length > 0) setSelectedHotelId(owned[0].id);
-        setStatus("ready");
-      })
-      .catch(() => setStatus("ready"));
-  }, []);
-
-  const loadDashboard = useCallback((hotelId: string) => {
+  const loadDashboard = useCallback(async (hotelId: string) => {
     const token = localStorage.getItem("access_token");
     if (!token || !hotelId) return;
     setDashboardLoading(true);
-    getHotelFinancialDashboard(hotelId, token)
-      .then((data) => setDashboard(data))
-      .catch(() => setDashboard(null))
-      .finally(() => setDashboardLoading(false));
+    try {
+      const data = await getHotelFinancialDashboard(hotelId, token);
+      setDashboard(data);
+    } catch {
+      setDashboard(null);
+    } finally {
+      setDashboardLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (selectedHotelId) loadDashboard(selectedHotelId);
-  }, [selectedHotelId, loadDashboard]);
+    let active = true;
+    async function init() {
+      const token = localStorage.getItem("access_token");
+      if (!token) {
+        if (active) setStatus("signedOut");
+        return;
+      }
+      try {
+        const [profile, hotelsData] = await Promise.all([getMyProfile(token), listMyHotels(token)]);
+        if (!active) return;
+        setUserId(profile.id);
+        const owned = hotelsData.results.filter((h) => h.owner === profile.id);
+        setMyHotels(owned);
+        if (owned.length > 0) {
+          setSelectedHotelId(owned[0].id);
+          setHotelNameDraft(owned[0].name || "");
+          await loadDashboard(owned[0].id);
+        }
+        setStatus("ready");
+      } catch {
+        if (active) setStatus("ready");
+      }
+    }
+    init();
+    return () => {
+      active = false;
+    };
+  }, [loadDashboard]);
+
+  function handleSelectHotel(hotelId: string) {
+    setSelectedHotelId(hotelId);
+    const found = myHotels.find((h) => h.id === hotelId);
+    setHotelNameDraft(found?.name || "");
+    setNameMessage("");
+    loadDashboard(hotelId);
+  }
+
+  async function handleSaveHotelName(e: React.FormEvent) {
+    e.preventDefault();
+    const token = localStorage.getItem("access_token");
+    if (!token || !selectedHotelId || !hotelNameDraft.trim()) return;
+    setNameSaving(true);
+    setNameMessage("");
+    try {
+      const updated = await setHotelName(selectedHotelId, hotelNameDraft.trim(), token);
+      setMyHotels((prev) => prev.map((h) => (h.id === updated.id ? { ...h, name: updated.name } : h)));
+      setHotelNameDraft(updated.name || "");
+      setNameMessage(t("hotelNameSaved"));
+    } catch (err) {
+      setNameMessage(err instanceof Error ? err.message : "");
+    } finally {
+      setNameSaving(false);
+    }
+  }
 
   if (status === "signedOut") {
     return (
@@ -124,20 +166,38 @@ export default function HotelDashboardPage() {
         ) : undefined
       }
     >
-      {myHotels.length > 1 && (
-        <div className="mb-6 max-w-xs">
-          <label className="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1.5">{t("selectHotel")}</label>
-          <select
-            value={selectedHotelId}
-            onChange={(e) => setSelectedHotelId(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-400/15"
-          >
-            {myHotels.map((h) => (
-              <option key={h.id} value={h.id}>{h.quarter_name}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div className="mb-6 flex flex-wrap items-end gap-4">
+        {myHotels.length > 1 && (
+          <div className="w-full max-w-xs">
+            <label className="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1.5">{t("selectHotel")}</label>
+            <select
+              value={selectedHotelId}
+              onChange={(e) => handleSelectHotel(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-400/15"
+            >
+              {myHotels.map((h) => (
+                <option key={h.id} value={h.id}>{h.name ? `${h.name} (${h.quarter_name})` : h.quarter_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <form onSubmit={handleSaveHotelName} className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1.5">{t("hotelNameLabel")}</label>
+            <input
+              value={hotelNameDraft}
+              onChange={(e) => setHotelNameDraft(e.target.value)}
+              placeholder={t("hotelNamePlaceholder")}
+              maxLength={200}
+              className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-amber-400 focus:outline-none"
+            />
+          </div>
+          <Button type="submit" disabled={nameSaving || !hotelNameDraft.trim()}>
+            {nameSaving ? t("savingHotelName") : t("saveHotelName")}
+          </Button>
+          {nameMessage && <span className="text-xs font-semibold text-emerald-700">{nameMessage}</span>}
+        </form>
+      </div>
 
       {dashboardLoading || !dashboard ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

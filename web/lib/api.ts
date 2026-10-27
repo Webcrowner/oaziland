@@ -254,7 +254,7 @@ export interface MediaUploadResult {
 const UPLOAD_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const UPLOAD_VIDEO_TYPES = ["video/mp4", "video/quicktime"];
 const UPLOAD_IMAGE_LIMIT_MB = 10;
-const UPLOAD_VIDEO_LIMIT_MB = 100;
+const UPLOAD_VIDEO_LIMIT_MB = 500;
 
 export type MediaFileProblem = { code: "unsupported" } | { code: "tooLarge"; sizeMb: number; limitMb: number };
 
@@ -370,6 +370,14 @@ export async function setNearbyFacilities(propertyType: string, propertyId: stri
   return res.json();
 }
 
+export const MARKETPLACE_CONDITION_TARGETS = {
+  warehouses: "marketplace.WarehouseListing",
+  stores: "marketplace.StoreListing",
+  businesses: "marketplace.BusinessListing",
+  cars: "marketplace.CarListing",
+  goods: "marketplace.GoodsListing",
+} as const;
+
 export interface ListingConditionItem {
   id: string;
   structured_conditions: Record<string, unknown>;
@@ -391,8 +399,16 @@ export async function attachListingCondition(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || "Could not set listing conditions");
-  return res.json();
+  // 204: posting empty conditions clears the listing's existing ones.
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const nested = Object.values(data.structured_conditions ?? {}).flat()[0];
+    const firstFieldError = Object.values(data).flat()[0];
+    const message = data.detail ?? (typeof nested === "string" ? nested : typeof firstFieldError === "string" ? firstFieldError : null);
+    throw new Error(message || "Could not set listing conditions");
+  }
+  return data;
 }
 
 export interface HouseCreatePayload {
@@ -770,6 +786,17 @@ export async function getHotelFinancialDashboard(hotelId: string, accessToken: s
   });
   if (!res.ok) throw new Error((await res.json()).detail || `Hotel financial dashboard fetch failed: ${res.status}`);
   return res.json();
+}
+
+export async function setHotelName(hotelId: string, name: string, accessToken: string): Promise<Hotel> {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/${hotelId}/set-name/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not update hotel name");
+  return data;
 }
 
 export async function createHotel(
@@ -1790,10 +1817,31 @@ export interface TrainingProgram {
   provider_name: string;
   price_xaf: string | null;
   issues_certification: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  location: string;
+  lesson_count: number;
 }
 
-export async function listTrainings(): Promise<{ count: number; results: TrainingProgram[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/trainings/`, { cache: "no-store" });
+export interface TrainingFilters {
+  category?: string;
+  q?: string;
+  free?: boolean;
+  certificate?: boolean;
+  page?: number;
+}
+
+export async function listTrainings(
+  filters: TrainingFilters = {},
+): Promise<{ count: number; next: string | null; previous: string | null; results: TrainingProgram[] }> {
+  const params = new URLSearchParams();
+  if (filters.category) params.set("category", filters.category);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.free) params.set("free", "true");
+  if (filters.certificate) params.set("certificate", "true");
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const query = params.toString();
+  const res = await fetch(`${API_BASE_URL}/api/trainings/${query ? `?${query}` : ""}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Training fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1810,6 +1858,7 @@ export interface TrainingEnrollmentItem {
   id: string;
   program: string;
   status: "ENROLLED" | "IN_PROGRESS" | "COMPLETED" | "DROPPED";
+  progress?: { total: number; done: number; percent: number };
   enrolled_at: string;
   completed_at: string | null;
   certificate_issued_at: string | null;
@@ -1849,6 +1898,224 @@ export async function completeTraining(enrollmentId: string, accessToken: string
   if (!res.ok) throw new Error("Could not mark this training as completed");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Courses (Coursera-style): learner player + staff authoring/supervision.
+// ---------------------------------------------------------------------------
+export type LessonKind = "TEXT" | "VIDEO" | "PDF" | "QUIZ" | "ASSIGNMENT";
+
+export type SubmissionStatus = "SUBMITTED" | "APPROVED" | "CHANGES_REQUESTED";
+
+export interface CourseSubmissionInfo {
+  status: SubmissionStatus;
+  feedback: string;
+  submitted_at: string;
+}
+
+export interface CourseOutlineQuestion {
+  id: string;
+  text: string;
+  multiple: boolean;
+  choices: { id: string; text: string }[];
+}
+
+export interface CourseOutlineLesson {
+  id: string;
+  title: string;
+  kind: LessonKind;
+  content_text: string;
+  video_url: string;
+  video_file_url: string;
+  pdf_url: string;
+  completed: boolean;
+  submission?: CourseSubmissionInfo | null;
+  pass_mark_percent?: number;
+  best_score_percent?: number | null;
+  questions?: CourseOutlineQuestion[];
+}
+
+export interface CourseProgress {
+  total: number;
+  done: number;
+  percent: number;
+}
+
+export interface CourseOutline {
+  program: { id: string; title: string };
+  status: TrainingEnrollmentItem["status"];
+  certificate_issued_at: string | null;
+  progress: CourseProgress;
+  modules: { id: string; title: string; lessons: CourseOutlineLesson[] }[];
+}
+
+export interface QuizResult {
+  score_percent: number;
+  passed: boolean;
+  pass_mark_percent: number;
+  status: TrainingEnrollmentItem["status"];
+  progress: CourseProgress;
+  results: { question: string; correct: boolean; correct_choices: string[]; explanation: string }[];
+}
+
+async function courseRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+  const isForm = init.body instanceof FormData;
+  const res = await fetchWithAutoRefresh(
+    `${API_BASE_URL}/api${path}`,
+    { ...init, headers: { ...(isForm || !init.body ? {} : { "Content-Type": "application/json" }), ...init.headers } },
+    token,
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const detail = body?.detail ?? (body && typeof body === "object" ? Object.values(body).flat().join(" ") : "");
+    throw new Error(detail || `Request failed (${res.status})`);
+  }
+  return res.status === 204 ? (undefined as T) : res.json();
+}
+
+export const getCourseOutline = (enrollmentId: string, token: string) =>
+  courseRequest<CourseOutline>(`/my-enrollments/${enrollmentId}/course/`, token);
+export const completeCourseLesson = (enrollmentId: string, lessonId: string, token: string) =>
+  courseRequest<{ status: string; progress: CourseProgress }>(`/my-enrollments/${enrollmentId}/lessons/${lessonId}/complete/`, token, { method: "POST" });
+export const submitCourseQuiz = (enrollmentId: string, lessonId: string, answers: Record<string, string[]>, token: string) =>
+  courseRequest<QuizResult>(`/my-enrollments/${enrollmentId}/quizzes/${lessonId}/submit/`, token, { method: "POST", body: JSON.stringify({ answers }) });
+
+export const submitCourseAssignment = (enrollmentId: string, lessonId: string, file: File, token: string) => {
+  const form = new FormData();
+  form.append("file", file);
+  return courseRequest<{ status: SubmissionStatus }>(`/my-enrollments/${enrollmentId}/assignments/${lessonId}/submit/`, token, { method: "POST", body: form });
+};
+
+// Submissions are private: the PDF is fetched with the user's token and shown from a temporary blob URL.
+// The tab is opened synchronously (inside the click) so popup blockers allow it, then pointed at the blob.
+export async function openPrivatePdf(path: string, token: string): Promise<void> {
+  const tab = window.open("", "_blank");
+  if (tab) tab.opener = null;
+  try {
+    const res = await fetchWithAutoRefresh(`${API_BASE_URL}/api${path}`, {}, token);
+    if (!res.ok) throw new Error(`Could not open the file (${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    if (tab) tab.location.href = url;
+    else window.location.assign(url);
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
+}
+export const openMySubmission = (enrollmentId: string, lessonId: string, token: string) =>
+  openPrivatePdf(`/my-enrollments/${enrollmentId}/assignments/${lessonId}/file/`, token);
+
+export interface CourseSubmissionRow {
+  id: string;
+  lesson: string;
+  lesson_title: string;
+  student_name: string;
+  username: string;
+  status: SubmissionStatus;
+  feedback: string;
+  submitted_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
+export const listCourseSubmissions = (courseId: string, token: string) =>
+  courseRequest<CourseSubmissionRow[]>(`/manage/courses/${courseId}/submissions/`, token);
+export const openCourseSubmission = (courseId: string, submissionId: string, token: string) =>
+  openPrivatePdf(`/manage/courses/${courseId}/submissions/${submissionId}/file/`, token);
+export const reviewCourseSubmission = (courseId: string, submissionId: string, decision: "APPROVED" | "CHANGES_REQUESTED", feedback: string, token: string) =>
+  courseRequest<{ status: SubmissionStatus }>(`/manage/courses/${courseId}/submissions/${submissionId}/review/`, token, { method: "POST", body: JSON.stringify({ decision, feedback }) });
+
+export interface ManageChoice { id?: string; text: string; is_correct: boolean }
+export interface ManageQuestion { id: string; lesson: string; text: string; explanation: string; position: number; choices: ManageChoice[] }
+export interface ManageLesson {
+  id: string;
+  module: string;
+  title: string;
+  kind: LessonKind;
+  position: number;
+  content_text: string;
+  video_url: string;
+  video_file_url: string;
+  pdf_url: string;
+  pass_mark_percent: number;
+  questions: ManageQuestion[];
+}
+export interface ManageModule { id: string; program: string; title: string; position: number; lessons: ManageLesson[] }
+export interface ManageCourse {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  price_xaf: string | null;
+  issues_certification: boolean;
+  is_published: boolean;
+  modules: ManageModule[];
+  my_role: "ADMIN" | "LECTURER" | "SUPERVISOR" | null;
+  learner_count: number;
+}
+export interface CourseStaffMember { id: number; user: string; user_name: string; username: string; phone: string; role: "LECTURER" | "SUPERVISOR" }
+export interface CourseLearnerRow {
+  enrollment: string;
+  student_name: string;
+  username: string;
+  phone: string;
+  status: TrainingEnrollmentItem["status"];
+  enrolled_at: string;
+  completed_at: string | null;
+  certificate_issued_at: string | null;
+  lessons_done: number;
+  lessons_total: number;
+  progress_percent: number;
+  quizzes: { lesson: string; lesson_title: string; attempts: number; best_score_percent: number; latest_score_percent: number; passed: boolean }[];
+}
+
+export const listManagedCourses = (token: string) =>
+  courseRequest<{ count: number; results: ManageCourse[] }>("/manage/courses/", token);
+export const getManagedCourse = (id: string, token: string) => courseRequest<ManageCourse>(`/manage/courses/${id}/`, token);
+export const createManagedCourse = (payload: Partial<ManageCourse>, token: string) =>
+  courseRequest<ManageCourse>("/manage/courses/", token, { method: "POST", body: JSON.stringify(payload) });
+export const updateManagedCourse = (id: string, payload: Partial<ManageCourse>, token: string) =>
+  courseRequest<ManageCourse>(`/manage/courses/${id}/`, token, { method: "PATCH", body: JSON.stringify(payload) });
+export const deleteManagedCourse = (id: string, token: string) =>
+  courseRequest<void>(`/manage/courses/${id}/`, token, { method: "DELETE" });
+
+export const listCourseStaff = (id: string, token: string) => courseRequest<CourseStaffMember[]>(`/manage/courses/${id}/staff/`, token);
+export const assignCourseStaff = (id: string, identifier: string, role: "LECTURER" | "SUPERVISOR", token: string) =>
+  courseRequest<CourseStaffMember>(`/manage/courses/${id}/staff/`, token, { method: "POST", body: JSON.stringify({ identifier, role }) });
+export const removeCourseStaff = (id: string, staffId: number, token: string) =>
+  courseRequest<void>(`/manage/courses/${id}/staff/${staffId}/`, token, { method: "DELETE" });
+export const listCourseLearners = (id: string, token: string) => courseRequest<CourseLearnerRow[]>(`/manage/courses/${id}/learners/`, token);
+
+export const createCourseModule = (program: string, title: string, token: string) =>
+  courseRequest<ManageModule>("/manage/modules/", token, { method: "POST", body: JSON.stringify({ program, title }) });
+export const updateCourseModule = (id: string, payload: Partial<ManageModule>, token: string) =>
+  courseRequest<ManageModule>(`/manage/modules/${id}/`, token, { method: "PATCH", body: JSON.stringify(payload) });
+export const deleteCourseModule = (id: string, token: string) => courseRequest<void>(`/manage/modules/${id}/`, token, { method: "DELETE" });
+
+export type LessonInput = Partial<Omit<ManageLesson, "questions" | "pdf_url" | "video_file_url">> & {
+  pdf_file?: File | null;
+  remove_pdf?: boolean;
+  video_file?: File | null;
+  remove_video_file?: boolean;
+};
+function lessonBody(input: LessonInput): FormData {
+  const form = new FormData();
+  Object.entries(input).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) form.append(key, value instanceof File ? value : String(value));
+  });
+  return form;
+}
+export const createCourseLesson = (input: LessonInput, token: string) =>
+  courseRequest<ManageLesson>("/manage/lessons/", token, { method: "POST", body: lessonBody(input) });
+export const updateCourseLesson = (id: string, input: LessonInput, token: string) =>
+  courseRequest<ManageLesson>(`/manage/lessons/${id}/`, token, { method: "PATCH", body: lessonBody(input) });
+export const deleteCourseLesson = (id: string, token: string) => courseRequest<void>(`/manage/lessons/${id}/`, token, { method: "DELETE" });
+
+export type QuestionInput = { lesson?: string; text: string; explanation: string; choices: ManageChoice[] };
+export const createCourseQuestion = (input: QuestionInput, token: string) =>
+  courseRequest<ManageQuestion>("/manage/questions/", token, { method: "POST", body: JSON.stringify(input) });
+export const updateCourseQuestion = (id: string, input: QuestionInput, token: string) =>
+  courseRequest<ManageQuestion>(`/manage/questions/${id}/`, token, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteCourseQuestion = (id: string, token: string) => courseRequest<void>(`/manage/questions/${id}/`, token, { method: "DELETE" });
 
 // ---------------------------------------------------------------------------
 // Job posting management (poster side) & WhatsApp share.
@@ -2526,12 +2793,14 @@ export interface SocialPost {
   id: string;
   author: string;
   author_name: string;
+  is_mine: boolean;
+  my_reaction: string | null;
   is_verified_creator: boolean;
   poster_role: string;
   post_type: string;
   caption: string;
   tag_names: string[];
-  media: { id: string; media_type: string; file_url: string }[];
+  media: { id: string; media_type: "PHOTO" | "VIDEO" | "AUDIO" | string; file_url: string }[];
   linked_listing_id: string | null;
   status: string;
   published_at: string | null;
@@ -2541,42 +2810,179 @@ export interface SocialPost {
   is_sponsored: boolean;
 }
 
-export async function listFeedPosts(accessToken?: string): Promise<{ count: number; results: SocialPost[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-    cache: "no-store",
+export interface SocialPostPage {
+  count: number;
+  next: string | null;
+  results: SocialPost[];
+}
+
+async function fetchPostPage(path: string, page: number, accessToken?: string): Promise<SocialPostPage> {
+  const separator = path.includes("?") ? "&" : "?";
+  const url = `${API_BASE_URL}${path}${page > 1 ? `${separator}page=${page}` : ""}`;
+  let res = await fetch(url, { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}, cache: "no-store" });
+  // A dead session must not take down a public feed: retry as an anonymous visitor.
+  if (res.status === 401 && accessToken) res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load posts");
+  const data = await res.json();
+  return { count: data.count ?? 0, next: data.next ?? null, results: data.results ?? [] };
+}
+
+export function listFeedPosts(accessToken?: string, page = 1): Promise<SocialPostPage> {
+  return fetchPostPage("/api/posts/", page, accessToken);
+}
+
+export function listFollowingFeed(accessToken: string, page = 1): Promise<SocialPostPage> {
+  return fetchPostPage("/api/posts/following/", page, accessToken);
+}
+
+export function listMyPosts(accessToken: string, page = 1): Promise<SocialPostPage> {
+  return fetchPostPage("/api/posts/mine/", page, accessToken);
+}
+
+export function listTopicFeed(tag: string, accessToken?: string, page = 1): Promise<SocialPostPage> {
+  return fetchPostPage(`/api/posts/topic/?tag=${encodeURIComponent(tag)}`, page, accessToken);
+}
+
+export function searchPosts(query: string, accessToken?: string, page = 1): Promise<SocialPostPage> {
+  return fetchPostPage(`/api/posts/search/?q=${encodeURIComponent(query)}`, page, accessToken);
+}
+
+// ---------------------------------------------------------------------------
+// Video feed (TikTok-style reels)
+// ---------------------------------------------------------------------------
+export interface ReelListingPreview {
+  id: string;
+  listing_type: "RENT" | "SALE" | string;
+  property_type: string;
+  price_xaf: string;
+  quarter: string;
+  cover_url: string | null;
+  is_available: boolean;
+}
+
+export interface ReelPost extends SocialPost {
+  author_username: string;
+  author_avatar: string | null;
+  is_following_author: boolean;
+  is_saved: boolean;
+  share_count: number;
+  view_count: number;
+  listing_preview: ReelListingPreview | null;
+}
+
+export interface ReelPage {
+  count: number;
+  next: string | null;
+  results: ReelPost[];
+}
+
+export type ReelScope = "for_you" | "following" | "trending" | "saved";
+export type ReelKind = "all" | "rent" | "sale" | "property" | "general";
+
+export interface ReelQuery {
+  scope?: ReelScope;
+  q?: string;
+  tag?: string;
+  kind?: ReelKind;
+  listing?: string;
+  author?: string;
+}
+
+const bearer = (accessToken?: string): Record<string, string> => (accessToken ? { Authorization: "Bearer " + accessToken } : {});
+
+export async function listReels(query: ReelQuery, accessToken?: string, page = 1): Promise<ReelPage> {
+  const params = new URLSearchParams();
+  if (query.scope) params.set("scope", query.scope);
+  if (query.q) params.set("q", query.q);
+  if (query.tag) params.set("tag", query.tag);
+  if (query.kind && query.kind !== "all") params.set("kind", query.kind);
+  if (query.listing) params.set("listing", query.listing);
+  if (query.author) params.set("author", query.author);
+  if (page > 1) params.set("page", String(page));
+  const url = `${API_BASE_URL}/api/posts/reels/?${params.toString()}`;
+  let res = await fetch(url, { headers: bearer(accessToken), cache: "no-store" });
+  // A dead session must not take down a public feed: retry as an anonymous visitor.
+  if (res.status === 401 && accessToken) res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load videos");
+  const data = await res.json();
+  return { count: data.count ?? 0, next: data.next ?? null, results: data.results ?? [] };
+}
+
+export async function getReel(postId: string, accessToken?: string): Promise<ReelPost> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/reel/`, { headers: bearer(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load video");
+  return res.json();
+}
+
+export async function listTrendingVideoTags(): Promise<{ name: string; count: number }[]> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/trending-tags/`, { cache: "no-store" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function recordReelView(postId: string, accessToken?: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/api/posts/${postId}/view/`, { method: "POST", headers: bearer(accessToken) }).catch(() => undefined);
+}
+
+export async function toggleSaveReel(postId: string, accessToken: string): Promise<{ saved: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/save/`, { method: "POST", headers: bearer(accessToken) });
+  if (!res.ok) throw new Error("Could not save video");
+  return res.json();
+}
+
+export async function recordReelShare(postId: string, channel: "WHATSAPP" | "FACEBOOK" | "SMS" | "IN_APP", accessToken: string): Promise<{ share_count: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/share/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...bearer(accessToken) },
+    body: JSON.stringify({ channel }),
   });
-  if (!res.ok) throw new Error("Could not fetch feed");
+  if (!res.ok) throw new Error("Could not record share");
   return res.json();
 }
 
-export async function listFollowingFeed(accessToken: string): Promise<{ count: number; results: SocialPost[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/following/`, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!res.ok) throw new Error("Could not fetch following feed");
-  return res.json();
-}
+export type CreatePostErrorKind = "moderation" | "validation" | "network";
 
-export async function searchPosts(query: string): Promise<{ count: number; results: SocialPost[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/search/?q=${encodeURIComponent(query)}`);
-  if (!res.ok) throw new Error("Could not search posts");
-  return res.json();
+export class CreatePostError extends Error {
+  kind: CreatePostErrorKind;
+  constructor(message: string, kind: CreatePostErrorKind) {
+    super(message);
+    this.kind = kind;
+  }
 }
 
 export async function createPost(
-  payload: { caption: string; tags?: string[]; linked_listing_id?: string; media_urls?: string[] },
+  payload: { caption: string; post_type?: "STANDARD" | "REEL"; tags?: string[]; linked_listing_id?: string; media_urls?: string[] },
   accessToken: string
 ): Promise<{ id: string } & Record<string, unknown>> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Could not create post");
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/posts/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new CreatePostError("Could not reach the server", "network");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // A `detail` on a 400 is the moderation gate; DRF field errors come back keyed by field instead.
+    if (res.status === 400 && typeof data.detail === "string") throw new CreatePostError(data.detail, "moderation");
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new CreatePostError(typeof firstFieldError === "string" ? firstFieldError : "Could not create post", "validation");
+  }
   return data;
 }
 
-export async function reactToPost(postId: string, emoji: string, accessToken: string) {
+export async function deletePost(postId: string, accessToken: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not delete post");
+}
+
+export async function reactToPost(postId: string, emoji: string, accessToken: string): Promise<SocialPost> {
   const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/react/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
@@ -2586,22 +2992,45 @@ export async function reactToPost(postId: string, emoji: string, accessToken: st
   return res.json();
 }
 
+export async function removePostReaction(postId: string, accessToken: string): Promise<SocialPost> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/remove-reaction/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not remove reaction");
+  return res.json();
+}
+
+export type PostReportReason = "INAPPROPRIATE_CONTENT" | "SCAM_SUSPECTED" | "HARASSMENT" | "OTHER";
+
+export async function reportPost(postId: string, reason: PostReportReason, accessToken: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ target_post: postId, reason }),
+  });
+  if (!res.ok) throw new Error("Could not file report");
+}
+
 export interface PostComment {
   id: string;
   post: string;
   author: string;
   author_name: string;
+  is_mine: boolean;
   text: string;
   created_at: string;
 }
 
-export async function getPostComments(postId: string): Promise<PostComment[]> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/comments/`);
+export async function getPostComments(postId: string, accessToken?: string): Promise<PostComment[]> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/comments/`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
   if (!res.ok) throw new Error("Could not fetch comments");
   return res.json();
 }
 
-export async function addPostComment(postId: string, text: string, accessToken: string) {
+export async function addPostComment(postId: string, text: string, accessToken: string): Promise<PostComment> {
   const res = await fetch(`${API_BASE_URL}/api/comments/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
@@ -2609,6 +3038,14 @@ export async function addPostComment(postId: string, text: string, accessToken: 
   });
   if (!res.ok) throw new Error("Could not add comment");
   return res.json();
+}
+
+export async function deletePostComment(commentId: string, accessToken: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/comments/${commentId}/`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Could not delete comment");
 }
 
 export async function getMyCreatorPremiumStatus(accessToken: string): Promise<{ is_premium: boolean }> {
@@ -2907,6 +3344,7 @@ interface BaseMarketplaceListing {
   description: string;
   price_basis: string;
   price_xaf: string;
+  security_deposit_xaf: string;
   quarter: string | null;
   quarter_name: string | null;
   latitude: string | null;
@@ -2941,7 +3379,25 @@ export interface CarListing extends BaseMarketplaceListing {
   vehicle_spec: VehicleSpec;
 }
 
-const MARKETPLACE_ENDPOINTS = { warehouses: "warehouses", stores: "stores", businesses: "businesses", cars: "cars" } as const;
+export const GOODS_CATEGORIES = [
+  "ELECTRONICS", "PHONES", "FASHION", "HOME", "APPLIANCES", "FOOD", "BUILDING", "TOOLS", "VEHICLE_PARTS", "BABY", "SPORTS", "OTHER",
+] as const;
+export const GOODS_CONDITIONS = ["NEW", "LIKE_NEW", "USED"] as const;
+export type GoodsCategory = (typeof GOODS_CATEGORIES)[number];
+export type GoodsCondition = (typeof GOODS_CONDITIONS)[number];
+
+export interface GoodsListing extends BaseMarketplaceListing {
+  item_category: GoodsCategory;
+  condition: GoodsCondition;
+  quantity: number;
+}
+
+/** The fields every category's browse card needs, whichever category the listing belongs to. */
+export type AnyMarketplaceListing = BaseMarketplaceListing & Partial<WarehouseListing> & Partial<StoreListing> & Partial<BusinessListing> & Partial<CarListing> & Partial<GoodsListing>;
+
+export const MARKETPLACE_CATEGORIES = ["goods", "cars", "stores", "warehouses", "businesses"] as const;
+
+const MARKETPLACE_ENDPOINTS = { warehouses: "warehouses", stores: "stores", businesses: "businesses", cars: "cars", goods: "goods" } as const;
 export type MarketplaceCategory = keyof typeof MARKETPLACE_ENDPOINTS;
 
 export async function listMarketplaceListings<T>(category: MarketplaceCategory, filters?: Record<string, string>): Promise<{ count: number; results: T[] }> {
@@ -3015,7 +3471,7 @@ export async function deleteMarketplaceListing(category: MarketplaceCategory, id
   if (!res.ok) throw new Error("Could not delete the listing");
 }
 
-export type MarketplaceOrderStatus = "PAID" | "HANDED_OVER" | "COMPLETED" | "CANCELLED" | "DISPUTED";
+export type MarketplaceOrderStatus = "PAYMENT_PENDING" | "PAID" | "HANDED_OVER" | "COMPLETED" | "CANCELLED" | "DISPUTED";
 
 export interface MarketplaceOrderItem {
   id: string;
@@ -3033,6 +3489,13 @@ export interface MarketplaceOrderItem {
   created_at: string;
   auto_release_at: string | null;
   seller_deadline: string | null;
+  deposit_xaf: string;
+  deposit_status: "NONE" | "HELD" | "CLAIMED" | "RETURNED" | "FORFEITED";
+  deposit_settled_at: string | null;
+  deposit_return_by: string | null;
+  total_xaf: string;
+  rental_starts_on: string | null;
+  rental_ends_on: string | null;
 }
 
 async function marketplaceOrderResponse(res: Response, fallback: string): Promise<MarketplaceOrderItem> {
@@ -3059,11 +3522,13 @@ export async function listMyMarketplaceOrders(role: "buying" | "selling", access
   return res.json();
 }
 
-export async function marketplaceOrderAction(orderId: string, action: "hand-over" | "confirm" | "cancel" | "decline" | "dispute", accessToken: string, reason?: string) {
+export type MarketplaceOrderActionName = "hand-over" | "confirm" | "cancel" | "decline" | "dispute" | "return-deposit" | "claim-deposit";
+
+export async function marketplaceOrderAction(orderId: string, action: MarketplaceOrderActionName, accessToken: string, reason?: string) {
   const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/${action}/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+    body: JSON.stringify(action === "dispute" || action === "claim-deposit" ? { reason } : {}),
   });
   return marketplaceOrderResponse(res, "That action could not be completed");
 }
@@ -3531,7 +3996,51 @@ export interface DriverProfileItem {
   user_name: string;
   license_number: string;
   is_verified: boolean;
+  is_online?: boolean;
+  last_seen_at?: string | null;
   vehicles: VehicleItem[];
+}
+
+export async function setDriverLocation(
+  payload: { latitude?: number; longitude?: number; is_online?: boolean },
+  accessToken: string,
+): Promise<DriverProfileItem> {
+  const res = await fetch(`${API_BASE_URL}/api/my-driver-profile/location/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not update your location");
+  return data;
+}
+
+export type OpenRideItem = RideBookingItem & { pickup_distance_km: string | null };
+
+export async function listOpenRides(
+  accessToken: string,
+  radiusKm?: number,
+): Promise<{ count: number; driver_located: boolean; radius_km: number; results: OpenRideItem[] }> {
+  const query = radiusKm ? `?radius_km=${radiusKm}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/rides/open/${query}`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load open requests");
+  return res.json();
+}
+
+export interface DriverTracking {
+  located: boolean;
+  latitude: string | null;
+  longitude: string | null;
+  updated_at: string | null;
+  heading_to: "pickup" | "dropoff";
+  distance_km: string | null;
+  eta_minutes: number | null;
+}
+
+export async function getRideDriverLocation(rideId: string, accessToken: string): Promise<DriverTracking> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/driver-location/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load the driver's position");
+  return res.json();
 }
 
 export async function getMyDriverProfile(accessToken: string): Promise<DriverProfileItem | null> {
@@ -3612,6 +4121,12 @@ export const releaseRide = (rideId: string, accessToken: string) => postRideActi
 export interface EmergencyContact {
   name: string;
   phone: string;
+  sms_delivery_live?: boolean;
+}
+
+export interface EmergencyContactState {
+  contact: EmergencyContact | null;
+  smsDeliveryLive: boolean;
 }
 
 export async function getMyEmergencyContact(accessToken: string): Promise<EmergencyContact | null> {
@@ -3621,11 +4136,21 @@ export async function getMyEmergencyContact(accessToken: string): Promise<Emerge
   return res.json();
 }
 
+export async function getMyEmergencyContactState(accessToken: string): Promise<EmergencyContactState> {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404) {
+    return { contact: null, smsDeliveryLive: data.sms_delivery_live !== false };
+  }
+  if (!res.ok) throw new Error("Could not load your emergency contact");
+  return { contact: data, smsDeliveryLive: data.sms_delivery_live !== false };
+}
+
 export async function saveMyEmergencyContact(contact: EmergencyContact, accessToken: string): Promise<EmergencyContact> {
   const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify(contact),
+    body: JSON.stringify({ name: contact.name, phone: contact.phone }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -3640,11 +4165,17 @@ export async function deleteMyEmergencyContact(accessToken: string) {
   if (!res.ok) throw new Error("Could not remove the contact");
 }
 
+export interface SosEmergencyContactResult {
+  name: string;
+  phone: string;
+  status: "sent" | "not_delivered" | "failed";
+}
+
 export async function raiseRideSos(
   rideId: string,
   accessToken: string,
   coords?: { latitude: number; longitude: number },
-): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact_alerted: boolean }> {
+): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact: SosEmergencyContactResult | null }> {
   const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/sos/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },

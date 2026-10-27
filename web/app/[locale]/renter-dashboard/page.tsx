@@ -22,7 +22,7 @@ export default function RenterDashboardPage() {
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
     if (!token) {
-      setStatus("signedOut");
+      void Promise.resolve().then(() => setStatus("signedOut"));
       return;
     }
 

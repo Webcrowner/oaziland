@@ -17,9 +17,11 @@ export default function AgentShareButton({ userId, customUrl, name }: AgentShare
   useEffect(() => {
     if (typeof window !== "undefined") {
       if (customUrl) {
-        setUrl(customUrl.startsWith("http") ? customUrl : `${window.location.origin}${customUrl}`);
+        const nextUrl = customUrl.startsWith("http") ? customUrl : `${window.location.origin}${customUrl}`;
+        void Promise.resolve().then(() => setUrl(nextUrl));
       } else if (userId) {
-        setUrl(`${window.location.origin}/user/${userId}`);
+        const nextUrl = `${window.location.origin}/user/${userId}`;
+        void Promise.resolve().then(() => setUrl(nextUrl));
       }
     }
   }, [userId, customUrl]);

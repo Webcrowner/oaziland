@@ -5,10 +5,12 @@ import { Link } from "@/i18n/navigation";
 import type { Listing } from "@/lib/api";
 import PropertyCard from "@/components/PropertyCard";
 import { IconSparkles } from "@/components/Icons";
+import LoadError from "@/components/ui/LoadError";
 
 /** Featured live listings, filterable by the property types that actually exist. */
-export default function FeaturedListings({ liveListings }: { liveListings: Listing[] }) {
+export default function FeaturedListings({ liveListings, loadFailed = false }: { liveListings: Listing[]; loadFailed?: boolean }) {
   const t = useTranslations("HomePage");
+  const search = useTranslations("SearchPage");
   const [filterType, setFilterType] = useState("ALL");
 
   const types = useMemo(() => Array.from(new Set(liveListings.map((l) => l.property_asset.type))), [liveListings]);
@@ -34,7 +36,7 @@ export default function FeaturedListings({ liveListings }: { liveListings: Listi
           </Link>
         </div>
 
-        {liveListings.length === 0 ? (
+        {loadFailed ? <LoadError message={search("loadFailed")} /> : liveListings.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
             <h3 className="font-bold text-slate-900 mb-1">{t("featuredEmptyTitle")}</h3>
             <p className="text-sm text-slate-500 mb-5">{t("featuredEmptyDesc")}</p>

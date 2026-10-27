@@ -67,6 +67,26 @@ def test_the_lister_can_edit_change_status_and_delete(parties):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("field,value", [
+    ("price_xaf", "0"),
+    ("price_xaf", "-1"),
+    ("size_sqm", "0"),
+    ("size_sqm", "-1"),
+])
+def test_listing_rejects_non_positive_prices_and_sizes(quarter, field, value):
+    owner = _verify(User.objects.create(username=f"invalid_{field}_{value}", phone=f"+2376992{abs(hash((field, value))) % 1000000:06d}"))
+    payload = {
+        "title": "Invalid warehouse", "price_basis": "SALE", "price_xaf": "1000",
+        "quarter": str(quarter.id), "size_sqm": "10", field: value,
+    }
+
+    response = _auth_client(owner).post("/api/warehouses/", payload, format="json")
+
+    assert response.status_code == 400
+    assert field in response.data
+
+
+@pytest.mark.django_db
 def test_an_admin_can_moderate_a_listing(parties):
     _, _, listing_id = parties
     admin = User.objects.create(username="own_admin", phone="+237699100103")
@@ -103,6 +123,40 @@ def test_editing_a_car_updates_its_vehicle_details(quarter):
     response = client.patch(f"/api/cars/{created.data['id']}/", {"vehicle_spec": {"make": "Toyota", "model": "Corolla", "year": 2012, "mileage_km": 160000}}, format="json")
     assert response.status_code == 200, response.data
     assert CarListing.objects.get(pk=created.data["id"]).vehicle_spec.mileage_km == 160000
+
+
+@pytest.mark.django_db
+def test_the_full_edit_form_payload_can_change_and_clear_every_field(quarter):
+    from marketplace.models import BusinessListing
+    owner = _verify(User.objects.create(username="own_fulledit", phone="+237699100105"))
+    client = _auth_client(owner)
+
+    car = client.post("/api/cars/", {
+        "title": "Corolla", "price_basis": "SALE", "price_xaf": "4000000", "quarter": str(quarter.id),
+        "vehicle_spec": {"make": "Toyota", "model": "Corolla", "year": 2012, "mileage_km": 150000, "engine_size_cc": 1600},
+    }, format="json")
+    assert car.status_code == 201, car.data
+    edited = client.patch(f"/api/cars/{car.data['id']}/", {
+        "title": "Corolla LE", "description": "Clean", "price_xaf": "3900000", "price_basis": "RENT_MONTHLY", "quarter": None,
+        "vehicle_spec": {"make": "Toyota", "model": "Corolla", "year": 2013, "mileage_km": None, "engine_size_cc": None},
+    }, format="json")
+    assert edited.status_code == 200, edited.data
+    saved = CarListing.objects.get(pk=car.data["id"])
+    assert (saved.price_basis, saved.quarter_id, saved.vehicle_spec.year) == ("RENT_MONTHLY", None, 2013)
+    assert saved.vehicle_spec.mileage_km is None and saved.vehicle_spec.engine_size_cc is None
+
+    business = client.post("/api/businesses/", {
+        "title": "Cafe", "price_basis": "SALE", "price_xaf": "9000000", "quarter": str(quarter.id),
+        "size_sqm": "40", "seating_capacity": 20, "annual_revenue_xaf": "5000000", "includes_goodwill": True,
+    }, format="json")
+    assert business.status_code == 201, business.data
+    cleared = client.patch(f"/api/businesses/{business.data['id']}/", {
+        "size_sqm": None, "seating_capacity": None, "annual_revenue_xaf": None, "includes_goodwill": False, "includes_inventory": True,
+    }, format="json")
+    assert cleared.status_code == 200, cleared.data
+    row = BusinessListing.objects.get(pk=business.data["id"])
+    assert (row.size_sqm, row.seating_capacity, row.annual_revenue_xaf) == (None, None, None)
+    assert (row.includes_goodwill, row.includes_inventory) == (False, True)
 
 
 @pytest.mark.django_db

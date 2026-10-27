@@ -52,7 +52,7 @@ export default function JoinHostelWaitlistButton({ hostelId }: { hostelId: strin
   }
 
   if (status === "joined") {
-    return <p className="text-[11px] font-semibold text-emerald-700">✓ On the waitlist — you'll be notified.</p>;
+    return <p className="text-[11px] font-semibold text-emerald-700">✓ On the waitlist — you&apos;ll be notified.</p>;
   }
 
   if (!open) {

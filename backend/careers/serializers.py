@@ -1,22 +1,40 @@
 from rest_framework import serializers
+from django.db.models import Count
 from .models import TrainingProgram, TrainingEnrollment, JobPosting, JobApplication
 
 
 class TrainingProgramSerializer(serializers.ModelSerializer):
     provider_name = serializers.CharField(source="provider.full_name", read_only=True)
+    lesson_count = serializers.SerializerMethodField()
+    starts_at = serializers.DateTimeField(source="event.starts_at", read_only=True, default=None)
+    ends_at = serializers.DateTimeField(source="event.ends_at", read_only=True, default=None)
+    location = serializers.CharField(source="event.location_description", read_only=True, default="")
 
     class Meta:
         model = TrainingProgram
-        fields = ["id", "title", "description", "category", "provider_name", "price_xaf", "issues_certification"]
+        fields = [
+            "id", "title", "description", "category", "provider_name", "price_xaf", "issues_certification",
+            "starts_at", "ends_at", "location", "lesson_count",
+        ]
+
+    def get_lesson_count(self, program) -> int:
+        count = getattr(program, "lesson_total", None)
+        return count if count is not None else program.modules.aggregate(n=Count("lessons"))["n"]
 
 
 class TrainingEnrollmentSerializer(serializers.ModelSerializer):
     program_detail = TrainingProgramSerializer(source="program", read_only=True)
+    progress = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingEnrollment
-        fields = ["id", "program", "program_detail", "status", "enrolled_at", "completed_at", "certificate_issued_at"]
+        fields = ["id", "program", "program_detail", "status", "progress", "enrolled_at", "completed_at", "certificate_issued_at"]
         read_only_fields = ["status", "enrolled_at", "completed_at", "certificate_issued_at"]
+
+    def get_progress(self, enrollment) -> dict:
+        from .course_services import course_progress
+
+        return course_progress(enrollment)
 
 
 class JobApplicationSerializer(serializers.ModelSerializer):

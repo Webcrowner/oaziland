@@ -88,11 +88,14 @@ export default function BookingCheckoutModal({
           roomTypeId || hotelObject.room_types[0]?.id;
         if (!activeRoomType) throw new Error("No room type configured for this hotel.");
 
+        const todayDate = new Date();
+        const tomorrowDate = new Date(todayDate);
+        tomorrowDate.setDate(todayDate.getDate() + 1);
         const res = await createReservation(
           {
             room_type: activeRoomType,
-            check_in: checkIn || new Date().toISOString().slice(0, 10),
-            check_out: checkOut || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+            check_in: checkIn || todayDate.toISOString().slice(0, 10),
+            check_out: checkOut || tomorrowDate.toISOString().slice(0, 10),
             adults: 1,
             special_requests: `Booked via Oaziland Instant Escrow Checkout - ${phoneNumber}`,
           },

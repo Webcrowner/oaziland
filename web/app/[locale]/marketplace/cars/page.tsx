@@ -15,6 +15,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import MediaUploader from "@/components/MediaUploader";
 import MediaThumbs from "@/components/MediaThumbs";
+import MarketplaceConditionsFields, { EMPTY_CONDITIONS, saveConditions, type ConditionsDraft } from "@/components/MarketplaceConditionsFields";
 import LocationCapture, { EMPTY_GPS, type GpsValue } from "@/components/LocationCapture";
 import ListerRoleBadge from "@/components/ListerRoleBadge";
 import WhatsAppShareButton from "@/components/WhatsAppShareButton";
@@ -35,17 +36,23 @@ const PRICE_BASIS_LABELS: Record<string, string> = {
  */
 export default function CarsMarketplacePage() {
   const t = useTranslations("MarketplaceCategoryPage");
+  const tc = useTranslations("MarketplaceConditions");
+  const [conditions, setConditions] = useState<ConditionsDraft>(EMPTY_CONDITIONS);
+  const [notice, setNotice] = useState("");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [showForm, setShowForm] = useState(false);
 
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [priceBasis, setPriceBasis] = useState("SALE");
   const [price, setPrice] = useState("");
+  const [deposit, setDeposit] = useState("");
   const [quarterId, setQuarterId] = useState("");
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
   const [year, setYear] = useState("");
   const [mileage, setMileage] = useState("");
+  const [engineSize, setEngineSize] = useState("");
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [gps, setGps] = useState<GpsValue>(EMPTY_GPS);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
@@ -57,6 +64,8 @@ export default function CarsMarketplacePage() {
 
   useEffect(() => {
     listQuarters().then(setQuarters).catch(() => {});
+    // The "Sell" page links here with ?post=1 to open the posting form straight away.
+    if (new URLSearchParams(window.location.search).has("post")) Promise.resolve().then(() => setShowForm(true));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -67,15 +76,22 @@ export default function CarsMarketplacePage() {
       return;
     }
     setSubmitStatus("submitting");
+    setNotice("");
     try {
       const listing = await createMarketplaceListing("cars", {
-        title, price_basis: priceBasis, price_xaf: price, quarter: quarterId || null,
+        title, description, price_basis: priceBasis, price_xaf: price, security_deposit_xaf: priceBasis === "SALE" ? "0" : deposit || "0", quarter: quarterId || null,
         latitude: gps.latitude, longitude: gps.longitude,
-        vehicle_spec: { make, model, year: Number(year), mileage_km: mileage ? Number(mileage) : null },
+        vehicle_spec: {
+          make, model, year: Number(year), mileage_km: mileage ? Number(mileage) : null,
+          engine_size_cc: engineSize ? Number(engineSize) : null,
+        },
       }, token);
       for (const m of media) await addMarketplaceMedia("cars", listing.id, m.url, m.media_type, token);
+      // The listing already exists at this point, so a conditions failure must not make the lister post it twice.
+      await saveConditions("cars", listing.id, conditions, token, true).catch(() => setNotice(tc("savedWithoutConditions")));
+      setConditions(EMPTY_CONDITIONS);
       setShowForm(false);
-      setTitle(""); setPrice(""); setMake(""); setModel(""); setYear(""); setMileage(""); setMedia([]); setGps(EMPTY_GPS);
+      setTitle(""); setDescription(""); setPrice(""); setDeposit(""); setMake(""); setModel(""); setYear(""); setMileage(""); setEngineSize(""); setMedia([]); setGps(EMPTY_GPS);
       setReloadKey((k) => k + 1);
     } catch {
       setErrorText(t("submitFailed"));
@@ -92,17 +108,24 @@ export default function CarsMarketplacePage() {
         action={<Button onClick={() => setShowForm(!showForm)}>{showForm ? t("cancel") : t("listACar")}</Button>}
       />
 
+      {notice && <p className="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800">{notice}</p>}
+
       {showForm && (
         <form onSubmit={handleSubmit} className="border border-gray-200 rounded-xl p-6 bg-white mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
           <input required placeholder={t("titlePlaceholder")} value={title} onChange={(e) => setTitle(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
+          <textarea rows={3} placeholder={t("listingDescriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
           <input required placeholder={t("makePlaceholder")} value={make} onChange={(e) => setMake(e.target.value)} className="border rounded-lg px-3 py-2" />
           <input required placeholder={t("modelPlaceholder")} value={model} onChange={(e) => setModel(e.target.value)} className="border rounded-lg px-3 py-2" />
-          <input required type="number" placeholder={t("yearPlaceholder")} value={year} onChange={(e) => setYear(e.target.value)} className="border rounded-lg px-3 py-2" />
-          <input type="number" placeholder={t("mileagePlaceholder")} value={mileage} onChange={(e) => setMileage(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input required type="number" min="1886" step="1" placeholder={t("yearPlaceholder")} value={year} onChange={(e) => setYear(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input type="number" min="0" step="1" placeholder={t("mileagePlaceholder")} value={mileage} onChange={(e) => setMileage(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input type="number" min="1" step="1" placeholder={t("engineSizePlaceholder")} value={engineSize} onChange={(e) => setEngineSize(e.target.value)} className="border rounded-lg px-3 py-2" />
           <select value={priceBasis} onChange={(e) => setPriceBasis(e.target.value)} className="border rounded-lg px-3 py-2">
             {Object.entries(PRICE_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <input required type="number" placeholder={t("pricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input required type="number" min="0.01" step="0.01" placeholder={t("pricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
+          {priceBasis !== "SALE" && (
+            <input type="number" min="0" step="0.01" placeholder={t("depositPlaceholder")} value={deposit} onChange={(e) => setDeposit(e.target.value)} className="border rounded-lg px-3 py-2" />
+          )}
           <select value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" required>
             <option value="" disabled>{t("chooseNeighborhood")}</option>
             <QuarterOptions quarters={quarters} />
@@ -114,12 +137,13 @@ export default function CarsMarketplacePage() {
             {media.length > 0 && <p className="text-xs text-gray-500 mt-1">{t("mediaAttached", { count: media.length })}</p>}
             <MediaThumbs items={media.map((m) => ({ url: m.url, media_type: m.media_type }))} onRemove={(i) => setMedia((prev) => prev.filter((_, idx) => idx !== i))} />
           </div>
+          <MarketplaceConditionsFields category="cars" value={conditions} onChange={setConditions} className="md:col-span-2" />
           {submitStatus === "error" && <p className="text-red-600 text-sm md:col-span-2">{errorText}</p>}
           <Button className="md:col-span-2" size="lg">{submitStatus === "submitting" ? t("submitting") : t("submitListing")}</Button>
         </form>
       )}
 
-      <MarketplaceFilterBar value={filters} onChange={setFilters} />
+      <MarketplaceFilterBar value={filters} onChange={setFilters} quarters={quarters} />
 
       {status === "loading" ? (
         <p className="text-gray-400">...</p>

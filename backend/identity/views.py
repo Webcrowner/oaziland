@@ -16,7 +16,9 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.exceptions import InvalidToken
 from drf_spectacular.utils import extend_schema
 from .models import User, MfaMethod, KYCProfile, VerificationStatus
 from .serializers import (
@@ -41,6 +43,23 @@ class LoginThrottle(AnonRateThrottle):
 
 class LoginView(TokenObtainPairView):
     throttle_classes = [LoginThrottle]
+
+
+class SafeTokenRefreshSerializer(TokenRefreshSerializer):
+    """simplejwt looks the token's user up with objects.get() and does not
+    handle a missing row, so a still-valid refresh token for a deleted user
+    (or after a database reset) crashed with a 500. That is just an invalid
+    session, so answer 401 and let the client send the user back to sign in."""
+
+    def validate(self, attrs):
+        try:
+            return super().validate(attrs)
+        except User.DoesNotExist:
+            raise InvalidToken("No active account found for the given token.")
+
+
+class RefreshView(TokenRefreshView):
+    serializer_class = SafeTokenRefreshSerializer
 
 
 class RegisterView(generics.CreateAPIView):

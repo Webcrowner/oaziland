@@ -29,7 +29,7 @@ export default function SavedSearchesPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   async function handleDelete(id: string) {

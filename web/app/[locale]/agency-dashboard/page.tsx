@@ -44,7 +44,7 @@ export default function AgencyDashboardPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   async function handleAddAgent(e: React.FormEvent) {

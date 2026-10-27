@@ -36,11 +36,11 @@ export default function PayoutWithdrawalModal({
 
   useEffect(() => {
     if (isOpen && token) {
-      setLoadingWallet(true);
+      void Promise.resolve().then(() => setLoadingWallet(true));
       getMyWallet(token)
         .then((w) => {
           setWallet(w);
-          if (!phone && defaultPhone) setPhone(defaultPhone);
+          setPhone((prev) => prev || defaultPhone);
         })
         .catch(() => {})
         .finally(() => setLoadingWallet(false));

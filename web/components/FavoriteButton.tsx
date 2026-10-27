@@ -50,7 +50,7 @@ export default function FavoriteButton({ listingId, variant = "card" }: { listin
       <button
         onClick={handleToggle}
         disabled={loading}
-        className={`absolute top-2 left-2 w-8 h-8 rounded-full flex items-center justify-center text-lg transition-colors ${
+        className={`absolute top-2 left-2 z-10 w-9 h-9 rounded-full flex items-center justify-center text-lg transition-colors ${
           isFavorited ? "bg-[var(--gold)] text-white" : "bg-white/90 text-gray-500 hover:text-[var(--gold)]"
         }`}
         aria-label={t(isFavorited ? "saved" : "save")}

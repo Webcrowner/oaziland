@@ -13,5 +13,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         result = process_marketplace_orders()
         self.stdout.write(self.style.SUCCESS(
-            f"Refunded {len(result['refunded'])} unfulfilled order(s); released {len(result['released'])} unconfirmed order(s)."
+            f"Expired {len(result['expired'])} pending payment(s); Refunded {len(result['refunded'])} "
+            f"unfulfilled order(s); released {len(result['released'])} unconfirmed order(s); "
+            f"relisted {len(result['relisted'])} ended rental(s); returned {len(result['deposits_returned'])} unclaimed deposit(s)."
         ))

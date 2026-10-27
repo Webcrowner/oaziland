@@ -134,11 +134,18 @@ export default function OaziGoScreen() {
           onPress: async () => {
             try {
               const result = await raiseRideSos(id, await getCurrentCoords());
-              const alerted = result.admins_alerted > 0 || result.emergency_contact_alerted;
+              const contact = result.emergency_contact;
+              const contactSent = contact?.status === "sent";
+              const alerted = result.admins_alerted > 0 || contactSent;
+              const contactNote = contactSent
+                ? " and your emergency contact has been notified by SMS"
+                : contact
+                  ? `. Your emergency contact (${contact.name}) could not be texted automatically, so their number was shared with our team to call`
+                  : "";
               Alert.alert(
                 alerted ? "SOS sent" : "SOS recorded",
                 alerted
-                  ? `The Oaziland team has been alerted${result.emergency_contact_alerted ? " and your emergency contact has been notified" : ""}. If you are in immediate danger, contact your local emergency services.`
+                  ? `The Oaziland team has been alerted${contactNote}. If you are in immediate danger, contact your local emergency services.`
                   : "No Oaziland operator could be alerted right now. Please contact your local emergency services.",
               );
               load();

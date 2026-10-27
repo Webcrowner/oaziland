@@ -51,6 +51,25 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Phones with the bottom tab bar: keep content, footer and floating widgets clear of it. */
+@media (max-width: 767px) {
+  html {
+    scroll-padding-top: 5rem;
+    scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
+  body[data-mobile-nav] {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+  body[data-mobile-nav] .support-widget[data-open="true"] {
+    bottom: calc(5.75rem + env(safe-area-inset-bottom));
+  }
+
+  :where(a, button, input, select, textarea):focus-visible {
+    outline: 2px solid #a16207;
+    outline-offset: 3px;
+  }
+}
+
 /* Glassmorphic and subtle elevation utilities */
 .glass-panel {
   background: rgba(255, 255, 255, 0.85);
@@ -128,6 +147,36 @@ body {
 }
 .animate-drift {
   animation: drift 10s ease-in-out infinite;
+}
+
+/* Course editor form fields: one consistent look for every input in the authoring area. */
+.course-editor input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.course-editor select,
+.course-editor textarea {
+  border-color: #cbd5e1;
+  border-radius: 0.625rem;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.course-editor input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+.course-editor select:focus,
+.course-editor textarea:focus {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(27, 42, 74, 0.12);
+}
+.course-editor input[type="checkbox"],
+.course-editor input[type="radio"] {
+  accent-color: var(--navy);
+}
+
+@keyframes video-heart-burst {
+  0% { transform: scale(0.3) rotate(-12deg); opacity: 0; }
+  20% { transform: scale(1.15) rotate(-6deg); opacity: 1; }
+  100% { transform: scale(1.5) translateY(-60px) rotate(6deg); opacity: 0; }
+}
+.video-heart-burst {
+  animation: video-heart-burst 0.9s ease-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

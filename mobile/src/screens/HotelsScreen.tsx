@@ -37,6 +37,7 @@ export default function HotelsScreen() {
               <Text style={styles.imagePlaceholderText}>No photo yet</Text>
             </View>
             <View style={styles.cardBody}>
+              {item.name ? <Text style={styles.hotelName}>{item.name}</Text> : null}
               <Text style={styles.location}>{item.quarter_name}</Text>
               {item.star_rating ? <Text style={styles.stars}>{"★".repeat(item.star_rating)}</Text> : null}
               <Text style={styles.roomCount}>{item.room_types.length} room type{item.room_types.length === 1 ? "" : "s"} available</Text>
@@ -59,6 +60,7 @@ const styles = StyleSheet.create({
   imagePlaceholder: { height: 140, backgroundColor: "#E5E7EB", justifyContent: "center", alignItems: "center" },
   imagePlaceholderText: { color: "#4B5563" },
   cardBody: { padding: 12 },
+  hotelName: { fontSize: 16, fontWeight: "700", color: "#1B2A4A", marginBottom: 2 },
   location: { fontSize: 14, color: "#6B7280", marginBottom: 4 },
   stars: { color: "#C9A227", fontSize: 14, marginBottom: 4 },
   roomCount: { fontSize: 12, color: "#6B7280", marginBottom: 6 },

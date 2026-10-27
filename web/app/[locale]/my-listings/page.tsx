@@ -64,15 +64,17 @@ export default function MyListingsPage() {
   useEffect(() => {
     const stored = localStorage.getItem("access_token");
     if (!stored) {
-      setState("signedOut");
+      void Promise.resolve().then(() => setState("signedOut"));
       return;
     }
-    setToken(stored);
+    void Promise.resolve().then(() => setToken(stored));
     getMyProfile(stored).then((p) => setRole(p.is_agent ? "agent" : "landlord")).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (token) load(token, tab, 1, false);
+    if (token) {
+      void Promise.resolve().then(() => load(token, tab, 1, false));
+    }
   }, [token, tab, load]);
 
   async function run(listing: Listing, action: () => Promise<unknown>, success: string) {

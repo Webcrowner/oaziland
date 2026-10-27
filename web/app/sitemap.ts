@@ -15,10 +15,28 @@ const LOCALES = ["en", "fr"];
 // Every one of these is genuinely public and worth indexing.
 const STATIC_ROUTES = [
   "", "/hotels", "/events", "/guest-houses", "/student-hostels", "/wanted",
-  "/marketplace", "/marketplace/warehouses", "/marketplace/stores", "/marketplace/businesses", "/marketplace/cars",
+  "/marketplace", "/marketplace/goods", "/marketplace/sell", "/marketplace/warehouses", "/marketplace/stores", "/marketplace/businesses", "/marketplace/cars",
   "/services", "/agents", "/agencies", "/testimonials", "/buy", "/sell",
   "/about", "/contact", "/trainings", "/how-it-works", "/careers",
 ];
+
+interface PaginatedResponse<T> {
+  next: string | null;
+  results: T[];
+}
+
+async function fetchAllPages<T>(path: string): Promise<T[]> {
+  const rows: T[] = [];
+  let url: string | null = `${API_BASE_URL}${path}`;
+  while (url) {
+    const response = await fetch(url, { next: { revalidate: 3600 } });
+    if (!response.ok) throw new Error(`Sitemap source failed: ${response.status}`);
+    const page: PaginatedResponse<T> = await response.json();
+    rows.push(...page.results);
+    url = page.next;
+  }
+  return rows;
+}
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticEntries: MetadataRoute.Sitemap = LOCALES.flatMap((locale) =>
@@ -37,23 +55,40 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // if the API is unreachable at build/request time, rather than
   // breaking the whole sitemap.
   let listingEntries: MetadataRoute.Sitemap = [];
+  let marketplaceEntries: MetadataRoute.Sitemap = [];
   try {
-    const res = await fetch(`${API_BASE_URL}/api/listings/`, { next: { revalidate: 3600 } });
-    if (res.ok) {
-      const data = await res.json();
-      listingEntries = LOCALES.flatMap((locale) =>
-        (data.results || []).map((listing: { id: string; published_at: string | null }) => ({
+    const listings = await fetchAllPages<{ id: string; published_at: string | null }>("/api/listings/");
+    listingEntries = LOCALES.flatMap((locale) =>
+      listings.map((listing) => ({
           url: `${BASE_URL}/${locale}/listing/${listing.id}`,
           lastModified: listing.published_at || undefined,
           changeFrequency: "weekly" as const,
           priority: 0.9,
-        }))
-      );
-    }
+      }))
+    );
   } catch {
     // Sitemap generation should never hard-fail the build over a
     // temporarily unreachable API — ship what we have.
   }
 
-  return [...staticEntries, ...listingEntries];
+  const marketplaceCategories = ["warehouses", "stores", "businesses", "cars", "goods"] as const;
+  const marketplaceResponses = await Promise.allSettled(
+    marketplaceCategories.map(async (category) => ({
+      category,
+      listings: await fetchAllPages<{ id: string; created_at: string }>(`/api/${category}/`),
+    })),
+  );
+  marketplaceEntries = marketplaceResponses.flatMap((response) => {
+    if (response.status !== "fulfilled") return [];
+    return LOCALES.flatMap((locale) =>
+      response.value.listings.map((listing) => ({
+        url: `${BASE_URL}/${locale}/marketplace/${response.value.category}/${listing.id}`,
+        lastModified: listing.created_at,
+        changeFrequency: "weekly" as const,
+        priority: 0.8,
+      })),
+    );
+  });
+
+  return [...staticEntries, ...listingEntries, ...marketplaceEntries];
 }

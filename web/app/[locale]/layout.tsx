@@ -6,9 +6,9 @@ import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import SiteChrome from "@/components/SiteChrome";
-import OnboardingModal from "@/components/OnboardingModal";
 import SupportChatWidget from "@/components/SupportChatWidget";
 import PresenceHeartbeat from "@/components/PresenceHeartbeat";
+import GlobalMobileNav from "@/components/GlobalMobileNav";
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));
@@ -43,8 +43,8 @@ export default async function LocaleLayout({
         <Footer />
       </SiteChrome>
       <ServiceWorkerRegister />
-      <OnboardingModal />
       <SupportChatWidget />
+      <GlobalMobileNav />
       <PresenceHeartbeat />
     </NextIntlClientProvider>
   );

@@ -10,9 +10,6 @@ import {
   IconLock,
   IconEye,
   IconEyeOff,
-  IconGoogle,
-  IconFacebook,
-  IconShieldCheck,
   IconSparkles,
 } from "@/components/Icons";
 
@@ -79,9 +76,9 @@ export default function LoginPage() {
               <Image
                 src="/logo.png"
                 alt="Oaziland"
-                width={168}
-                height={168}
-                style={{ width: "168px", height: "168px" }}
+                width={96}
+                height={96}
+                style={{ width: "96px", height: "96px" }}
                 priority
                 className="object-contain drop-shadow-md"
               />
@@ -89,59 +86,32 @@ export default function LoginPage() {
             <div className="flex justify-center">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200/70 text-[11px] font-bold uppercase tracking-wider text-amber-800 mb-3">
                 <IconSparkles size={13} className="text-amber-500" />
-                <span>Oaziland Secure Portal</span>
+                <span>{t("portal")}</span>
               </div>
             </div>
             <h1 className="font-[family-name:var(--font-display)] text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
               {t("title")}
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
-              Access your verified listings, reservations &amp; escrow dashboard
+              {t("subtitle")}
             </p>
-          </div>
-
-          {/* Real Social Authentication Buttons */}
-          <div className="space-y-2.5 mb-6">
-            <button
-              type="button"
-              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs sm:text-sm font-semibold transition-all duration-200 shadow-sm active:scale-[0.99] group"
-              onClick={() => alert("Google OAuth integration: Please configure Google Client ID in backend settings.")}
-            >
-              <IconGoogle size={18} className="shrink-0 transition-transform group-hover:scale-110" />
-              <span>Continue with Google</span>
-            </button>
-
-            <button
-              type="button"
-              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs sm:text-sm font-semibold transition-all duration-200 shadow-sm active:scale-[0.99] group"
-              onClick={() => alert("Facebook Login integration: Please configure Facebook App ID in backend settings.")}
-            >
-              <IconFacebook size={18} className="shrink-0 transition-transform group-hover:scale-110" />
-              <span>Continue with Facebook</span>
-            </button>
-          </div>
-
-          {/* Divider */}
-          <div className="relative flex items-center justify-center mb-6">
-            <div className="border-t border-slate-200 w-full" />
-            <span className="bg-white px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 absolute">
-              or sign in with username
-            </span>
           </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                Username
+              <label htmlFor="login-username" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                {t("usernamePlaceholder")}
               </label>
               <div className="relative flex items-center">
                 <IconUser size={16} className="absolute left-3.5 text-slate-400 pointer-events-none" />
                 <input
+                  id="login-username"
+                  autoComplete="username"
                   type="text"
                   placeholder={t("usernamePlaceholder")}
                   required
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-3.5 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                  className="min-h-11 w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 text-base font-medium text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />
@@ -150,8 +120,8 @@ export default function LoginPage() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                  Password
+                <label htmlFor="login-password" className="block text-sm font-semibold text-slate-700">
+                  {t("passwordPlaceholder")}
                 </label>
                 <Link href="/forgot-password" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
                   {t("forgotPassword")}
@@ -160,18 +130,20 @@ export default function LoginPage() {
               <div className="relative flex items-center">
                 <IconLock size={16} className="absolute left-3.5 text-slate-400 pointer-events-none" />
                 <input
+                  id="login-password"
+                  autoComplete="current-password"
                   type={showPassword ? "text" : "password"}
                   placeholder={t("passwordPlaceholder")}
                   required
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                  className="min-h-11 w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-12 py-2.5 text-base font-medium text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors p-1"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute right-0 flex min-h-11 min-w-11 items-center justify-center text-slate-600 hover:text-slate-900 transition-colors"
+                  aria-label={t(showPassword ? "hidePassword" : "showPassword")}
                 >
                   {showPassword ? <IconEyeOff size={16} /> : <IconEye size={16} />}
                 </button>
@@ -179,7 +151,7 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+              <div role="alert" className="p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700 font-medium">
                 {error}
               </div>
             )}
@@ -191,12 +163,6 @@ export default function LoginPage() {
               {loading ? t("signingIn") : t("signIn")}
             </Button>
           </form>
-
-          {/* Trust note */}
-          <div className="mt-6 pt-5 border-t border-slate-100 flex items-center justify-center gap-2 text-xs text-slate-500">
-            <IconShieldCheck size={14} className="text-emerald-500" />
-            <span>Encrypted JWT session &bull; MoMo Escrow Protected</span>
-          </div>
 
           <p className="text-xs text-slate-500 mt-5 text-center">
             {t("noAccountYet")}{" "}

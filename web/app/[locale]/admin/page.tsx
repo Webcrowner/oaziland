@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useTasklnLabels } from "@/lib/useTasklnLabels";
 import { Link } from "@/i18n/navigation";
@@ -67,7 +67,6 @@ import AdminFaqManager from "@/components/admin/AdminFaqManager";
 import {
   IconShield,
   IconShieldCheck,
-  IconClock,
   IconLock,
   IconUsers,
   IconAlertCircle,
@@ -75,15 +74,35 @@ import {
   IconBuilding,
   IconHome,
   IconGraduationCap,
-  IconParty,
-  IconHotel,
-  IconCar,
   IconMapPin,
   IconCheckCircle,
   IconChevronRight,
   IconArrowUpRight,
   IconRefresh,
 } from "@/components/Icons";
+
+function playSosAlertTone() {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    [880, 660, 880].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, ctx.currentTime + i * 0.22);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.22 + 0.18);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.22);
+      osc.stop(ctx.currentTime + i * 0.22 + 0.18);
+    });
+  } catch {
+    // Browser autoplay policy may block audio before user interaction.
+  }
+}
 
 type Tab =
   | "summary"
@@ -135,100 +154,155 @@ export default function AdminConsolePage() {
   const [greetingSettings, setGreetingSettings] = useState<AdminGreetingSettings | null>(null);
   const [savingGreetings, setSavingGreetings] = useState(false);
   const [greetingSaveSuccess, setGreetingSaveSuccess] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<string>(() =>
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported"
+  );
+  const seenSosKeysRef = useRef<Set<string>>(new Set());
 
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+
+  const notifyNewSosRides = useCallback(
+    (incoming: AdminSosRide[]) => {
+      let hasNew = false;
+      for (const ride of incoming) {
+        const key = `${ride.id}:${ride.sos_raised_at}`;
+        if (!seenSosKeysRef.current.has(key)) {
+          seenSosKeysRef.current.add(key);
+          hasNew = true;
+          if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+            try {
+              new Notification(`🆘 OaziGo SOS — ${ride.raised_by?.name ?? "Ride Alert"}`, {
+                body: `${ride.pickup_description} → ${ride.dropoff_description}`,
+                tag: key,
+              });
+            } catch {
+              // Ignore notification errors in restricted contexts.
+            }
+          }
+        }
+      }
+      if (hasNew) {
+        playSosAlertTone();
+      }
+    },
+    []
+  );
 
   // Real server-side filtering + pagination for the Users queue —
   // account_status/role are sent to the API and paged with ?page=,
   // rather than only ever filtering whatever single page of users
   // happened to already be loaded client-side.
   const loadUsers = useCallback(
-    (page: number) => {
+    async (page: number) => {
       if (!token) return;
       setUsersLoading(true);
       const statusParam = userStatusFilter === "ALL" ? undefined : userStatusFilter;
       const roleParam = userRoleFilter === "ALL" ? undefined : userRoleFilter.toLowerCase();
-      listAdminUsers(token, statusParam, roleParam, page)
-        .then((data) => {
-          setUsers(data.results || []);
-          setUsersCount(data.count || 0);
-          setUsersHasNext(Boolean(data.next));
-          setUsersPage(page);
-        })
-        .catch(() => {})
-        .finally(() => setUsersLoading(false));
+      try {
+        const data = await listAdminUsers(token, statusParam, roleParam, page);
+        setUsers(data.results || []);
+        setUsersCount(data.count || 0);
+        setUsersHasNext(Boolean(data.next));
+        setUsersPage(page);
+      } catch {
+        // Ignore transient user list error
+      } finally {
+        setUsersLoading(false);
+      }
     },
     [token, userStatusFilter, userRoleFilter]
   );
 
   useEffect(() => {
-    loadUsers(1);
+    void Promise.resolve().then(() => loadUsers(1));
   }, [loadUsers]);
 
-  const loadAll = useCallback(() => {
+  const loadAll = useCallback(async () => {
     if (!token) {
       setStatus("signedOut");
       return;
     }
-    Promise.all([
-      getAdminConsoleSummary(token),
-      listAdminPendingPropertyListings(token),
-      listAdminVerificationRequests(token),
-      listAdminKycReviews(token),
-      listAdminContentReports(token),
-      listAdminDisputeCases(token),
-      listHotelsForAdmin(token),
-      listVenuesForAdmin(token),
-      listDriversForAdmin(token),
-      listTechniciansForAdmin(token),
-      listAdminWelfareAlerts(token),
-      getAdminGreetingSettings(token).catch(() => null),
-      listAdminServiceDisputes(token).catch(() => [] as AdminServiceDisputeItem[]),
-      listTechniciansForAdmin(token, "verified").catch(() => ({ results: [] as TechnicianProfileItem[] })),
-      listAdminSosRides(token).catch(() => ({ count: 0, results: [] as AdminSosRide[] })),
-    ])
-      .then(
-        ([
-          summaryData,
-          propertiesData,
-          verificationsData,
-          kycReviewsData,
-          reportsData,
-          disputesData,
-          hotelsData,
-          venuesData,
-          driversData,
-          techniciansData,
-          welfareData,
-          greetingsData,
-          serviceDisputesData,
-          verifiedTechniciansData,
-          sosRidesData,
-        ]) => {
-          setSummary(summaryData);
-          setPendingProperties(propertiesData.results || []);
-          setVerifications(verificationsData.results || []);
-          setKycReviews(kycReviewsData.results || []);
-          setReports(reportsData.results || []);
-          setDisputes(disputesData.results || []);
-          setPendingHotels((hotelsData.results || []).filter((h) => !h.verified));
-          setPendingVenues((venuesData.results || []).filter((v) => !v.verified));
-          setPendingDrivers(driversData.results || []);
-          setPendingTechnicians(techniciansData.results || []);
-          setWelfareAlerts(welfareData.results || []);
-          if (greetingsData) setGreetingSettings(greetingsData);
-          setServiceDisputes(serviceDisputesData);
-          setVerifiedTechnicians(verifiedTechniciansData.results || []);
-          setSosRides(sosRidesData.results || []);
-          setStatus("ready");
-        }
-      )
-      .catch(() => setStatus("notAdmin"));
-  }, [token]);
+    try {
+      const [
+        summaryData,
+        propertiesData,
+        verificationsData,
+        kycReviewsData,
+        reportsData,
+        disputesData,
+        hotelsData,
+        venuesData,
+        driversData,
+        techniciansData,
+        welfareData,
+        greetingsData,
+        serviceDisputesData,
+        verifiedTechniciansData,
+        sosRidesData,
+      ] = await Promise.all([
+        getAdminConsoleSummary(token),
+        listAdminPendingPropertyListings(token),
+        listAdminVerificationRequests(token),
+        listAdminKycReviews(token),
+        listAdminContentReports(token),
+        listAdminDisputeCases(token),
+        listHotelsForAdmin(token),
+        listVenuesForAdmin(token),
+        listDriversForAdmin(token),
+        listTechniciansForAdmin(token),
+        listAdminWelfareAlerts(token),
+        getAdminGreetingSettings(token).catch(() => null),
+        listAdminServiceDisputes(token).catch(() => [] as AdminServiceDisputeItem[]),
+        listTechniciansForAdmin(token, "verified").catch(() => ({ results: [] as TechnicianProfileItem[] })),
+        listAdminSosRides(token).catch(() => ({ count: 0, results: [] as AdminSosRide[] })),
+      ]);
+      setSummary(summaryData);
+      setPendingProperties(propertiesData.results || []);
+      setVerifications(verificationsData.results || []);
+      setKycReviews(kycReviewsData.results || []);
+      setReports(reportsData.results || []);
+      setDisputes(disputesData.results || []);
+      setPendingHotels((hotelsData.results || []).filter((h) => !h.verified));
+      setPendingVenues((venuesData.results || []).filter((v) => !v.verified));
+      setPendingDrivers(driversData.results || []);
+      setPendingTechnicians(techniciansData.results || []);
+      setWelfareAlerts(welfareData.results || []);
+      if (greetingsData) setGreetingSettings(greetingsData);
+      setServiceDisputes(serviceDisputesData);
+      setVerifiedTechnicians(verifiedTechniciansData.results || []);
+      const openSos = sosRidesData.results || [];
+      setSosRides(openSos);
+      notifyNewSosRides(openSos);
+      setStatus("ready");
+    } catch {
+      setStatus("notAdmin");
+    }
+  }, [token, notifyNewSosRides]);
 
   useEffect(() => {
-    loadAll();
+    void Promise.resolve().then(() => loadAll());
   }, [loadAll]);
+
+  useEffect(() => {
+    if (!token || status !== "ready") return;
+    const interval = setInterval(() => {
+      listAdminSosRides(token)
+        .then((data) => {
+          const openSos = data.results || [];
+          setSosRides(openSos);
+          notifyNewSosRides(openSos);
+        })
+        .catch(() => {});
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [token, status, notifyNewSosRides]);
+
+  async function enableBrowserSosAlerts() {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotifPermission(perm);
+    if (perm === "granted") playSosAlertTone();
+  }
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
@@ -647,6 +721,15 @@ export default function AdminConsolePage() {
         subtitle="Manage KYC audits, title verification queues, content moderation and escrow dispute cases."
         action={
           <div className="flex items-center gap-2">
+            {notifPermission === "default" && (
+              <button
+                type="button"
+                onClick={enableBrowserSosAlerts}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors cursor-pointer"
+              >
+                🔔 {t("sosEnableAlerts")}
+              </button>
+            )}
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
               Live System State
@@ -654,6 +737,38 @@ export default function AdminConsolePage() {
           </div>
         }
       />
+
+      {sosRides.length > 0 && (
+        <div className="mb-6 rounded-2xl border-2 border-red-500 bg-red-50 px-5 py-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">🆘</span>
+            <div>
+              <p className="text-sm font-black text-red-900">{t("sosUrgentBanner", { count: sosRides.length })}</p>
+              <p className="text-xs text-red-700">
+                {sosRides[0].raised_by?.name ?? "—"} ({sosRides[0].raised_by?.phone}) · {sosRides[0].pickup_description} → {sosRides[0].dropoff_description}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={playSosAlertTone}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer"
+            >
+              🔊 {t("sosTestSound")}
+            </button>
+            {tab !== "sos" && (
+              <button
+                type="button"
+                onClick={() => setTab("sos")}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white hover:bg-red-700 cursor-pointer"
+              >
+                {t("tabSos")} ({sosRides.length})
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Mobile/tablet: modern categorized horizontal queue tabs with badges and quick refresh */}
       <div className="lg:hidden mb-6 space-y-3">

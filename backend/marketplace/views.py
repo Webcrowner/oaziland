@@ -7,36 +7,47 @@ already existed and is reused here exactly as written, not
 reimplemented at the API layer.
 """
 from rest_framework import viewsets, permissions, status
+from django.db import transaction as db_transaction
 from django.http import Http404
 from rest_framework.exceptions import ValidationError
 from decimal import Decimal, InvalidOperation
+import logging
 import uuid
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, PriceBasis, RideEmergencyContact
+from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, GoodsListing, GoodsCategory, GoodsCondition, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, MarketplaceOrderStatus, PriceBasis, RideEmergencyContact
 from .serializers import (
-    PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer, EmergencyContactSerializer, AdminSosRideSerializer,
+    PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer, EmergencyContactSerializer, EmergencyContactStatusSerializer, AdminSosRideSerializer,
     AddMediaSerializer, SetAvailabilitySerializer,
-    WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer,
+    WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer, GoodsListingSerializer,
     RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer, RideSosSerializer,
     ListingConditionSerializer, AttachConditionSerializer,
-    DriverProfileSerializer, DriverRegistrationSerializer, VehicleSerializer,
+    DriverProfileSerializer, DriverRegistrationSerializer, DriverLocationSerializer, VehicleSerializer,
 )
 from .services import (
     search_marketplace_listings, LISTING_ORDERINGS, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition,
     trusted_ride_distance_km, cancel_ride, release_ride, raise_sos, RideStateError,
     moderate_listing_text, moderate_listing_photo,
-    category_models, place_order, mark_handed_over, confirm_receipt, cancel_order, decline_order, dispute_order,
+    category_models, place_order, mark_handed_over, confirm_receipt, cancel_order, decline_order, dispute_order, return_deposit, claim_deposit,
     OrderError, ListingNotAvailableError, NotPartyToOrderError,
     register_as_driver, register_vehicle, NotARegisteredDriverError, DriverNotVerifiedError, VehicleCategoryMismatchError,
     post_ride_message, NotPartyToRideError,
+    update_driver_location, open_rides_for_driver, ride_driver_tracking, DEFAULT_NEARBY_RADIUS_KM,
 )
 from oaziland.permissions import IsAdminRole, IsKycVerified
+import notifications.services as notification_services
 from trust_safety.services import ContentBlockedError
 
 MAX_MEDIA_PER_LISTING = 20
+logger = logging.getLogger(__name__)
+LIVE_ORDER_STATUSES = (
+    MarketplaceOrderStatus.PAYMENT_PENDING,
+    MarketplaceOrderStatus.PAID,
+    MarketplaceOrderStatus.HANDED_OVER,
+    MarketplaceOrderStatus.DISPUTED,
+)
 
 
 def _moderate_text(listing_id, title, description):
@@ -116,6 +127,14 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
                 if params["price_basis"] not in PriceBasis.values:
                     raise ValidationError({"price_basis": "Enter a valid price basis."})
                 filters["price_basis"] = params["price_basis"]
+            if params.get("item_category"):
+                if params["item_category"] not in GoodsCategory.values:
+                    raise ValidationError({"item_category": "Enter a valid item category."})
+                filters["item_category"] = params["item_category"]
+            if params.get("condition"):
+                if params["condition"] not in GoodsCondition.values:
+                    raise ValidationError({"condition": "Enter a valid condition."})
+                filters["condition"] = params["condition"]
             if params.get("q", "").strip():
                 filters["q"] = params["q"].strip()
             return search_marketplace_listings(listing_class=self.model_class, filters=filters)
@@ -143,8 +162,22 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         data = serializer.validated_data
         instance = serializer.instance
+        has_live_order = MarketplaceOrder.objects.filter(listing_id=instance.id, status__in=LIVE_ORDER_STATUSES).exists()
+        if has_live_order:
+            for field in ("price_xaf", "price_basis", "security_deposit_xaf"):
+                if field in data and data[field] != getattr(instance, field):
+                    raise ValidationError({field: "The price and deposit cannot be changed while an order is active."})
         _moderate_text(instance.id, data.get("title", instance.title), data.get("description", instance.description))
         serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        listing = self.get_object()
+        if MarketplaceOrder.objects.filter(listing_id=listing.id).exists():
+            return Response(
+                {"detail": "A listing with order history cannot be deleted. Mark it unavailable instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=["get"])
     def mine(self, request):
@@ -164,7 +197,16 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         is_admin = hasattr(request.user, "admin_profile")
         if listing.removed_by_moderation and not is_admin:
             return Response({"detail": "This listing was removed by moderation. Contact support to appeal."}, status=status.HTTP_403_FORBIDDEN)
-        listing.availability_status = input_serializer.validated_data["status"]
+        requested_status = input_serializer.validated_data["status"]
+        if (
+            requested_status != listing.availability_status
+            and MarketplaceOrder.objects.filter(listing_id=listing.id, status__in=LIVE_ORDER_STATUSES).exists()
+        ):
+            return Response(
+                {"detail": "The listing status is managed by its active order."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        listing.availability_status = requested_status
         if is_admin and listing.removed_by_moderation and listing.availability_status == "AVAILABLE":
             listing.removed_by_moderation = False
         listing.save(update_fields=["availability_status", "removed_by_moderation"])
@@ -229,6 +271,11 @@ class BusinessListingViewSet(BaseMarketplaceViewSet):
 class CarListingViewSet(BaseMarketplaceViewSet):
     serializer_class = CarListingSerializer
     model_class = CarListing
+
+
+class GoodsListingViewSet(BaseMarketplaceViewSet):
+    serializer_class = GoodsListingSerializer
+    model_class = GoodsListing
 
 
 def _is_verified_driver(user) -> bool:
@@ -303,6 +350,37 @@ class RideViewSet(viewsets.ModelViewSet):
         if ride.status == RideStatus.REQUESTED and _is_verified_driver(request.user):
             return Response(_mask_open_ride(data))
         raise Http404
+
+    @extend_schema(responses={200: dict, 403: dict})
+    @action(detail=False, methods=["get"], url_path="open")
+    def open_requests(self, request):
+        """Open requests a verified driver can take, nearest pickup first, limited to their vehicle types
+        and, when they have shared a recent position, to ?radius_km (default 10) around it."""
+        if not _is_verified_driver(request.user):
+            return Response({"detail": "Only verified drivers can browse open requests."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            radius_km = min(max(float(request.query_params.get("radius_km", DEFAULT_NEARBY_RADIUS_KM)), 1), 100)
+        except ValueError:
+            radius_km = DEFAULT_NEARBY_RADIUS_KM
+        pairs, located = open_rides_for_driver(driver_profile=request.user.driver_profile, radius_km=radius_km)
+        results = []
+        for ride, distance in pairs:
+            row = _mask_open_ride(RideBookingSerializer(ride).data)
+            row["pickup_distance_km"] = str(distance) if distance is not None else None
+            results.append(row)
+        return Response({"count": len(results), "driver_located": located, "radius_km": radius_km, "results": results})
+
+    @extend_schema(responses={200: dict, 400: dict, 403: dict})
+    @action(detail=True, methods=["get"], url_path="driver-location")
+    def driver_location(self, request, pk=None):
+        """The rider follows their driver: last known position, distance and arrival estimate."""
+        ride = self.get_object()
+        try:
+            return Response(ride_driver_tracking(ride=ride, user=request.user))
+        except NotPartyToRideError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except RideStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(request=RideRequestSerializer, responses={201: RideBookingSerializer})
     def create(self, request, *args, **kwargs):
@@ -395,13 +473,18 @@ class RideViewSet(viewsets.ModelViewSet):
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data
         try:
-            admins_alerted, contact_alerted = raise_sos(ride=ride, user=request.user, latitude=data.get("latitude"), longitude=data.get("longitude"), note=data.get("note", ""))
+            admins_alerted, contact_result = raise_sos(ride=ride, user=request.user, latitude=data.get("latitude"), longitude=data.get("longitude"), note=data.get("note", ""))
         except NotPartyToRideError as e:
             return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
         except RideStateError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         ride.refresh_from_db()
-        return Response({"sos_raised_at": ride.sos_raised_at, "admins_alerted": admins_alerted, "emergency_contact_alerted": contact_alerted})
+        return Response({
+            "sos_raised_at": ride.sos_raised_at,
+            "admins_alerted": admins_alerted,
+            # None, or {name, phone, status}; status is "sent", "not_delivered" (no SMS provider connected) or "failed".
+            "emergency_contact": contact_result,
+        })
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
@@ -418,13 +501,8 @@ class RideViewSet(viewsets.ModelViewSet):
     def complete(self, request, pk=None):
         """Only the ride's own rider pays for it — settling through
         the real payment gateway, exactly like every other real
-        payment on the platform. Reuses transactions.views'
-        FakeRedisLock exactly — an already-documented, intentional
-        placeholder (see that class's own docstring) pending real
-        Redis wiring in production, the same pattern every other
-        booking flow on the platform already follows; not a new gap,
-        not something invented here."""
-        from transactions.views import FakeRedisLock
+        payment on the platform, using the shared production lock."""
+        from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
 
         ride = self.get_object()
@@ -437,7 +515,7 @@ class RideViewSet(viewsets.ModelViewSet):
         input_serializer.is_valid(raise_exception=True)
         try:
             complete_ride_with_payment(
-                ride=ride, lock_client=FakeRedisLock(), payment_gateway=get_active_gateway(),
+                ride=ride, lock_client=get_booking_lock_client(), payment_gateway=get_active_gateway(),
                 phone_number=input_serializer.validated_data["phone_number"],
             )
         except ValueError as e:
@@ -507,7 +585,7 @@ class ListingConditionView(APIView):
         conditions = ListingCondition.objects.filter(target_content_type=content_type, target_id=target_id)
         return Response(ListingConditionSerializer(conditions, many=True).data)
 
-    @extend_schema(request=AttachConditionSerializer, responses={201: ListingConditionSerializer, 403: dict, 404: dict})
+    @extend_schema(request=AttachConditionSerializer, responses={201: ListingConditionSerializer, 204: None, 403: dict, 404: dict, 409: dict})
     def post(self, request):
         """Only the target listing's own lister can attach a
         condition to it — resolved dynamically since the target could
@@ -526,10 +604,25 @@ class ListingConditionView(APIView):
         if owner_id != request.user.id:
             return Response({"detail": "Only the listing's own lister can set its conditions."}, status=status.HTTP_403_FORBIDDEN)
 
-        condition = attach_condition(
-            listing=target, created_by=request.user,
-            structured_conditions=data["structured_conditions"], free_text_clause=data["free_text_clause"],
-        )
+        # A buyer who has paid agreed to the terms as they were; they cannot change underneath an active order.
+        if (
+            data["target_content_type"].startswith("marketplace.")
+            and MarketplaceOrder.objects.filter(listing_id=target.id, status__in=LIVE_ORDER_STATUSES).exists()
+        ):
+            return Response({"detail": "Conditions cannot be changed while an order is active."}, status=status.HTTP_409_CONFLICT)
+
+        clause = data["free_text_clause"].strip()
+        _moderate_text(target.id, "", clause)
+
+        # Posting again replaces the lister's earlier conditions instead of stacking duplicates; empty input clears them.
+        with db_transaction.atomic():
+            ListingCondition.objects.filter(target_content_type=data["target_content_type"], target_id=target.id).delete()
+            if not data["structured_conditions"] and not clause:
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            condition = attach_condition(
+                listing=target, created_by=request.user,
+                structured_conditions=data["structured_conditions"], free_text_clause=clause,
+            )
         return Response(ListingConditionSerializer(condition).data, status=status.HTTP_201_CREATED)
 
 
@@ -555,23 +648,42 @@ class MyDriverProfileView(APIView):
         return Response(DriverProfileSerializer(driver_profile).data, status=status.HTTP_201_CREATED)
 
 
+class MyDriverLocationView(APIView):
+    """A verified driver reports their position and/or goes online or offline."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=DriverLocationSerializer, responses={200: DriverProfileSerializer, 403: dict})
+    def post(self, request):
+        if not _is_verified_driver(request.user):
+            return Response({"detail": "Only verified drivers can share their location."}, status=status.HTTP_403_FORBIDDEN)
+        serializer = DriverLocationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        profile = update_driver_location(
+            driver_profile=request.user.driver_profile,
+            latitude=data.get("latitude"), longitude=data.get("longitude"), is_online=data.get("is_online"),
+        )
+        return Response(DriverProfileSerializer(profile).data)
+
+
 class MyEmergencyContactView(APIView):
     """The person a user wants told when they press SOS on a ride. One per user; they set, change and remove it."""
     permission_classes = [permissions.IsAuthenticated]
 
-    @extend_schema(responses={200: EmergencyContactSerializer, 404: dict})
+    @extend_schema(responses={200: EmergencyContactStatusSerializer, 404: dict})
     def get(self, request):
         contact = getattr(request.user, "ride_emergency_contact", None)
+        sms_live = notification_services.is_delivery_live("SMS")
         if contact is None:
-            return Response({"detail": "You have not set an emergency contact."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(EmergencyContactSerializer(contact).data)
+            return Response({"detail": "You have not set an emergency contact.", "sms_delivery_live": sms_live}, status=status.HTTP_404_NOT_FOUND)
+        return Response({**EmergencyContactSerializer(contact).data, "sms_delivery_live": sms_live})
 
-    @extend_schema(request=EmergencyContactSerializer, responses={200: EmergencyContactSerializer})
+    @extend_schema(request=EmergencyContactSerializer, responses={200: EmergencyContactStatusSerializer})
     def put(self, request):
         serializer = EmergencyContactSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         contact, _ = RideEmergencyContact.objects.update_or_create(user=request.user, defaults=serializer.validated_data)
-        return Response(EmergencyContactSerializer(contact).data)
+        return Response({**EmergencyContactSerializer(contact).data, "sms_delivery_live": notification_services.is_delivery_live("SMS")})
 
     @extend_schema(responses={204: None})
     def delete(self, request):
@@ -655,7 +767,16 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
     deliberate 403 is not turned into a 404 (retrieve is overridden to still hide orders from outsiders)."""
     serializer_class = MarketplaceOrderSerializer
     permission_classes = [permissions.IsAuthenticated]
-    queryset = MarketplaceOrder.objects.select_related("listing__lister_user", "buyer", "booking")
+    queryset = MarketplaceOrder.objects.select_related(
+        "listing__lister_user",
+        "listing__warehouselisting",
+        "listing__storelisting",
+        "listing__businesslisting",
+        "listing__carlisting",
+        "listing__goodslisting",
+        "buyer",
+        "booking",
+    )
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -678,9 +799,9 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
             raise Http404
         return Response(self.get_serializer(order).data)
 
-    @extend_schema(request=PlaceOrderSerializer, responses={201: MarketplaceOrderSerializer, 400: dict, 404: dict, 409: dict})
+    @extend_schema(request=PlaceOrderSerializer, responses={202: MarketplaceOrderSerializer, 400: dict, 404: dict, 409: dict, 503: dict})
     def create(self, request, *args, **kwargs):
-        from transactions.views import FakeRedisLock
+        from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
         input_serializer = PlaceOrderSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
@@ -690,14 +811,20 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": "That listing was not found."}, status=status.HTTP_404_NOT_FOUND)
         try:
             order = place_order(
-                listing=listing, buyer=request.user, lock_client=FakeRedisLock(),
+                listing=listing, buyer=request.user, lock_client=get_booking_lock_client(),
                 payment_gateway=get_active_gateway(), phone_number=data["phone_number"],
             )
         except ListingNotAvailableError as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
         except OrderError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
+        except (RuntimeError, NotImplementedError, ValueError):
+            logger.exception("Marketplace payment infrastructure is unavailable.")
+            return Response(
+                {"detail": "Payments are temporarily unavailable. Please try again later."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(self.get_serializer(order).data, status=status.HTTP_202_ACCEPTED)
 
     def get_permissions(self):
         if self.action == "create":
@@ -741,3 +868,17 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
         input_serializer = OrderDisputeSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         return self._run(request, dispute_order, user=request.user, reason=input_serializer.validated_data["reason"])
+
+    @action(detail=True, methods=["post"], url_path="return-deposit")
+    @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def return_deposit(self, request, pk=None):
+        """The seller confirms the rental came back in good order, so the deposit goes back to the renter."""
+        return self._run(request, return_deposit, seller=request.user)
+
+    @action(detail=True, methods=["post"], url_path="claim-deposit")
+    @extend_schema(request=OrderDisputeSerializer, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def claim_deposit(self, request, pk=None):
+        """The seller reports a problem with the returned item; an admin then decides who gets the deposit."""
+        input_serializer = OrderDisputeSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        return self._run(request, claim_deposit, seller=request.user, reason=input_serializer.validated_data["reason"])

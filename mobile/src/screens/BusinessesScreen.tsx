@@ -1,17 +1,21 @@
-import { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, Modal, ScrollView, Switch } from "react-native";
+import { useEffect, useState } from "react";
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, Modal, ScrollView, Switch, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 import {
-  createMarketplaceListing, addMarketplaceMedia, uploadMediaFile,
-  type BusinessListing, type MediaUploadResult,
+  createMarketplaceListing, addMarketplaceMedia, uploadMediaFile, listQuarters,
+  type BusinessListing, type MediaUploadResult, type Quarter,
 } from "../lib/api";
 import { useMarketplaceListings } from "../lib/useMarketplaceListings";
 import LoadMoreButton from "../components/LoadMoreButton";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import MarketplaceFilterBar from "../components/MarketplaceFilterBar";
 import { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "../lib/marketplaceFilters";
+import MarketplaceFormLocation from "../components/MarketplaceFormLocation";
+import type { Coords } from "../lib/location";
+import MarketplaceConditionsFields, { saveConditions } from "../components/MarketplaceConditionsFields";
+import { conditionsError, EMPTY_CONDITIONS, type ConditionsDraft } from "../lib/marketplaceConditions";
 
 /** Businesses — mobile parity with the web app's /marketplace/businesses page. */
 export default function BusinessesScreen() {
@@ -21,13 +25,28 @@ export default function BusinessesScreen() {
   const [showForm, setShowForm] = useState(false);
 
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
+  const [conditions, setConditions] = useState<ConditionsDraft>(EMPTY_CONDITIONS);
+  const [sizeSqm, setSizeSqm] = useState("");
+  const [seatingCapacity, setSeatingCapacity] = useState("");
+  const [annualRevenue, setAnnualRevenue] = useState("");
   const [includesGoodwill, setIncludesGoodwill] = useState(false);
   const [includesInventory, setIncludesInventory] = useState(false);
+  const [quarters, setQuarters] = useState<Quarter[]>([]);
+  const [quarterId, setQuarterId] = useState("");
+  const [coords, setCoords] = useState<Coords | null>(null);
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    listQuarters().then((data) => {
+      setQuarters(data);
+      if (data.length > 0) setQuarterId(data[0].id);
+    }).catch(() => {});
+  }, []);
 
   async function handlePickPhoto() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -48,15 +67,26 @@ export default function BusinessesScreen() {
   }
 
   async function handleSubmit() {
+    const invalidConditions = conditionsError("businesses", conditions);
+    if (invalidConditions) {
+      setError(invalidConditions);
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
       const listing = await createMarketplaceListing("businesses", {
-        title, price_basis: "SALE", price_xaf: price, includes_goodwill: includesGoodwill, includes_inventory: includesInventory,
+        title, description, price_basis: "SALE", price_xaf: price, size_sqm: sizeSqm || null,
+        seating_capacity: seatingCapacity ? Number(seatingCapacity) : null,
+        annual_revenue_xaf: annualRevenue || null,
+        includes_goodwill: includesGoodwill, includes_inventory: includesInventory,
+        quarter: quarterId || null, latitude: coords?.latitude ?? null, longitude: coords?.longitude ?? null,
       });
       await Promise.all(media.map((m) => addMarketplaceMedia("businesses", listing.id, m.url, m.media_type)));
+      await saveConditions("businesses", listing.id, conditions, true).catch(() => Alert.alert("Listing posted", "Its conditions could not be saved. Add them from My listings."));
       setShowForm(false);
-      setTitle(""); setPrice(""); setIncludesGoodwill(false); setIncludesInventory(false); setMedia([]);
+      setTitle(""); setDescription(""); setPrice(""); setSizeSqm(""); setSeatingCapacity(""); setAnnualRevenue("");
+      setIncludesGoodwill(false); setIncludesInventory(false); setConditions(EMPTY_CONDITIONS); setCoords(null); setMedia([]);
       reload();
     } catch {
       setError("Could not create listing. Please check your details and try again.");
@@ -109,7 +139,11 @@ export default function BusinessesScreen() {
         <ScrollView contentContainerStyle={styles.formContainer}>
           <Text style={styles.formTitle}>List a Business</Text>
           <TextInput style={styles.input} placeholder="Title" value={title} onChangeText={setTitle} />
+          <TextInput style={styles.input} placeholder="Description" value={description} onChangeText={setDescription} multiline numberOfLines={3} />
           <TextInput style={styles.input} placeholder="Asking Price (XAF)" value={price} onChangeText={setPrice} keyboardType="numeric" />
+          <TextInput style={styles.input} placeholder="Size (m², optional)" value={sizeSqm} onChangeText={setSizeSqm} keyboardType="numeric" />
+          <TextInput style={styles.input} placeholder="Seating capacity (optional)" value={seatingCapacity} onChangeText={setSeatingCapacity} keyboardType="numeric" />
+          <TextInput style={styles.input} placeholder="Annual revenue (XAF, optional)" value={annualRevenue} onChangeText={setAnnualRevenue} keyboardType="numeric" />
 
           <View style={styles.switchRow}>
             <Text style={styles.switchLabel}>Includes Goodwill</Text>
@@ -119,6 +153,8 @@ export default function BusinessesScreen() {
             <Text style={styles.switchLabel}>Includes Inventory</Text>
             <Switch value={includesInventory} onValueChange={setIncludesInventory} />
           </View>
+          <MarketplaceFormLocation quarters={quarters} quarterId={quarterId} onQuarterChange={setQuarterId} coords={coords} onCoordsChange={setCoords} />
+          <MarketplaceConditionsFields category="businesses" value={conditions} onChange={setConditions} />
 
           <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto} disabled={uploadingMedia}>
             {uploadingMedia ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.photoButtonText}>Add Photo or Video</Text>}

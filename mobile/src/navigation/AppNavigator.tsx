@@ -70,7 +70,7 @@ export type RootStackParamList = {
   Comparison: undefined;
   Messages: undefined;
   Conversation: { conversationId: string; participantNames: string };
-  Feed: undefined;
+  Feed: { tab?: "forYou" | "following" | "mine" } | undefined;
   CreatePost: { linkedListingId?: string } | undefined;
   AdminConsole: undefined;
   AgentDashboard: undefined;

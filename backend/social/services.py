@@ -93,6 +93,29 @@ def suggest_connections(user, limit=10):
 # or comment on. get_recommended_feed() below has had nothing to
 # recommend that a real user ever put there.
 # ---------------------------------------------------------------------------
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
+_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".ogg", ".aac"}
+
+
+def _infer_media_type(url: str) -> str:
+    """The API only receives URLs, so the media type is read from the file
+    extension — storing every upload as a PHOTO made videos unplayable."""
+    from urllib.parse import urlparse
+    from .models import PostMedia
+    path = urlparse(url).path.lower()
+    extension = path[path.rfind("."):] if "." in path else ""
+    if extension in _VIDEO_EXTENSIONS:
+        return PostMedia.MediaType.VIDEO
+    if extension in _AUDIO_EXTENSIONS:
+        return PostMedia.MediaType.AUDIO
+    return PostMedia.MediaType.PHOTO
+
+
+def has_video_url(urls) -> bool:
+    from .models import PostMedia
+    return any(_infer_media_type(url) == PostMedia.MediaType.VIDEO for url in urls)
+
+
 def create_post(*, author, caption: str = "", post_type=None, tags=None, linked_listing_id=None, poster_role=None, media_urls=None):
     """Creates a real Post AND its mandatory PosterAttribution in one
     step — Post.attribution is a required, one-per-post OneToOne per
@@ -114,10 +137,13 @@ def create_post(*, author, caption: str = "", post_type=None, tags=None, linked_
     if tags:
         from .models import Tag
         for tag_name in tags:
-            tag, _ = Tag.objects.get_or_create(name=tag_name.strip().lstrip("#"))
+            clean_name = tag_name.strip().lstrip("#").strip()
+            if not clean_name:
+                continue
+            tag, _ = Tag.objects.get_or_create(name=clean_name)
             post.tags.add(tag)
-    for url in (media_urls or []):
-        PostMedia.objects.create(post=post, media_type=PostMedia.MediaType.PHOTO, file_url=url)
+    for order, url in enumerate(media_urls or []):
+        PostMedia.objects.create(post=post, media_type=_infer_media_type(url), file_url=url, order=order)
 
     PosterAttribution.objects.create(post=post, poster_role=poster_role or PosterRole.LANDLORD)
     return post
@@ -225,7 +251,13 @@ def get_recommended_feed(user, limit=20):
     )
     interest_tag_ids.discard(None)
 
-    candidates = Post.objects.filter(status=ContentStatus.PUBLISHED).exclude(author=user)
+    from django.db.models import Q
+    candidates = (
+        Post.objects.filter(status=ContentStatus.PUBLISHED)
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        .exclude(author=user)
+        .prefetch_related("tags")
+    )
 
     scored = []
     for post in candidates:
@@ -789,16 +821,34 @@ class AlreadyReviewedError(Exception):
 
 
 def _author_may_rate(author, subject_user) -> bool:
-    """A driver can only be rated by someone they have driven (and a passenger by their driver), so a rating
-    reflects a trip that really happened. Other people (agents, landlords, owners) stay open to any signed-in user."""
+    """Drivers and passengers can only rate each other after completing a ride together, and marketplace sellers and
+    buyers can only rate each other after completing an order together. Other people (agents, landlords, owners) stay
+    open to any signed-in user."""
     if subject_user is None:
         return True
-    from marketplace.models import RideBooking, RideStatus
-    completed = RideBooking.objects.filter(status=RideStatus.COMPLETED)
-    if completed.filter(driver=author, rider=subject_user).exists():
+    from django.db.models import Q
+    from marketplace.models import RideBooking, RideStatus, MarketplaceListingBase, MarketplaceOrder, MarketplaceOrderStatus
+    from services.models import ServiceRequest, ServiceRequestStatus
+
+    completed_rides = RideBooking.objects.filter(status=RideStatus.COMPLETED)
+    if completed_rides.filter(Q(driver=author, rider=subject_user) | Q(driver=subject_user, rider=author)).exists():
         return True
-    if hasattr(subject_user, "driver_profile"):
-        return completed.filter(driver=subject_user, rider=author).exists()
+
+    completed_orders = MarketplaceOrder.objects.filter(status=MarketplaceOrderStatus.COMPLETED)
+    if completed_orders.filter(
+        Q(buyer=author, listing__lister_user=subject_user) | Q(buyer=subject_user, listing__lister_user=author)
+    ).exists():
+        return True
+
+    if ServiceRequest.objects.filter(
+        status=ServiceRequestStatus.COMPLETED, requester=author, technician=subject_user
+    ).exists():
+        return True
+
+    if hasattr(subject_user, "driver_profile") or RideBooking.objects.filter(rider=subject_user).exists():
+        return False
+    if MarketplaceListingBase.objects.filter(lister_user=subject_user).exists() or MarketplaceOrder.objects.filter(buyer=subject_user).exists():
+        return False
     return True
 
 
@@ -813,7 +863,7 @@ def create_or_update_rating(*, author, score, subject_user=None, subject_propert
     if subject_user is not None and subject_user.id == author.id:
         raise CannotRateSelfError("You cannot rate yourself.")
     if not _author_may_rate(author, subject_user):
-        raise RatingNotEarnedError("You can only rate a driver after completing a ride with them.")
+        raise RatingNotEarnedError("You can only rate this person after completing a ride or order with them.")
 
     from .models import Rating
     rating, _ = Rating.objects.update_or_create(

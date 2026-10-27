@@ -164,7 +164,7 @@ class EventBookingViewSet(viewsets.ModelViewSet):
         """The real payment step this booking previously never had —
         pays the 30% deposit through the shared Booking/PaymentEscrow flow."""
         from .services import confirm_event_booking_deposit
-        from transactions.views import FakeRedisLock
+        from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
 
         event_booking = self.get_object()
@@ -173,7 +173,7 @@ class EventBookingViewSet(viewsets.ModelViewSet):
             return Response({"detail": "phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         event_booking, _escrow = confirm_event_booking_deposit(
-            event_booking=event_booking, lock_client=FakeRedisLock(),
+            event_booking=event_booking, lock_client=get_booking_lock_client(),
             payment_gateway=get_active_gateway(), phone_number=phone_number,
         )
         return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)
@@ -183,7 +183,7 @@ class EventBookingViewSet(viewsets.ModelViewSet):
         """Collects the remaining balance — the real gap this closes:
         the balance amount was computed but had no reachable payment step."""
         from .services import confirm_event_booking_balance
-        from transactions.views import FakeRedisLock
+        from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
 
         event_booking = self.get_object()
@@ -192,7 +192,7 @@ class EventBookingViewSet(viewsets.ModelViewSet):
             return Response({"detail": "phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         event_booking, _escrow = confirm_event_booking_balance(
-            event_booking=event_booking, lock_client=FakeRedisLock(),
+            event_booking=event_booking, lock_client=get_booking_lock_client(),
             payment_gateway=get_active_gateway(), phone_number=phone_number,
         )
         return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)

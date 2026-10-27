@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter, usePathname } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
 import PropertyCard from "@/components/PropertyCard";
 import EmptyState from "@/components/ui/EmptyState";
+import LoadError from "@/components/ui/LoadError";
 import { searchListings, type Listing, type Quarter } from "@/lib/api";
 
 // Leaflet touches `window` directly — SSR must be disabled, the same
@@ -36,6 +37,8 @@ export default function SearchResultsView({
   quarters: Quarter[];
 }) {
   const t = useTranslations("SearchPage");
+  const types = useTranslations("HeroSearch");
+  const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -44,12 +47,16 @@ export default function SearchResultsView({
   const [listings, setListings] = useState(initialListings);
   const [page, setPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Real result set changed (new filters applied server-side) — reset
   // the client-side "Load More" pagination state to match.
   useEffect(() => {
-    setListings(initialListings);
-    setPage(1);
+    void Promise.resolve().then(() => {
+      setListings(initialListings);
+      setPage(1);
+      setLoadFailed(false);
+    });
   }, [initialListings]);
 
   function updateFilter(key: string, value: string) {
@@ -61,6 +68,7 @@ export default function SearchResultsView({
 
   async function loadMore() {
     setLoadingMore(true);
+    setLoadFailed(false);
     const nextPage = page + 1;
     try {
       const data = await searchListings({
@@ -75,8 +83,7 @@ export default function SearchResultsView({
       setListings((prev) => [...prev, ...data.results]);
       setPage(nextPage);
     } catch {
-      // Real network/API failure — leave the current results as-is
-      // rather than silently pretending more were loaded.
+      setLoadFailed(true);
     } finally {
       setLoadingMore(false);
     }
@@ -104,7 +111,8 @@ export default function SearchResultsView({
           <button
             key={value || "any"}
             onClick={() => updateFilter("listing_type", value)}
-            className={`px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
+            aria-pressed={currentListingType === value}
+            className={`min-h-11 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
               currentListingType === value ? "bg-[var(--navy)] text-white border-[var(--navy)]" : "border-gray-300 text-gray-700 hover:border-[var(--navy)]"
             }`}
           >
@@ -116,11 +124,12 @@ export default function SearchResultsView({
           <button
             key={value}
             onClick={() => updateFilter("property_type", currentPropertyType === value ? "" : value)}
-            className={`px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
+            aria-pressed={currentPropertyType === value}
+            className={`min-h-11 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
               currentPropertyType === value ? "bg-[var(--gold)] text-[var(--navy)] border-[var(--gold)]" : "border-gray-300 text-gray-700 hover:border-[var(--navy)]"
             }`}
           >
-            {value}
+            {types(value)}
           </button>
         ))}
         <span className="w-px h-5 bg-gray-300 mx-1" />
@@ -128,7 +137,8 @@ export default function SearchResultsView({
           <button
             key={value}
             onClick={() => updateFilter("finish_level", currentFinishLevel === value ? "" : value)}
-            className={`px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
+            aria-pressed={currentFinishLevel === value}
+            className={`min-h-11 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
               currentFinishLevel === value ? "bg-slate-800 text-white border-slate-800" : "border-gray-300 text-gray-700 hover:border-[var(--navy)]"
             }`}
           >
@@ -139,9 +149,10 @@ export default function SearchResultsView({
 
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <select
+          aria-label={t("anyNeighborhood")}
           value={currentQuarter}
           onChange={(e) => updateFilter("quarter", e.target.value)}
-          className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 bg-white"
+          className="min-h-11 px-3 py-1.5 rounded-xl text-sm font-medium border border-gray-300 text-gray-700 bg-white"
         >
           <option value="">{t("anyNeighborhood")}</option>
           {quarters.map((q) => (
@@ -152,9 +163,10 @@ export default function SearchResultsView({
         </select>
 
         <select
+          aria-label={t("sortBy")}
           value={currentOrdering}
           onChange={(e) => updateFilter("ordering", e.target.value)}
-          className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 bg-white"
+          className="min-h-11 px-3 py-1.5 rounded-xl text-sm font-medium border border-gray-300 text-gray-700 bg-white"
         >
           <option value="">{t("sortNewest")}</option>
           <option value="price_asc">{t("sortPriceAsc")}</option>
@@ -171,9 +183,9 @@ export default function SearchResultsView({
           <button
             onClick={() => updateFilter("max_price", "")}
             className="px-3 py-1.5 rounded-full text-sm font-semibold border bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
-            aria-label="Clear budget filter"
+            aria-label={t("clearBudget")}
           >
-            Budget: up to {Number(currentMaxPrice).toLocaleString()} XAF ✕
+            {t("budgetUpTo", { amount: Number(currentMaxPrice).toLocaleString(locale) })} ✕
           </button>
         </div>
       )}
@@ -195,7 +207,8 @@ export default function SearchResultsView({
               ))}
             </div>
 
-            {hasMore && (
+            {loadFailed && <LoadError message={t("loadFailed")} onRetry={loadMore} />}
+            {hasMore && !loadFailed && (
               <div className="flex justify-center mt-6">
                 <button
                   onClick={loadMore}

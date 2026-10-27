@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Linking } from "react-native";
+import { useState, useCallback, useRef } from "react";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Linking, Vibration } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import * as SecureStore from "expo-secure-store";
+import * as Notifications from "expo-notifications";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import {
@@ -28,6 +29,25 @@ export default function AdminConsoleScreen({ navigation }: Props) {
   const [reports, setReports] = useState<AdminContentReport[]>([]);
   const [disputes, setDisputes] = useState<AdminDisputeCase[]>([]);
   const [sosRides, setSosRides] = useState<AdminSosRide[]>([]);
+  const seenSosRef = useRef<Set<string>>(new Set());
+
+  const notifyNewSos = useCallback((incoming: AdminSosRide[]) => {
+    for (const ride of incoming) {
+      const key = `${ride.id}:${ride.sos_raised_at}`;
+      if (!seenSosRef.current.has(key)) {
+        seenSosRef.current.add(key);
+        Vibration.vibrate([0, 400, 200, 400]);
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: `🆘 OaziGo SOS — ${ride.raised_by?.name ?? "Ride Alert"}`,
+            body: `${ride.pickup_description} → ${ride.dropoff_description}`,
+            sound: true,
+          },
+          trigger: null,
+        }).catch(() => {});
+      }
+    }
+  }, []);
 
   const loadAll = useCallback(() => {
     SecureStore.getItemAsync("access_token").then(async (token) => {
@@ -45,14 +65,28 @@ export default function AdminConsoleScreen({ navigation }: Props) {
         setReports(reportsData.results);
         setDisputes(disputesData.results);
         setSosRides(sosData.results);
+        notifyNewSos(sosData.results);
         setStatus("ready");
       } catch {
         setStatus("notAdmin");
       }
     });
-  }, []);
+  }, [notifyNewSos]);
 
-  useFocusEffect(useCallback(() => { loadAll(); }, [loadAll]));
+  useFocusEffect(
+    useCallback(() => {
+      loadAll();
+      const interval = setInterval(() => {
+        listAdminSosRides()
+          .then((sosData) => {
+            setSosRides(sosData.results);
+            notifyNewSos(sosData.results);
+          })
+          .catch(() => {});
+      }, 15000);
+      return () => clearInterval(interval);
+    }, [loadAll, notifyNewSos])
+  );
 
   async function handleApprove(id: string) {
     const res = await approveVerificationRequest(id);

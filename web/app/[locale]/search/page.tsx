@@ -3,6 +3,7 @@ import SearchResultsView from "@/components/SearchResultsView";
 import SaveSearchButton from "@/components/SaveSearchButton";
 import { searchListings, listQuarters } from "@/lib/api";
 import type { Metadata } from "next";
+import LoadError from "@/components/ui/LoadError";
 
 /**
  * WHY this page is set noindex (but follow) rather than given a
@@ -39,8 +40,8 @@ export default async function SearchPage({
   const t = await getTranslations("SearchPage");
   const params = await searchParams;
   const [data, quarters] = await Promise.all([
-    searchListings(params).catch(() => ({ count: 0, next: null, previous: null, results: [] as never[] })),
-    listQuarters().catch(() => []),
+    searchListings(params).catch(() => null),
+    listQuarters().catch(() => null),
   ]);
 
   return (
@@ -48,15 +49,22 @@ export default async function SearchPage({
       <div className="max-w-7xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-[var(--navy)] mb-1">{t("title")}</h1>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <p className="text-gray-600">
+          {data && <p className="text-gray-600">
             {data.count === 1 ? t("countFoundOne", { count: data.count }) : t("countFoundOther", { count: data.count })}
-          </p>
+          </p>}
           {Object.keys(params).length > 0 && (
             <SaveSearchButton filters={params as Record<string, string>} />
           )}
         </div>
 
-        <SearchResultsView listings={data.results} count={data.count} quarters={quarters} />
+        {!data ? (
+          <LoadError message={t("loadFailed")} />
+        ) : (
+          <>
+            {!quarters && <LoadError message={t("areasFailed")} />}
+            <SearchResultsView listings={data.results} count={data.count} quarters={quarters ?? []} />
+          </>
+        )}
       </div>
     </main>
   );

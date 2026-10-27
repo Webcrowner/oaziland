@@ -199,7 +199,7 @@ def resolve_dispute(*, dispute, outcome: str, notes: str = ""):
     order = order_for_escrow(dispute.escrow)
     if order is not None:
         # A marketplace order also pays the seller's wallet or reopens the listing, not just the escrow.
-        resolve_order_dispute(order=order, outcome=outcome)
+        resolve_order_dispute(order=order, outcome=outcome, escrow=dispute.escrow)
     elif outcome == "RELEASE":
         dispute.escrow.release()
     else:

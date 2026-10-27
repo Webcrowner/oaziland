@@ -10,7 +10,7 @@ import {
 } from "./Icons";
 import { getMyProfile, listQuarters, type Quarter, type UserProfile } from "@/lib/api";
 
-interface NavMenuItem {
+export interface NavMenuItem {
   href: string;
   label: string;
   icon: ComponentType<{ size?: number; className?: string }>;
@@ -94,7 +94,7 @@ function NavDropdown({ label, items, pathname }: { label: string; items: NavMenu
 }
 
 /** Neighbourhood search: only real quarters can be chosen, so it always lands on a filtered results page. */
-function HeaderSearch({ placeholder, label, className = "" }: { placeholder: string; label: string; className?: string }) {
+export function HeaderSearch({ placeholder, label, className = "" }: { placeholder: string; label: string; className?: string }) {
   const router = useRouter();
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [value, setValue] = useState("");
@@ -188,7 +188,7 @@ function AvatarMenu({ profile, items, onLogOut, logOutLabel }: {
   );
 }
 
-function MobileGroup({ title, items, onNavigate }: { title: string; items: NavMenuItem[]; onNavigate: () => void }) {
+export function MobileGroup({ title, items, onNavigate }: { title: string; items: NavMenuItem[]; onNavigate: () => void }) {
   return (
     <div>
       <p className="px-1 mb-1.5 text-[11px] font-extrabold uppercase tracking-widest text-slate-500">{title}</p>
@@ -212,40 +212,9 @@ function MobileGroup({ title, items, onNavigate }: { title: string; items: NavMe
   );
 }
 
-/**
- * Site navbar. Priorities: find a property -> book a stay -> get things done,
- * with one gold call-to-action and every account link in a single avatar menu.
- */
-export default function Navbar(): ReactNode {
+/** The site's three main link groups, shared by the desktop navbar and the mobile Explore sheet. */
+export function useSiteMenus() {
   const t = useTranslations("Header");
-  const router = useRouter();
-  const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-
-  // Re-checked on every route change so a login/logout on another page is picked up.
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    setIsLoggedIn(!!token);
-    if (token) {
-      getMyProfile(token)
-        .then((p) => setProfile(p))
-        .catch(() => setProfile(null));
-    } else {
-      setProfile(null);
-    }
-  }, [pathname]);
-
-  function handleLogOut() {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    setIsLoggedIn(false);
-    setProfile(null);
-    setMobileOpen(false);
-    router.push("/");
-  }
-
   const propertiesMenu: NavMenuItem[] = [
     { href: "/search?listing_type=RENT", label: t("rent"), icon: IconHome },
     { href: "/buy", label: t("buy"), icon: IconBuilding },
@@ -267,6 +236,47 @@ export default function Navbar(): ReactNode {
     { href: "/careers", label: t("careers"), icon: IconBriefcase },
     { href: "/how-it-works", label: t("howItWorks"), icon: IconSparkles },
   ];
+  return { propertiesMenu, staysMenu, servicesMenu };
+}
+
+/**
+ * Site navbar. Priorities: find a property -> book a stay -> get things done,
+ * with one gold call-to-action and every account link in a single avatar menu.
+ */
+export default function Navbar(): ReactNode {
+  const t = useTranslations("Header");
+  const router = useRouter();
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  // Re-checked on every route change so a login/logout on another page is picked up.
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    void Promise.resolve().then(() => {
+      setIsLoggedIn(!!token);
+      if (!token) {
+        setProfile(null);
+      }
+    });
+    if (token) {
+      getMyProfile(token)
+        .then((p) => setProfile(p))
+        .catch(() => setProfile(null));
+    }
+  }, [pathname]);
+
+  function handleLogOut() {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    setIsLoggedIn(false);
+    setProfile(null);
+    setMobileOpen(false);
+    router.push("/");
+  }
+
+  const { propertiesMenu, staysMenu, servicesMenu } = useSiteMenus();
 
   const accountItems = [
     { href: dashboardHrefFor(profile), label: t("dashboard") },
@@ -301,6 +311,15 @@ export default function Navbar(): ReactNode {
             <NavDropdown label={t("propertiesMenu")} items={propertiesMenu} pathname={pathname} />
             <NavDropdown label={t("staysMenu")} items={staysMenu} pathname={pathname} />
             <NavDropdown label={t("servicesMenu")} items={servicesMenu} pathname={pathname} />
+            <Link
+              href="/videos"
+              className={`flex items-center gap-1.5 whitespace-nowrap px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                pathname === "/videos" || pathname.startsWith("/videos/") ? "bg-white/15 text-[var(--gold)]" : "text-slate-200 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l10.9-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14Z" /></svg>
+              {t("videos")}
+            </Link>
           </nav>
 
           <HeaderSearch placeholder={t("searchPlaceholder")} label={t("searchLabel")} className="hidden lg:block flex-1 max-w-xs" />

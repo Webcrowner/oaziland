@@ -7,6 +7,7 @@ import MissingAreaRequest from "@/components/MissingAreaRequest";
 import PageHeader from "@/components/ui/PageHeader";
 import AssetCard from "@/components/AssetCard";
 import Button from "@/components/ui/Button";
+import LoadError from "@/components/ui/LoadError";
 import MediaUploader from "@/components/MediaUploader";
 import MediaThumbs from "@/components/MediaThumbs";
 import LocationCapture from "@/components/LocationCapture";
@@ -35,9 +36,6 @@ const SHOWCASE_HOTELS = [
     id: "showcase-h1",
     name: "Kribi Oceanfront Resort & Spa",
     quarter_name: "Kribi Beachfront, South",
-    star_rating: 4,
-    verified: true,
-    rooms_count: 3,
     cheapest_rate: "45,000",
     photo_url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80",
     amenities: ["Ocean View", "Private Beach", "Pool & Bar", "Fresh Seafood"],
@@ -46,9 +44,6 @@ const SHOWCASE_HOTELS = [
     id: "showcase-h2",
     name: "Bastos Diplomatic Suites & Hotel",
     quarter_name: "Bastos, Yaoundé",
-    star_rating: 5,
-    verified: true,
-    rooms_count: 5,
     cheapest_rate: "65,000",
     photo_url: "https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=800&q=80",
     amenities: ["Free High-Speed WiFi", "Airport Shuttle", "Fitness Center", "Gourmet Dining"],
@@ -57,9 +52,6 @@ const SHOWCASE_HOTELS = [
     id: "showcase-h3",
     name: "Douala Marina Executive Hotel",
     quarter_name: "Bonapriso, Douala",
-    star_rating: 4,
-    verified: true,
-    rooms_count: 4,
     cheapest_rate: "55,000",
     photo_url: "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=800&q=80",
     amenities: ["AC in all rooms", "Conference Hall", "Backup Power", "Executive Lounge"],
@@ -68,9 +60,6 @@ const SHOWCASE_HOTELS = [
     id: "showcase-h4",
     name: "Buea Mountain View Lodge",
     quarter_name: "Molyko / Clerks Quarter, Buea",
-    star_rating: 3,
-    verified: true,
-    rooms_count: 2,
     cheapest_rate: "35,000",
     photo_url: "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=800&q=80",
     amenities: ["Mountain View", "Breakfast Included", "Secure Parking", "24/7 Hot Water"],
@@ -81,7 +70,7 @@ export default function HotelsPage() {
   const t = useTranslations("HotelsPage");
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [showForm, setShowForm] = useState(false);
 
   // Filter states
@@ -113,7 +102,7 @@ export default function HotelsPage() {
   const [bookingStatus, setBookingStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [bookingError, setBookingError] = useState("");
 
-  // Customer-facing direct booking modal state (both for live and showcase listings)
+  // Only live hotels can enter checkout.
   const [activeCheckout, setActiveCheckout] = useState<{
     title: string;
     quarter: string;
@@ -172,14 +161,17 @@ export default function HotelsPage() {
   }
 
   const load = useCallback(() => {
+    setStatus("loading");
     searchHotels()
-      .then((data) => setHotels(data.results))
-      .catch(() => setHotels([]))
-      .finally(() => setStatus("ready"));
+      .then((data) => {
+        setHotels(data.results);
+        setStatus("ready");
+      })
+      .catch(() => setStatus("error"));
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(load);
     listQuarters()
       .then((data) => {
         setQuarters(data);
@@ -513,8 +505,10 @@ export default function HotelsPage() {
 
       {/* ================= LISTINGS DISPLAY ================= */}
       {status === "loading" ? (
-        <div className="py-20 text-center text-slate-400">Loading hotels...</div>
-      ) : hotels.length > 0 ? (
+        <div role="status" className="py-20 text-center text-slate-600">{t("loadingHotels")}</div>
+      ) : status === "error" ? (
+        <LoadError message={t("loadFailed")} onRetry={load} />
+      ) : hotels.length > 0 || searchQuarter || filterStar || maxPrice ? (
         /* Real live hotels from the backend */
         <div>
           <div className="flex items-center justify-between mb-5">
@@ -523,6 +517,7 @@ export default function HotelsPage() {
             </h3>
           </div>
 
+          {filteredHotels.length === 0 && <p className="rounded-2xl border border-slate-200 p-8 text-center text-slate-600">{t("noMatches")}</p>}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredHotels.map((hotel) => {
               const cheapestRoom = hotel.room_types.length
@@ -603,20 +598,20 @@ export default function HotelsPage() {
           </div>
         </div>
       ) : (
-        /* Professional Showcase Cards when Database is empty — eliminates the bare empty void */
+        /* Samples are explicitly separate from bookable inventory. */
         <div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
             <div>
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-[11px] font-bold uppercase tracking-wider text-amber-800 mb-1">
                 <IconSparkles size={12} />
-                <span>Premier Destination Preview</span>
+                <span>{t("sampleBadge")}</span>
               </div>
               <h3 className="font-[family-name:var(--font-display)] text-xl font-bold text-slate-900">
-                Featured Verified Accommodations in Cameroon
+                {t("sampleTitle")}
               </h3>
             </div>
             <p className="text-xs text-slate-500 max-w-xs">
-              Live bookings open as hotel partners complete their local verification audits.
+              {t("sampleDescription")}
             </p>
           </div>
 
@@ -624,7 +619,7 @@ export default function HotelsPage() {
             {SHOWCASE_HOTELS.map((item) => (
               <div
                 key={item.id}
-                className="group bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between"
+                className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm flex flex-col justify-between"
               >
                 <div>
                   <div className="relative h-44 overflow-hidden bg-slate-100">
@@ -633,25 +628,18 @@ export default function HotelsPage() {
                       alt={item.name}
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
-                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500 text-white text-[10px] font-bold uppercase">
-                      <IconShieldCheck size={11} />
-                      <span>Verified</span>
+                    <div className="absolute top-2.5 left-2.5 rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
+                      {t("sampleBadge")}
                     </div>
 
                     <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-slate-950/80 to-transparent p-3">
                       <p className="text-white text-base font-bold">
-                        {item.cheapest_rate} <span className="text-[11px] font-normal text-slate-200">XAF / night</span>
+                        {t("sampleRate", { amount: item.cheapest_rate })}
                       </p>
                     </div>
                   </div>
 
                   <div className="p-4">
-                    <div className="flex items-center gap-1 text-amber-400 text-xs mb-1.5">
-                      {Array.from({ length: item.star_rating }).map((_, r) => (
-                        <IconStar key={r} size={13} />
-                      ))}
-                    </div>
-
                     <h4 className="font-bold text-slate-900 text-sm mb-1 line-clamp-1 group-hover:text-amber-600 transition-colors">
                       {item.name}
                     </h4>
@@ -672,22 +660,7 @@ export default function HotelsPage() {
                 </div>
 
                 <div className="p-4 pt-0">
-                  <button
-                    onClick={() => {
-                      const matchedHotel = hotels.find((h) => h.quarter_name.toLowerCase().includes(item.quarter_name.toLowerCase().split(",")[0]));
-                      setActiveCheckout({
-                        title: item.name,
-                        quarter: item.quarter_name,
-                        price: item.cheapest_rate.replace(/,/g, ""),
-                        targetId: matchedHotel ? matchedHotel.id : item.id,
-                        hotelObj: matchedHotel || null,
-                      });
-                    }}
-                    className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black transition-colors text-center shadow-md shadow-amber-500/20 flex items-center justify-center gap-1.5"
-                  >
-                    <IconLock size={13} />
-                    <span>Book with Escrow Protection</span>
-                  </button>
+                  <p className="rounded-xl bg-slate-100 px-3 py-3 text-center text-sm font-medium text-slate-600">{t("sampleUnavailable")}</p>
                 </div>
               </div>
             ))}

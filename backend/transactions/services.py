@@ -63,6 +63,22 @@ class PaymentDetails:
 HOLD_TTL_SECONDS = 420  # 7 minutes, per Architecture doc §2.2.1 / Pre-Dev §1.3
 
 
+def _acquire_booking_lock(lock_client, key: str, ttl_seconds: int, owner_token: str) -> bool:
+    acquire_owned = getattr(lock_client, "acquire_owned", None)
+    if acquire_owned is not None:
+        return acquire_owned(key, ttl_seconds, owner_token)
+    return lock_client.acquire(key, ttl_seconds=ttl_seconds)
+
+
+def _release_booking_lock(lock_client, booking: Booking):
+    lock_key = f"booking-lock:{booking.target_content_type}:{booking.target_id}"
+    release_owned = getattr(lock_client, "release_owned", None)
+    if release_owned is not None:
+        release_owned(lock_key, booking.idempotency_key)
+    else:
+        lock_client.release(lock_key, permanent=True)
+
+
 def reserve_booking(
     *,
     lock_client,
@@ -77,7 +93,8 @@ def reserve_booking(
     Raises InventoryConflictError if the lock cannot be acquired — this is
     what prevents two guests from booking the same house simultaneously."""
     lock_key = f"booking-lock:{target_content_type}:{target_id}"
-    if not lock_client.acquire(lock_key, ttl_seconds=HOLD_TTL_SECONDS):
+    idempotency_key = str(uuid.uuid4())
+    if not _acquire_booking_lock(lock_client, lock_key, HOLD_TTL_SECONDS, idempotency_key):
         raise InventoryConflictError(
             "This unit is no longer available for the selected dates."
         )
@@ -90,7 +107,7 @@ def reserve_booking(
             requester=requester,
             status=BookingStatus.PENDING,
             amount_xaf=amount_xaf,
-            idempotency_key=str(uuid.uuid4()),
+            idempotency_key=idempotency_key,
             hold_expires_at=timezone.now() + timezone.timedelta(seconds=HOLD_TTL_SECONDS),
         )
     return booking
@@ -153,9 +170,17 @@ def confirm_payment(
             raise WebhookSignatureError(
                 "Payment webhook signature could not be verified — possible fraud attempt."
             )
+        if verification.external_id and verification.external_id != booking.idempotency_key:
+            raise WebhookSignatureError("Payment webhook does not match this booking.")
+        if verification.amount_xaf is not None and verification.amount_xaf != booking.amount_xaf:
+            raise WebhookSignatureError("Payment webhook amount does not match this booking.")
         if not verification.payment_succeeded:
             fail_payment(lock_client=lock_client, booking=booking)
             raise ValueError("Payment did not succeed according to the gateway.")
+        verified_provider_reference = verification.provider_reference or provider_reference
+        if not verified_provider_reference:
+            raise WebhookSignatureError("Payment webhook has no provider reference.")
+        provider_reference = verified_provider_reference
 
     if platform_fee_xaf is None:
         from monetization.models import PlatformFeePolicy
@@ -163,18 +188,29 @@ def confirm_payment(
         platform_fee_xaf = PlatformFeePolicy.fee_for(fee_category, booking.amount_xaf)
 
     with db_transaction.atomic():
-        booking.confirm()
+        locked_booking = Booking.objects.select_for_update().get(pk=booking.pk)
+        existing_escrow = PaymentEscrow.objects.filter(booking=locked_booking).first()
+        if existing_escrow is not None:
+            return existing_escrow
+        if locked_booking.status not in (BookingStatus.PENDING, BookingStatus.PAYMENT_PROCESSING):
+            raise BookingAlreadySettledError(
+                f"A payment cannot be confirmed while this booking is {locked_booking.status}."
+            )
+        if locked_booking.hold_expires_at and locked_booking.hold_expires_at <= timezone.now():
+            raise BookingAlreadySettledError("This payment hold has expired. Start a new payment.")
+        locked_booking.confirm()
         escrow = PaymentEscrow.objects.create(
-            booking=booking,
-            gross_amount_xaf=booking.amount_xaf,
+            booking=locked_booking,
+            gross_amount_xaf=locked_booking.amount_xaf,
             platform_fee_xaf=platform_fee_xaf,
-            payee_amount_xaf=booking.amount_xaf - platform_fee_xaf,
+            payee_amount_xaf=locked_booking.amount_xaf - platform_fee_xaf,
             status=EscrowStatus.HELD,
             provider=provider,
             provider_reference=provider_reference,
         )
-    lock_key = f"booking-lock:{booking.target_content_type}:{booking.target_id}"
-    lock_client.release(lock_key, permanent=True)
+        booking.status = locked_booking.status
+        booking.hold_expires_at = locked_booking.hold_expires_at
+    _release_booking_lock(lock_client, booking)
 
     # WHY this was a real gap before this fix: a confirmed booking
     # previously sent NOTHING to the guest — the acceptance criteria's
@@ -203,8 +239,7 @@ def fail_payment(*, lock_client, booking: Booking):
     """Step 5a: payment declined — release the hold so the unit becomes
     searchable again, and let the guest retry."""
     booking.fail_payment()
-    lock_key = f"booking-lock:{booking.target_content_type}:{booking.target_id}"
-    lock_client.release(lock_key)
+    _release_booking_lock(lock_client, booking)
 
 
 def expire_hold(*, lock_client, booking: Booking):
@@ -212,8 +247,7 @@ def expire_hold(*, lock_client, booking: Booking):
     origin. Intended to be called by a periodic sweep job querying
     Booking.objects.filter(status=PENDING, hold_expires_at__lt=now())."""
     booking.expire()
-    lock_key = f"booking-lock:{booking.target_content_type}:{booking.target_id}"
-    lock_client.release(lock_key)
+    _release_booking_lock(lock_client, booking)
 
 
 def cancel_booking(*, lock_client, booking: Booking):
@@ -230,8 +264,7 @@ def cancel_booking(*, lock_client, booking: Booking):
             "This booking can no longer be cancelled this way — open a dispute if you already paid."
         )
     booking.cancel()
-    lock_key = f"booking-lock:{booking.target_content_type}:{booking.target_id}"
-    lock_client.release(lock_key)
+    _release_booking_lock(lock_client, booking)
 
     # A cancelled reservation on a Listing is exactly the "this is
     # available again" event the platform-wide waitlist exists for.

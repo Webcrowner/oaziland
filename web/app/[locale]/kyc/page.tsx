@@ -128,7 +128,7 @@ export default function KycPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   const readyToSubmit = !!(idFrontUrl && idBackUrl && selfieUrl);

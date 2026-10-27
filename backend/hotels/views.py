@@ -69,6 +69,30 @@ class HotelViewSet(viewsets.ModelViewSet):
             )
         return Response(HotelSerializer(hotel).data, status=status.HTTP_201_CREATED)
 
+    def update(self, request, *args, **kwargs):
+        hotel = self.get_object()
+        if hotel.owner_id != request.user.id and not hasattr(request.user, "admin_profile"):
+            return Response({"detail": "Only the hotel's own owner can update it."}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        extra = {}
+        if "name" in serializer.validated_data:
+            extra["name"] = serializer.validated_data["name"].strip()
+        serializer.save(**extra)
+
+    @action(detail=True, methods=["post"], url_path="set-name")
+    def set_name(self, request, pk=None):
+        hotel = self.get_object()
+        if hotel.owner_id != request.user.id and not hasattr(request.user, "admin_profile"):
+            return Response({"detail": "Only the hotel's own owner can name it."}, status=status.HTTP_403_FORBIDDEN)
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return Response({"detail": "Enter a name for the hotel."}, status=status.HTTP_400_BAD_REQUEST)
+        hotel.name = name[:200]
+        hotel.save(update_fields=["name"])
+        return Response(HotelSerializer(hotel).data)
+
     @action(detail=True, methods=["post"], url_path="set-location")
     def set_location(self, request, pk=None):
         hotel = self.get_object()
@@ -167,7 +191,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
         pays the full room rate through the shared Booking/PaymentEscrow
         flow, exactly like every other transaction type."""
         from .services import confirm_reservation_payment
-        from transactions.views import FakeRedisLock
+        from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
 
         try:
@@ -180,7 +204,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
             return Response({"detail": "phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         reservation, _escrow = confirm_reservation_payment(
-            reservation=reservation, lock_client=FakeRedisLock(),
+            reservation=reservation, lock_client=get_booking_lock_client(),
             payment_gateway=get_active_gateway(), phone_number=phone_number,
         )
         return Response(ReservationSerializer(reservation).data, status=status.HTTP_200_OK)

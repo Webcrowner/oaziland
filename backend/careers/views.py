@@ -4,8 +4,13 @@ public (browsing available courses shouldn't require an account,
 matching how the platform treats browsing everywhere else);
 enrolling requires login.
 """
+import django_filters
+from django.db.models import Count, Q
+from django.http import FileResponse
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from oaziland.permissions import IsOwnerOrReadOnly
 from .models import TrainingProgram, TrainingEnrollment, JobPosting, JobApplication
@@ -16,18 +21,56 @@ from .serializers import (
 from .services import (
     enroll_in_training, mark_training_completed, AlreadyEnrolledError, apply_to_job, AlreadyAppliedError,
     update_application_status, share_job_posting_via_whatsapp, mark_training_in_progress, drop_training,
+    InvalidEnrollmentTransitionError,
 )
+from .course_services import (
+    CourseError, complete_lesson, course_progress, is_platform_admin, learner_outline, submit_assignment, submit_quiz,
+)
+from .models import AssignmentSubmission
+
+
+def pdf_response(submission):
+    response = FileResponse(submission.file.open("rb"), content_type="application/pdf")
+    response["Content-Disposition"] = 'inline; filename="submission.pdf"'
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+class TrainingProgramFilter(django_filters.FilterSet):
+    """?category=TENANT_LAW&q=lease&free=true&certificate=true"""
+    q = django_filters.CharFilter(method="filter_q")
+    free = django_filters.BooleanFilter(method="filter_free")
+    certificate = django_filters.BooleanFilter(field_name="issues_certification")
+
+    class Meta:
+        model = TrainingProgram
+        fields = ["category"]
+
+    def filter_q(self, queryset, name, value):
+        value = value.strip()
+        if not value:
+            return queryset
+        return queryset.filter(Q(title__icontains=value) | Q(description__icontains=value))
+
+    def filter_free(self, queryset, name, value):
+        free = Q(price_xaf__isnull=True) | Q(price_xaf=0)
+        return queryset.filter(free) if value else queryset.exclude(free)
 
 
 class TrainingProgramViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = TrainingProgramSerializer
-    queryset = TrainingProgram.objects.select_related("provider").order_by("title")
+    queryset = TrainingProgram.objects.select_related("provider", "event").order_by("title")
     permission_classes = [permissions.AllowAny]
+    filterset_class = TrainingProgramFilter
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return TrainingProgram.objects.none()
-        return self.queryset
+        queryset = self.queryset.annotate(lesson_total=Count("modules__lessons", distinct=True))
+        if is_platform_admin(self.request.user):
+            return queryset
+        # Drafts stay hidden from the public catalogue (staff still reach them via /api/manage/).
+        return queryset.filter(is_published=True)
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def enroll(self, request, pk=None):
@@ -39,11 +82,27 @@ class TrainingProgramViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(TrainingEnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
 
 
+class MyEnrollmentPagination(PageNumberPagination):
+    """The catalogue page maps every enrollment onto its program, so it
+    needs the full set — the default 20-per-page would silently hide a
+    student's enrollment in any program beyond the first page."""
+    page_size = 100
+
+
 class MyEnrollmentViewSet(viewsets.ReadOnlyModelViewSet):
     """A student's own enrollments — scoped to self, the same pattern
     as MyRoomAllocationViewSet and every other 'my X' endpoint."""
     serializer_class = TrainingEnrollmentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = MyEnrollmentPagination
+
+    @staticmethod
+    def _transition(fn, enrollment):
+        try:
+            fn(enrollment)
+        except InvalidEnrollmentTransitionError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response(TrainingEnrollmentSerializer(enrollment).data)
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -57,24 +116,71 @@ class MyEnrollmentViewSet(viewsets.ReadOnlyModelViewSet):
         requester's own enrollments, so this can't be called on
         someone else's."""
         enrollment = self.get_object()
-        mark_training_completed(enrollment)
-        return Response(TrainingEnrollmentSerializer(enrollment).data)
+        return self._transition(mark_training_completed, enrollment)
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
         """The real gap this closes: enrollment could only ever go
         ENROLLED → COMPLETED, with no way to mark IN_PROGRESS."""
         enrollment = self.get_object()
-        mark_training_in_progress(enrollment)
-        return Response(TrainingEnrollmentSerializer(enrollment).data)
+        return self._transition(mark_training_in_progress, enrollment)
 
     @action(detail=True, methods=["post"])
     def drop(self, request, pk=None):
         """The real gap this closes: a student had no way to back out
         of a training they'd enrolled in."""
         enrollment = self.get_object()
-        drop_training(enrollment)
-        return Response(TrainingEnrollmentSerializer(enrollment).data)
+        return self._transition(drop_training, enrollment)
+
+    @action(detail=True, methods=["get"])
+    def course(self, request, pk=None):
+        """The course player's data: syllabus, lesson content and the
+        learner's own progress (never the quiz answers)."""
+        return Response(learner_outline(self.get_object(), request))
+
+    @action(detail=True, methods=["post"], url_path=r"lessons/(?P<lesson_id>[0-9a-fA-F-]{32,36})/complete")
+    def complete_lesson(self, request, pk=None, lesson_id=None):
+        enrollment = self.get_object()
+        try:
+            complete_lesson(enrollment, lesson_id)
+        except (InvalidEnrollmentTransitionError, CourseError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        enrollment.refresh_from_db()
+        return Response({"status": enrollment.status, "progress": course_progress(enrollment)})
+
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser], url_path=r"assignments/(?P<lesson_id>[0-9a-fA-F-]{32,36})/submit")
+    def submit_assignment(self, request, pk=None, lesson_id=None):
+        enrollment = self.get_object()
+        file = request.FILES.get("file")
+        if file is None:
+            return Response({"detail": "Attach your PDF as 'file'."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            submission = submit_assignment(enrollment, lesson_id, file)
+        except (InvalidEnrollmentTransitionError, CourseError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT if isinstance(e, InvalidEnrollmentTransitionError) else status.HTTP_400_BAD_REQUEST)
+        return Response({"status": submission.status}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path=r"assignments/(?P<lesson_id>[0-9a-fA-F-]{32,36})/file")
+    def assignment_file(self, request, pk=None, lesson_id=None):
+        """A learner can always re-open their own submitted PDF."""
+        enrollment = self.get_object()
+        submission = AssignmentSubmission.objects.filter(enrollment=enrollment, lesson_id=lesson_id).first()
+        if submission is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return pdf_response(submission)
+
+    @action(detail=True, methods=["post"], url_path=r"quizzes/(?P<lesson_id>[0-9a-fA-F-]{32,36})/submit")
+    def submit_quiz(self, request, pk=None, lesson_id=None):
+        enrollment = self.get_object()
+        answers = request.data.get("answers")
+        if not isinstance(answers, dict):
+            return Response({"detail": "answers must be an object of question id to selected choice ids."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = submit_quiz(enrollment, lesson_id, answers)
+        except (InvalidEnrollmentTransitionError, CourseError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        enrollment.refresh_from_db()
+        return Response({**result, "status": enrollment.status, "progress": course_progress(enrollment)})
 
 
 class JobPostingViewSet(viewsets.ModelViewSet):

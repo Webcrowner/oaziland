@@ -12,7 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema
 from .models import SocialAccountLink, Conversation, Post, Comment, ContentStatus, Rating, Review
-from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer, PostSerializer, CommentSerializer, RatingSerializer, ReviewSerializer
+from .serializers import SocialAccountLinkSerializer, ConversationSerializer, MessageSerializer, PostSerializer, ReelSerializer, CommentSerializer, RatingSerializer, ReviewSerializer
 from .services import (
     link_social_account, create_or_update_rating, create_review, CannotRateSelfError, RatingNotEarnedError,
     ReviewRequiresCompletedBookingError, AlreadyReviewedError, is_following, is_mutual_follow,
@@ -68,6 +68,14 @@ class TestimonialsView(APIView):
 
 class ChatThrottle(UserRateThrottle):
     scope = "chat"
+
+
+class VideoThrottle(UserRateThrottle):
+    scope = "videos"
+
+
+# Actions that serve the full-screen video experience (ReelSerializer, own throttle bucket).
+VIDEO_ACTIONS = {"reels", "reel_detail", "trending_tags", "record_view"}
 
 
 # Deliberately identical whichever side blocked, so a block never reveals itself.
@@ -299,26 +307,79 @@ class PostViewSet(viewsets.ModelViewSet):
         # @action needs its own explicit branch here, since falling
         # through to the authenticated-only default silently applies
         # to it too).
-        if self.action in ("list", "retrieve", "comments", "following_feed", "topic_feed", "search_posts"):
+        if self.action in ("list", "retrieve", "comments", "following_feed", "topic_feed", "search_posts") or self.action in VIDEO_ACTIONS:
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.action in VIDEO_ACTIONS:
+            return [VideoThrottle()]
+        return super().get_throttles()
+
+    def get_serializer_class(self):
+        if self.action in VIDEO_ACTIONS or self.action in ("save_post", "share_post"):
+            return ReelSerializer
+        return super().get_serializer_class()
+
+    # No edit UI exists and the serializer can't re-apply write-only tags/media on update, so
+    # PUT/PATCH are closed rather than letting anyone rewrite a post through the generic router.
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    @staticmethod
+    def _with_related(posts):
+        return posts.select_related("author", "attribution").prefetch_related("tags", "media", "reactions")
+
+    def _visible_posts(self):
+        """Published, un-expired posts that the requester hasn't blocked — the one
+        definition of 'publicly visible' shared by every feed, search and detail
+        route (previously only some of them checked status, none checked expiry)."""
+        from django.db.models import Q
+        from django.utils import timezone
+        posts = Post.objects.filter(status=ContentStatus.PUBLISHED).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+        )
+        if self.request.user.is_authenticated:
+            from engagement.services import exclude_blocked_users
+            posts = exclude_blocked_users(posts, self.request.user)
+        return self._with_related(posts)
+
+    @staticmethod
+    def _real_estate_first(posts):
+        """The platform's hard rule: property-linked posts outrank everything else."""
+        from django.db.models import Case, IntegerField, Value, When
+        return posts.annotate(
+            _real_estate=Case(When(linked_listing_id__isnull=False, then=Value(1)), default=Value(0), output_field=IntegerField()),
+        ).order_by("-_real_estate", "-created_at")
+
+    def _paginated(self, posts):
+        page = self.paginate_queryset(posts)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Post.objects.none()
-        if self.action == "list":
-            from .services import get_recommended_feed
-            # Anonymous browsing still needs SOME real ranking — the
-            # full personalized algorithm needs a real user for its
-            # interest-tag matching, so an anonymous request falls
-            # back to real-estate-priority + recency only (no
-            # interest-tag boost), never a broken/empty feed.
-            if self.request.user.is_authenticated:
-                from engagement.services import exclude_blocked_users
-                feed = get_recommended_feed(self.request.user, limit=50)
-                return exclude_blocked_users(Post.objects.filter(id__in=[p.id for p in feed]), self.request.user)
-            return Post.objects.filter(status=ContentStatus.PUBLISHED).order_by("-created_at")[:50]
-        return Post.objects.all()
+        user = self.request.user
+        if self.action == "destroy":
+            # Only the author can delete; anyone else gets a 404 rather than a hint the post exists.
+            return Post.objects.filter(author=user)
+        visible = self._visible_posts()
+        if not user.is_authenticated:
+            return visible
+        from django.db.models import Q
+        return self._with_related(Post.objects.filter(Q(id__in=visible.values("id")) | Q(author=user)))
+
+    def list(self, request, *args, **kwargs):
+        # Anonymous browsing still needs SOME real ranking — the full personalized
+        # algorithm needs a real user for its interest-tag matching, so an anonymous
+        # request falls back to real-estate-priority + recency (no interest-tag boost).
+        if not request.user.is_authenticated:
+            return self._paginated(self._real_estate_first(self._visible_posts()))
+        from .services import get_recommended_feed
+        ranked_ids = [post.id for post in get_recommended_feed(request.user, limit=50)]
+        # Re-filtering with id__in alone discards the ranking, so the order is re-applied explicitly.
+        by_id = {post.id: post for post in self._visible_posts().filter(id__in=ranked_ids)}
+        return self._paginated([by_id[post_id] for post_id in ranked_ids if post_id in by_id])
 
     def create(self, request, *args, **kwargs):
         from .services import create_post, publish_users_post
@@ -337,7 +398,7 @@ class PostViewSet(viewsets.ModelViewSet):
             publish_users_post(post)
         except ContentBlockedError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(PostSerializer(post).data, status=status.HTTP_201_CREATED)
+        return Response(self.get_serializer(post).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def react(self, request, pk=None):
@@ -348,19 +409,31 @@ class PostViewSet(viewsets.ModelViewSet):
         if emoji not in EmojiType.values:
             return Response({"detail": f"emoji must be one of {EmojiType.values}."}, status=status.HTTP_400_BAD_REQUEST)
         react_to_post(post=post, author=request.user, emoji=emoji)
-        return Response(PostSerializer(post).data)
+        # Re-read so the prefetched reactions reflect the change just made.
+        return Response(self.get_serializer(self.get_object()).data)
 
     @action(detail=True, methods=["post"], url_path="remove-reaction")
     def remove_reaction_action(self, request, pk=None):
         from .services import remove_reaction
         post = self.get_object()
         remove_reaction(post=post, author=request.user)
-        return Response(PostSerializer(post).data)
+        return Response(self.get_serializer(self.get_object()).data)
 
     @action(detail=True, methods=["get"])
     def comments(self, request, pk=None):
         post = self.get_object()
-        return Response(CommentSerializer(post.comments.order_by("created_at"), many=True).data)
+        comments = post.comments.select_related("author").order_by("created_at")
+        if request.user.is_authenticated:
+            from engagement.services import exclude_blocked_users
+            comments = exclude_blocked_users(comments, request.user)
+        return Response(CommentSerializer(comments, many=True, context=self.get_serializer_context()).data)
+
+    @action(detail=False, methods=["get"], url_path="mine", permission_classes=[permissions.IsAuthenticated])
+    def my_posts(self, request):
+        """The author's own posts in every status — the main feed never shows
+        your own posts, so without this a new post seemed to vanish."""
+        posts = self._with_related(Post.objects.filter(author=request.user)).order_by("-created_at")
+        return self._paginated(posts)
 
     @action(detail=False, methods=["get"], url_path="following")
     def following_feed(self, request):
@@ -370,13 +443,11 @@ class PostViewSet(viewsets.ModelViewSet):
         posted' is a deliberately simpler, more literal promise than
         the algorithmic FYP feed."""
         if not request.user.is_authenticated:
-            return Response({"count": 0, "results": []})
+            return Response({"count": 0, "next": None, "previous": None, "results": []})
         from .models import Follow
         followed_ids = Follow.objects.filter(follower=request.user).values_list("followee_id", flat=True)
-        posts = Post.objects.filter(author_id__in=followed_ids, status=ContentStatus.PUBLISHED).order_by("-created_at")
-        page = self.paginate_queryset(posts)
-        serializer = self.get_serializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        posts = self._visible_posts().filter(author_id__in=followed_ids).order_by("-created_at")
+        return self._paginated(posts)
 
     @action(detail=False, methods=["get"], url_path="topic")
     def topic_feed(self, request):
@@ -385,10 +456,8 @@ class PostViewSet(viewsets.ModelViewSet):
         tag_name = request.query_params.get("tag", "").strip().lstrip("#")
         if not tag_name:
             return Response({"detail": "A ?tag= query parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
-        posts = Post.objects.filter(tags__name__iexact=tag_name, status=ContentStatus.PUBLISHED).order_by("-linked_listing_id", "-created_at")
-        page = self.paginate_queryset(posts)
-        serializer = self.get_serializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        posts = self._real_estate_first(self._visible_posts().filter(tags__name__iexact=tag_name).distinct())
+        return self._paginated(posts)
 
     @action(detail=False, methods=["get"], url_path="search")
     def search_posts(self, request):
@@ -397,13 +466,131 @@ class PostViewSet(viewsets.ModelViewSet):
         query = request.query_params.get("q", "").strip()
         if not query:
             return Response({"detail": "A ?q= query parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
-        posts = Post.objects.filter(
-            Q(caption__icontains=query) | Q(tags__name__icontains=query),
-            status=ContentStatus.PUBLISHED,
+        posts = self._visible_posts().filter(
+            Q(caption__icontains=query) | Q(tags__name__icontains=query.lstrip("#")),
         ).distinct().order_by("-created_at")
-        page = self.paginate_queryset(posts)
-        serializer = self.get_serializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        return self._paginated(posts)
+
+    def _video_posts(self):
+        from .models import PostMedia
+        return self._visible_posts().filter(
+            id__in=PostMedia.objects.filter(media_type=PostMedia.MediaType.VIDEO).values("post_id"),
+        )
+
+    @action(detail=False, methods=["get"])
+    def reels(self, request):
+        """The TikTok-style video feed: every visible post that has a video, narrowed by
+        scope (for_you / following / trending / saved) and optional search, tag, kind, listing
+        and author filters. Property-linked videos still rank first in for_you."""
+        import uuid as uuid_lib
+        from django.db.models import Count, F, Q
+        from .models import Favorite, Follow
+
+        params = request.query_params
+        scope = params.get("scope", "for_you")
+        posts = self._video_posts()
+
+        if scope in ("following", "saved"):
+            if not request.user.is_authenticated:
+                return Response({"count": 0, "next": None, "previous": None, "results": []})
+            if scope == "following":
+                followed = Follow.objects.filter(follower=request.user).values_list("followee_id", flat=True)
+                posts = posts.filter(author_id__in=followed)
+            else:
+                posts = posts.filter(id__in=Favorite.objects.filter(user=request.user, post__isnull=False).values("post_id"))
+
+        query = params.get("q", "").strip()
+        if query:
+            posts = posts.filter(
+                Q(caption__icontains=query)
+                | Q(id__in=Post.objects.filter(tags__name__icontains=query.lstrip("#")).values("id"))
+                | Q(author__first_name__icontains=query)
+                | Q(author__last_name__icontains=query)
+                | Q(author__username__icontains=query),
+            )
+        tag = params.get("tag", "").strip().lstrip("#")
+        if tag:
+            posts = posts.filter(id__in=Post.objects.filter(tags__name__iexact=tag).values("id"))
+
+        kind = params.get("kind", "")
+        if kind in ("rent", "sale"):
+            from property.models import Listing
+            posts = posts.filter(
+                linked_listing_id__in=Listing.objects.filter(listing_type=kind.upper()).values("id"),
+            )
+        elif kind == "property":
+            posts = posts.filter(linked_listing_id__isnull=False)
+        elif kind == "general":
+            posts = posts.filter(linked_listing_id__isnull=True)
+
+        for key, field in (("listing", "linked_listing_id"), ("author", "author_id")):
+            value = params.get(key)
+            if value:
+                try:
+                    posts = posts.filter(**{field: uuid_lib.UUID(value)})
+                except ValueError:
+                    return Response({"count": 0, "next": None, "previous": None, "results": []})
+
+        if scope == "trending" or params.get("sort") == "trending":
+            posts = posts.annotate(
+                _likes=Count("reactions", distinct=True), _comments=Count("comments", distinct=True),
+            ).annotate(_score=F("view_count") + 5 * F("_likes") + 8 * F("_comments")).order_by("-_score", "-created_at")
+        elif scope in ("following", "saved"):
+            posts = posts.order_by("-created_at")
+        else:
+            posts = self._real_estate_first(posts)
+        return self._paginated(posts)
+
+    @action(detail=True, methods=["get"], url_path="reel")
+    def reel_detail(self, request, pk=None):
+        """One video as a card — the target of a shared /videos/<id> link."""
+        return Response(self.get_serializer(self.get_object()).data)
+
+    @action(detail=False, methods=["get"], url_path="trending-tags")
+    def trending_tags(self, request):
+        """Hashtags on currently visible videos, most used first — search suggestions."""
+        from django.db.models import Count
+        from .models import Tag
+        video_ids = self._video_posts().values("id")
+        tags = (
+            Tag.objects.filter(posts__id__in=video_ids)
+            .annotate(uses=Count("posts"))
+            .order_by("-uses", "name")[:12]
+        )
+        return Response([{"name": tag.name, "count": tag.uses} for tag in tags])
+
+    @action(detail=True, methods=["post"], url_path="view")
+    def record_view(self, request, pk=None):
+        """Counts one view; an author watching their own clip doesn't inflate it."""
+        from django.db.models import F
+        post = self.get_object()
+        if not (request.user.is_authenticated and request.user.id == post.author_id):
+            Post.objects.filter(pk=post.pk).update(view_count=F("view_count") + 1)
+            post.refresh_from_db(fields=["view_count"])
+        return Response({"view_count": post.view_count})
+
+    @action(detail=True, methods=["post"], url_path="save")
+    def save_post(self, request, pk=None):
+        """Toggles a private bookmark on a video."""
+        from .models import Favorite
+        post = self.get_object()
+        existing = Favorite.objects.filter(user=request.user, post=post)
+        if existing.exists():
+            existing.delete()
+            return Response({"saved": False})
+        Favorite.objects.create(user=request.user, post=post)
+        return Response({"saved": True})
+
+    @action(detail=True, methods=["post"], url_path="share")
+    def share_post(self, request, pk=None):
+        """Records a share (so channels can be compared later) and returns the new count."""
+        from .models import Channel, ShareEvent
+        post = self.get_object()
+        channel = request.data.get("channel", Channel.IN_APP)
+        if channel not in Channel.values:
+            return Response({"detail": f"channel must be one of {Channel.values}."}, status=status.HTTP_400_BAD_REQUEST)
+        ShareEvent.objects.create(shared_by=request.user, post=post, channel=channel)
+        return Response({"share_count": ShareEvent.objects.filter(post=post).count()})
 
 
 class CommentViewSet(viewsets.ModelViewSet):
@@ -412,16 +599,30 @@ class CommentViewSet(viewsets.ModelViewSet):
     a global, unscoped comment list."""
     serializer_class = CommentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # Create/delete only, as documented: PATCH would let an author re-point a comment at another post.
+    http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Comment.objects.none()
-        return Comment.objects.filter(author=self.request.user)
+        return Comment.objects.filter(author=self.request.user).select_related("author")
 
     def perform_create(self, serializer):
+        from django.db.models import Q
+        from django.utils import timezone
+        from rest_framework.exceptions import ValidationError
+        from engagement.services import exclude_blocked_users
         from .services import add_comment
-        post_id = self.request.data.get("post")
-        post = Post.objects.get(id=post_id)
+        post = serializer.validated_data["post"]
+        # Comments are only accepted on posts the commenter could actually see in a feed.
+        visible = exclude_blocked_users(
+            Post.objects.filter(id=post.id, status=ContentStatus.PUBLISHED).filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+            ),
+            self.request.user,
+        ).exists()
+        if not visible and post.author_id != self.request.user.id:
+            raise ValidationError({"post": "This post isn't available for comments."})
         comment = add_comment(post=post, author=self.request.user, text=serializer.validated_data["text"])
         serializer.instance = comment
 

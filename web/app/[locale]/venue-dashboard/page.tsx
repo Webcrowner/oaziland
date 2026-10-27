@@ -32,7 +32,7 @@ export default function VenueDashboardPage() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      setStatus("signedOut");
+      void Promise.resolve().then(() => setStatus("signedOut"));
       return;
     }
     Promise.all([getMyProfile(token), listMyVenues(token)])
@@ -57,7 +57,9 @@ export default function VenueDashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedVenueId) loadDashboard(selectedVenueId);
+    if (selectedVenueId) {
+      void Promise.resolve().then(() => loadDashboard(selectedVenueId));
+    }
   }, [selectedVenueId, loadDashboard]);
 
   if (status === "signedOut") {

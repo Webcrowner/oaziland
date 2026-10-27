@@ -58,13 +58,13 @@ export default function UserPublicIndexPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setPageUrl(window.location.href);
+      void Promise.resolve().then(() => setPageUrl(window.location.href));
     }
   }, []);
 
   useEffect(() => {
     if (!userId) return;
-    setLoading(true);
+    void Promise.resolve().then(() => setLoading(true));
     getUserPublicIndex(userId)
       .then((data) => {
         setProfile(data);
@@ -1282,7 +1282,7 @@ export default function UserPublicIndexPage() {
             </div>
             <h3 className="text-lg font-bold text-slate-900 mb-1">No Active Listings Yet</h3>
             <p className="text-sm text-slate-500 max-w-sm mx-auto mb-6">
-              This user hasn't published hotels, hostels, or apartments yet.
+              This user hasn&apos;t published hotels, hostels, or apartments yet.
             </p>
             <Link
               href="/search"

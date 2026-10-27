@@ -215,12 +215,12 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
     @extend_schema(request=FundServiceRequestSerializer, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
     def fund(self, request, pk=None):
         """The requester pays the approved quote into escrow before work starts."""
-        from transactions.views import FakeRedisLock
+        from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
         input_serializer = FundServiceRequestSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         return self._run(
-            request, fund_service_request_escrow, requester=request.user, lock_client=FakeRedisLock(),
+            request, fund_service_request_escrow, requester=request.user, lock_client=get_booking_lock_client(),
             payment_gateway=get_active_gateway(), phone_number=input_serializer.validated_data["phone_number"],
         )
 
@@ -229,11 +229,8 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
     def complete(self, request, pk=None):
         """Only the request's own requester pays for it — settling
         through the real payment gateway, exactly like every other
-        real payment on the platform. Reuses transactions.views'
-        FakeRedisLock exactly, the same already-documented placeholder
-        every other booking flow (including marketplace's rides)
-        already relies on."""
-        from transactions.views import FakeRedisLock
+        real payment on the platform, using the shared production lock."""
+        from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
 
         service_request = self.get_object()
@@ -252,7 +249,7 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
         try:
             complete_service_request_with_payment(
                 service_request=service_request, amount_xaf=service_request.quoted_amount_xaf,
-                lock_client=FakeRedisLock(), payment_gateway=get_active_gateway(),
+                lock_client=get_booking_lock_client(), payment_gateway=get_active_gateway(),
                 phone_number=phone_number,
             )
         except ValueError as e:

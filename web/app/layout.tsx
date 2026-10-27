@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 // WHY real system fonts here, not next/font/google: fetching fonts
@@ -20,6 +20,13 @@ export const metadata: Metadata = {
   title: "Oaziland — Real Estate in Cameroon",
   description: "Verified property listings, secure Mobile Money payments, and trusted local agents across Cameroon.",
   manifest: "/manifest.json",
+};
+
+// viewport-fit=cover lets env(safe-area-inset-*) work on notched phones (bottom tab bar).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

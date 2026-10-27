@@ -3,7 +3,7 @@ import { ReactNode } from "react";
 import { usePathname } from "@/i18n/navigation";
 
 // Pages whose layout (DashboardLayout / AccountSidebarLayout) owns navigation via its sidebar.
-const SIDEBAR_ROUTES = new Set([
+export const SIDEBAR_ROUTES = new Set([
   "/dashboard",
   "/renter-dashboard",
   "/landlord-portfolio",

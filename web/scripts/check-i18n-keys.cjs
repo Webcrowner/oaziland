@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Reports t("key") calls whose key is missing from messages/en.json or messages/fr.json.
 const fs = require("fs");
 const path = require("path");

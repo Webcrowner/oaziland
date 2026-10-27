@@ -6,7 +6,15 @@ WhatsAppActionButton (Part B) for sharing postings.
 """
 import uuid
 from django.conf import settings
+from django.core.files.storage import FileSystemStorage
 from django.db import models
+
+
+def private_storage():
+    """Learner submissions are personal documents: kept outside MEDIA_ROOT
+    so they're never served as a public static URL — only through the
+    permission-checked download endpoints."""
+    return FileSystemStorage(location=settings.BASE_DIR / "private_media")
 
 
 class JobRoleCategory(models.TextChoices):
@@ -79,7 +87,11 @@ class TrainingProgram(models.Model):
     """event is OPTIONAL and reuses engagement.Event directly for
     scheduling — a training program IS a kind of event, so this
     composes with Part C's Event rather than duplicating start/end
-    date fields here."""
+    date fields here.
+
+    A program with no modules is a legacy "simple" course (enroll, then
+    self-report completion). A program with modules/lessons is a full
+    Coursera-style course: completion is earned through lessons/quizzes."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     provider = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="training_programs_offered")
     title = models.CharField(max_length=200)
@@ -88,9 +100,86 @@ class TrainingProgram(models.Model):
     event = models.ForeignKey("engagement.Event", on_delete=models.SET_NULL, null=True, blank=True, related_name="training_program")
     price_xaf = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # null = free
     issues_certification = models.BooleanField(default=False)
+    is_published = models.BooleanField(default=True)  # drafts are visible only to admins and course staff
 
     class Meta:
         db_table = "training_programs"
+
+
+class CourseStaffRole(models.TextChoices):
+    LECTURER = "LECTURER", "Lecturer"      # edits the course content
+    SUPERVISOR = "SUPERVISOR", "Supervisor"  # tracks learners, reviews quiz results and PDFs
+
+
+class CourseStaff(models.Model):
+    program = models.ForeignKey(TrainingProgram, on_delete=models.CASCADE, related_name="staff")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="course_staff_roles")
+    role = models.CharField(max_length=15, choices=CourseStaffRole.choices)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "course_staff"
+        unique_together = [("program", "user")]  # one role per person per course
+
+
+class CourseModule(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    program = models.ForeignKey(TrainingProgram, on_delete=models.CASCADE, related_name="modules")
+    title = models.CharField(max_length=200)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "course_modules"
+        ordering = ["position", "title"]
+
+
+class LessonKind(models.TextChoices):
+    TEXT = "TEXT", "Reading"
+    VIDEO = "VIDEO", "Video"
+    PDF = "PDF", "PDF document"
+    QUIZ = "QUIZ", "Quiz"
+    ASSIGNMENT = "ASSIGNMENT", "PDF assignment"  # learner uploads a PDF; a lecturer/supervisor approves it
+
+
+class Lesson(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    module = models.ForeignKey(CourseModule, on_delete=models.CASCADE, related_name="lessons")
+    title = models.CharField(max_length=200)
+    kind = models.CharField(max_length=10, choices=LessonKind.choices, default=LessonKind.TEXT)
+    position = models.PositiveIntegerField(default=0)
+    content_text = models.TextField(blank=True)
+    video_url = models.URLField(blank=True, max_length=500)  # external link (YouTube, Vimeo, direct file)
+    video_file = models.FileField(upload_to="course_videos/", blank=True)  # or a video uploaded by staff
+    pdf_file = models.FileField(upload_to="course_pdfs/", blank=True)
+    pass_mark_percent = models.PositiveSmallIntegerField(default=70)  # quizzes only
+
+    class Meta:
+        db_table = "course_lessons"
+        ordering = ["position", "title"]
+
+
+class QuizQuestion(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="questions")
+    text = models.TextField()
+    explanation = models.TextField(blank=True)  # shown after submitting
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "course_quiz_questions"
+        ordering = ["position"]
+
+
+class QuizChoice(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    question = models.ForeignKey(QuizQuestion, on_delete=models.CASCADE, related_name="choices")
+    text = models.CharField(max_length=500)
+    is_correct = models.BooleanField(default=False)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "course_quiz_choices"
+        ordering = ["position"]
 
 
 class TrainingEnrollmentStatus(models.TextChoices):
@@ -112,3 +201,54 @@ class TrainingEnrollment(models.Model):
     class Meta:
         db_table = "training_enrollments"
         unique_together = [("program", "student")]
+
+
+class SubmissionStatus(models.TextChoices):
+    SUBMITTED = "SUBMITTED", "Awaiting review"
+    APPROVED = "APPROVED", "Approved"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED", "Changes requested"
+
+
+class AssignmentSubmission(models.Model):
+    """One row per learner per assignment; resubmitting after
+    'changes requested' replaces the file and goes back to review."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    enrollment = models.ForeignKey(TrainingEnrollment, on_delete=models.CASCADE, related_name="submissions")
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="submissions")
+    file = models.FileField(upload_to="course_submissions/", storage=private_storage)
+    status = models.CharField(max_length=20, choices=SubmissionStatus.choices, default=SubmissionStatus.SUBMITTED)
+    feedback = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "course_assignment_submissions"
+        unique_together = [("enrollment", "lesson")]
+        ordering = ["-submitted_at"]
+
+
+class LessonProgress(models.Model):
+    enrollment = models.ForeignKey(TrainingEnrollment, on_delete=models.CASCADE, related_name="lesson_progress")
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="progress")
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "course_lesson_progress"
+        unique_together = [("enrollment", "lesson")]
+
+
+class QuizAttempt(models.Model):
+    """answers maps question id -> list of selected choice ids, kept so a
+    supervisor can review exactly what the learner answered."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    enrollment = models.ForeignKey(TrainingEnrollment, on_delete=models.CASCADE, related_name="quiz_attempts")
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="attempts")
+    score_percent = models.PositiveSmallIntegerField()
+    passed = models.BooleanField()
+    answers = models.JSONField(default=dict)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "course_quiz_attempts"
+        ordering = ["-submitted_at"]

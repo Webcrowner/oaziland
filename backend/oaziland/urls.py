@@ -10,12 +10,11 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from identity.views import (
     RegisterView, MyProfileView, MfaSetupView, MfaVerifyView, MyMfaStatusView, MyReferralCodeView,
-    MyKycView, ChangePasswordView, PasswordResetRequestView, PasswordResetConfirmView, LoginView,
+    MyKycView, ChangePasswordView, PasswordResetRequestView, PasswordResetConfirmView, LoginView, RefreshView,
     AdminKYCReviewViewSet, UserPublicIndexView, DevRoleSwitchView,
 )
 from geo.views import QuarterViewSet, AreaSuggestionView
@@ -59,8 +58,8 @@ from property_management.views import (
     DisputeMessagesView,
 )
 from marketplace.views import (
-    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet,
-    MyDriverProfileView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView, AdminSosRideViewSet,
+    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, GoodsListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet,
+    MyDriverProfileView, MyDriverLocationView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView, AdminSosRideViewSet,
 )
 from services.views import (
     ServiceRequestViewSet, FindTechniciansView, TechnicianDirectoryView, MyTechnicianDocumentsView, MyTechnicianDashboardView, MyTechnicianProfileView, AdminTechnicianViewSet,
@@ -92,6 +91,7 @@ router.register(r"warehouses", WarehouseListingViewSet, basename="warehouse")
 router.register(r"stores", StoreListingViewSet, basename="store")
 router.register(r"businesses", BusinessListingViewSet, basename="business")
 router.register(r"cars", CarListingViewSet, basename="car")
+router.register(r"goods", GoodsListingViewSet, basename="goods")
 router.register(r"marketplace-orders", MarketplaceOrderViewSet, basename="marketplace-order")
 router.register(r"rides", RideViewSet, basename="ride")
 router.register(r"my-vehicles", MyVehicleViewSet, basename="my-vehicle")
@@ -128,6 +128,11 @@ router.register(r"wanted-listings", WantedListingViewSet, basename="wanted-listi
 router.register(r"service-categories", PartnerServiceCategoryViewSet, basename="service-category")
 router.register(r"trainings", TrainingProgramViewSet, basename="training")
 router.register(r"my-enrollments", MyEnrollmentViewSet, basename="my-enrollment")
+from careers.course_views import ManageCourseViewSet, ModuleEditorViewSet, LessonEditorViewSet, QuestionEditorViewSet  # noqa: E402
+router.register(r"manage/courses", ManageCourseViewSet, basename="manage-course")
+router.register(r"manage/modules", ModuleEditorViewSet, basename="manage-module")
+router.register(r"manage/lessons", LessonEditorViewSet, basename="manage-lesson")
+router.register(r"manage/questions", QuestionEditorViewSet, basename="manage-question")
 router.register(r"jobs", JobPostingViewSet, basename="job")
 router.register(r"my-job-applications", MyJobApplicationViewSet, basename="my-job-application")
 router.register(r"saved-searches", SavedSearchViewSet, basename="saved-search")
@@ -157,7 +162,7 @@ urlpatterns = [
     # Authentication
     path('api/auth/register/', RegisterView.as_view(), name='register'),
     path('api/auth/login/', LoginView.as_view(), name='token_obtain_pair'),
-    path('api/auth/login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/login/refresh/', RefreshView.as_view(), name='token_refresh'),
     path('api/auth/me/', MyProfileView.as_view(), name='my_profile'),
     path('api/area-suggestions/', AreaSuggestionView.as_view(), name='area-suggestions'),
     path('api/auth/dev-switch-role/', DevRoleSwitchView.as_view(), name='dev-switch-role'),
@@ -222,6 +227,7 @@ urlpatterns = [
     path('api/my-ratings/', MyRatingsView.as_view(), name='my-ratings'),
     path('api/my-referrals/', MyReferralsView.as_view(), name='my-referrals'),
     path('api/my-driver-profile/', MyDriverProfileView.as_view(), name='my-driver-profile'),
+    path('api/my-driver-profile/location/', MyDriverLocationView.as_view(), name='my-driver-location'),
     path('api/my-emergency-contact/', MyEmergencyContactView.as_view(), name='my-emergency-contact'),
     path('api/content-reports/', FileContentReportView.as_view(), name='file-content-report'),
     path('api/admin/greeting-settings/', AdminGreetingSettingsView.as_view(), name='admin-greeting-settings'),

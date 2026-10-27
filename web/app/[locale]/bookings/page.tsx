@@ -92,7 +92,9 @@ export default function BookingsPage() {
   // Dashboard cards link here with ?filter=active|completed.
   useEffect(() => {
     const preset = new URLSearchParams(window.location.search).get("filter");
-    if (preset === "active" || preset === "completed") setFilter(preset);
+    if (preset === "active" || preset === "completed") {
+      void Promise.resolve().then(() => setFilter(preset));
+    }
   }, []);
 
   const load = useCallback(() => {
@@ -111,7 +113,9 @@ export default function BookingsPage() {
     }).catch(() => setStatus("ready"));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void Promise.resolve().then(() => load());
+  }, [load]);
 
   async function handleOpenDispute(bookingId: string) {
     const token = localStorage.getItem("access_token");

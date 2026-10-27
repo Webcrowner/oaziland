@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
+import MarketplaceUnifiedSearch from "../components/MarketplaceUnifiedSearch";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Marketplace">;
 
@@ -19,7 +20,8 @@ const CATEGORIES = [
  */
 export default function MarketplaceScreen({ navigation }: Props) {
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <MarketplaceUnifiedSearch onOpen={(result) => navigation.navigate("MarketplaceListingDetail", { category: result.category, listingId: result.id })} />
       <Text style={styles.subtitle}>Beyond real estate: browse or list warehouses, stores, businesses, and cars.</Text>
 
       {CATEGORIES.map((category) => (

@@ -11,6 +11,7 @@ interface GpsCaptureButtonProps {
   onClear?: () => void;
   clearLabel?: string;
   hint?: string;
+  buttonClassName?: string;
 }
 
 export default function GpsCaptureButton({
@@ -21,6 +22,7 @@ export default function GpsCaptureButton({
   onClear,
   clearLabel = "Remove",
   hint = "Captures your exact device GPS coordinates so seekers and visitors can navigate directly to the property doorstep.",
+  buttonClassName = "bg-amber-400 text-slate-950 hover:bg-amber-300",
 }: GpsCaptureButtonProps) {
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export default function GpsCaptureButton({
           type="button"
           onClick={handleCaptureGps}
           disabled={capturing}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-400 text-slate-950 hover:bg-amber-300 active:scale-95 transition-all shadow-xs disabled:opacity-60 cursor-pointer"
+          className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all shadow-xs disabled:opacity-60 cursor-pointer ${buttonClassName}`}
         >
           {capturing ? (
             <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />

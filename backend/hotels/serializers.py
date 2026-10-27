@@ -27,6 +27,14 @@ class HotelSerializer(OwnerRoleSerializerMixin, serializers.ModelSerializer):
     def get_photos(self, hotel) -> list[dict]:
         return PropertyAssetPhotoSerializer(hotel.asset_photos.all(), many=True).data
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not data.get("name"):
+            desc = (instance.description or "").strip()
+            if "—" in desc:
+                data["name"] = desc.split("—", 1)[0].strip()
+        return data
+
     class Meta:
         model = Hotel
         fields = [

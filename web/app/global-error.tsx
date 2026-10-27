@@ -20,9 +20,15 @@ export default function GlobalError({ reset }: { error: Error & { digest?: strin
             <button onClick={reset} className="bg-slate-900 text-white font-semibold px-6 py-3 rounded hover:opacity-90">
               Try Again
             </button>
-            <a href="/" className="text-sm font-semibold text-gray-600 underline">
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = "/";
+              }}
+              className="text-sm font-semibold text-gray-600 underline"
+            >
               Go Home
-            </a>
+            </button>
           </div>
         </div>
       </body>

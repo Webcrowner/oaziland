@@ -28,7 +28,7 @@ export default function JoinWaitlistButton({ listingId }: { listingId: string })
   }
 
   if (status === "joined") {
-    return <p className="text-xs font-semibold text-emerald-700 text-center">✓ You'll be notified if this listing becomes available.</p>;
+    return <p className="text-xs font-semibold text-emerald-700 text-center">✓ You&apos;ll be notified if this listing becomes available.</p>;
   }
 
   return (

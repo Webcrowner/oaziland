@@ -106,7 +106,7 @@ export default function PropertyManagementPage() {
   }, []);
 
   useEffect(() => {
-    loadAll();
+    void Promise.resolve().then(() => loadAll());
   }, [loadAll]);
 
   async function handleCloseMaintenance(id: string) {

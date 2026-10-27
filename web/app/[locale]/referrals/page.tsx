@@ -25,12 +25,14 @@ export default function ReferralsPage() {
   const [origin, setOrigin] = useState("");
 
   useEffect(() => {
-    setOrigin(window.location.origin);
     const token = localStorage.getItem("access_token");
-    if (!token) {
-      setLoggedIn(false);
-      return;
-    }
+    void Promise.resolve().then(() => {
+      setOrigin(window.location.origin);
+      if (!token) {
+        setLoggedIn(false);
+      }
+    });
+    if (!token) return;
     getMyReferralCode(token)
       .then((data) => setCode(data.referral_code))
       .catch(() => {});

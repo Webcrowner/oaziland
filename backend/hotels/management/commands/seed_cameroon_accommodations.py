@@ -97,11 +97,15 @@ class Command(BaseCommand):
             quarter=q_kribi,
             type="HOTEL",
             defaults={
+                "name": "Kribi Oceanfront Resort & Spa",
                 "description": "Kribi Oceanfront Resort & Spa — Luxury beachfront accommodation with private beach access.",
                 "verified": True,
                 "star_rating": 4,
             },
         )
+        if not h1.name:
+            h1.name = "Kribi Oceanfront Resort & Spa"
+            h1.save(update_fields=["name"])
         if created:
             RoomType.objects.create(
                 hotel=h1,
@@ -127,11 +131,15 @@ class Command(BaseCommand):
             quarter=q_bastos,
             type="HOTEL",
             defaults={
+                "name": "Bastos Diplomatic Suites",
                 "description": "Bastos Diplomatic Suites — Boutique hotel near major embassies in Yaoundé.",
                 "verified": True,
                 "star_rating": 5,
             },
         )
+        if not h2.name:
+            h2.name = "Bastos Diplomatic Suites"
+            h2.save(update_fields=["name"])
         if created:
             RoomType.objects.create(
                 hotel=h2,

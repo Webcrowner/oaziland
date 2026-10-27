@@ -5,9 +5,19 @@ ContentModerationProvider) plus the one shared notify() helper every
 other app should call.
 """
 from abc import ABC, abstractmethod
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Channels where a message only counts as delivered if a real provider carried it. IN_APP is different:
+# the stored Notification row IS the delivery, so it never needs a provider.
+EXTERNAL_CHANNELS = ("SMS", "WHATSAPP", "EMAIL", "PUSH")
 
 
 class NotificationDispatcher(ABC):
+    # False for stand-ins that send nothing. Anything that tells a user "we notified them" must check this.
+    is_live = True
+
     @abstractmethod
     def send(self, notification) -> bool:
         """Attempts real delivery (WhatsApp/SMS/push/email). Returns
@@ -18,27 +28,179 @@ class NotificationDispatcher(ABC):
 class SandboxDispatcher(NotificationDispatcher):
     """A working stand-in — always 'delivers' successfully, no real
     message sent. Good enough to prove notify() and everything that
-    calls it works correctly."""
+    calls it works correctly. NOT a real delivery: is_live is False,
+    notify() logs a warning for every external message it swallows, and
+    a startup system check lists the channels still on it."""
+    is_live = False
+
     def send(self, notification) -> bool:
         return True
 
 
 class WhatsAppDispatcher(NotificationDispatcher):
-    """NOT YET CONNECTED — needs WHATSAPP_BUSINESS_API_TOKEN (Twilio/360dialog)."""
+    """Sends WhatsApp messages through Meta's Cloud API."""
+
+    @staticmethod
+    def is_configured() -> bool:
+        import os
+
+        return bool(
+            os.environ.get("WHATSAPP_BUSINESS_API_TOKEN", "").strip()
+            and os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+        )
+
     def send(self, notification) -> bool:
-        raise NotImplementedError("WhatsApp dispatch not yet built — requires real API credentials.")
+        import os
+        import requests
+
+        phone = (notification.external_phone_number or getattr(notification.recipient, "phone", "") or "").strip()
+        if not phone:
+            logger.error("WhatsApp notification %s has no destination phone number.", notification.id)
+            return False
+
+        token = os.environ.get("WHATSAPP_BUSINESS_API_TOKEN", "").strip()
+        phone_number_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+        api_version = os.environ.get("WHATSAPP_GRAPH_API_VERSION", "v23.0").strip()
+        template_name = os.environ.get("WHATSAPP_TEMPLATE_NAME", "").strip()
+        if not token or not phone_number_id:
+            raise RuntimeError("WHATSAPP_BUSINESS_API_TOKEN and WHATSAPP_PHONE_NUMBER_ID must be configured.")
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": phone.lstrip("+"),
+        }
+        if template_name:
+            payload.update({
+                "type": "template",
+                "template": {
+                    "name": template_name,
+                    "language": {
+                        "code": os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE", "en").strip(),
+                    },
+                    "components": [{
+                        "type": "body",
+                        "parameters": [{"type": "text", "text": notification.message}],
+                    }],
+                },
+            })
+        else:
+            payload.update({
+                "type": "text",
+                "text": {"preview_url": False, "body": notification.message},
+            })
+
+        response = requests.post(
+            f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if not response.ok:
+            logger.error(
+                "Meta WhatsApp delivery failed for notification %s with HTTP %s: %s",
+                notification.id, response.status_code, response.text[:500],
+            )
+        return response.ok
 
 
 class SMSDispatcher(NotificationDispatcher):
-    """NOT YET CONNECTED — needs an Africa's Talking/Twilio SMS account."""
+    """Sends real SMS via Africa's Talking or Twilio when credentials are configured in the environment."""
+
+    @staticmethod
+    def is_configured() -> bool:
+        import os
+        at_ready = bool(os.environ.get("AFRICAS_TALKING_API_KEY", "").strip() and os.environ.get("AFRICAS_TALKING_USERNAME", "").strip())
+        tw_ready = bool(
+            os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+            and os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+            and os.environ.get("TWILIO_FROM_NUMBER", "").strip()
+        )
+        return at_ready or tw_ready
+
     def send(self, notification) -> bool:
+        import os
+        import requests
+
+        phone = (notification.external_phone_number or getattr(notification.recipient, "phone", "") or "").strip()
+        if not phone:
+            return False
+
+        at_key = os.environ.get("AFRICAS_TALKING_API_KEY", "").strip()
+        at_user = os.environ.get("AFRICAS_TALKING_USERNAME", "").strip()
+        if at_key and at_user:
+            host = "https://api.sandbox.africastalking.com" if at_user == "sandbox" else "https://api.africastalking.com"
+            resp = requests.post(
+                f"{host}/version1/messaging",
+                data={"username": at_user, "to": phone, "message": notification.message},
+                headers={"apiKey": at_key, "Accept": "application/json"},
+                timeout=10,
+            )
+            return resp.ok
+
+        tw_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+        tw_token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+        tw_from = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
+        if tw_sid and tw_token and tw_from:
+            resp = requests.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{tw_sid}/Messages.json",
+                data={"To": phone, "From": tw_from, "Body": notification.message},
+                auth=(tw_sid, tw_token),
+                timeout=10,
+            )
+            return resp.ok
+
         raise NotImplementedError("SMS dispatch not yet built — requires real API credentials.")
 
 
 class EmailDispatcher(NotificationDispatcher):
-    """NOT YET CONNECTED — needs a Postmark or SendGrid account."""
+    """Sends transactional email through Postmark."""
+
+    @staticmethod
+    def is_configured() -> bool:
+        import os
+
+        return bool(
+            os.environ.get("POSTMARK_SERVER_TOKEN", "").strip()
+            and os.environ.get("POSTMARK_FROM_EMAIL", "").strip()
+        )
+
     def send(self, notification) -> bool:
-        raise NotImplementedError("Email dispatch not yet built — requires real API credentials.")
+        import os
+        import requests
+
+        email = (getattr(notification.recipient, "email", "") or "").strip()
+        if not email:
+            logger.error("Email notification %s has no recipient email address.", notification.id)
+            return False
+
+        token = os.environ.get("POSTMARK_SERVER_TOKEN", "").strip()
+        from_email = os.environ.get("POSTMARK_FROM_EMAIL", "").strip()
+        if not token or not from_email:
+            raise RuntimeError("POSTMARK_SERVER_TOKEN and POSTMARK_FROM_EMAIL must be configured.")
+
+        response = requests.post(
+            "https://api.postmarkapp.com/email",
+            json={
+                "From": from_email,
+                "To": email,
+                "Subject": notification.title,
+                "TextBody": notification.message,
+                "MessageStream": os.environ.get("POSTMARK_MESSAGE_STREAM", "outbound").strip(),
+            },
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Postmark-Server-Token": token,
+            },
+            timeout=10,
+        )
+        if not response.ok:
+            logger.error(
+                "Postmark delivery failed for notification %s with HTTP %s: %s",
+                notification.id, response.status_code, response.text[:500],
+            )
+        return response.ok
 
 
 def get_active_dispatcher(channel: str) -> NotificationDispatcher:
@@ -48,19 +210,27 @@ def get_active_dispatcher(channel: str) -> NotificationDispatcher:
     through notify(), dead code nobody would have noticed until trying
     to connect real credentials and finding nothing used them.
 
-    Every channel still maps to Sandbox for now, since no real
-    credentials exist yet for ANY of them — but the mapping is now
-    explicit and per-channel, so connecting real WhatsApp/SMS/Email
-    credentials later is a ONE-LINE change per channel (swap
-    SandboxDispatcher() for the real class), exactly the same pattern
-    already used in payments.gateways.get_active_gateway()."""
+    Each channel automatically switches to its live dispatcher once all
+    required credentials are set. Channels without live credentials stay
+    on SandboxDispatcher and are surfaced by the startup system check."""
     return {
-        "WHATSAPP": SandboxDispatcher(),
-        "SMS": SandboxDispatcher(),
-        "EMAIL": SandboxDispatcher(),
+        "WHATSAPP": WhatsAppDispatcher() if WhatsAppDispatcher.is_configured() else SandboxDispatcher(),
+        "SMS": SMSDispatcher() if SMSDispatcher.is_configured() else SandboxDispatcher(),
+        "EMAIL": EmailDispatcher() if EmailDispatcher.is_configured() else SandboxDispatcher(),
         "PUSH": SandboxDispatcher(),
         "IN_APP": SandboxDispatcher(),
     }.get(channel, SandboxDispatcher())
+
+
+def is_delivery_live(channel: str) -> bool:
+    """True when a message on this channel really reaches the person — a real provider is connected, or the
+    channel is IN_APP. Use this before telling a user that someone 'has been notified'."""
+    return channel == "IN_APP" or get_active_dispatcher(channel).is_live
+
+
+def sandbox_channels() -> list:
+    """The external channels that are still on the sandbox stand-in, so nothing sent on them is delivered."""
+    return [channel for channel in EXTERNAL_CHANNELS if not is_delivery_live(channel)]
 
 
 def notify(*, recipient=None, external_phone_number: str = "", notification_type: str, title: str, message: str, channel="IN_APP", related_reference: str = ""):
@@ -86,6 +256,12 @@ def notify(*, recipient=None, external_phone_number: str = "", notification_type
     dispatcher = get_active_dispatcher(channel)
     record.delivered = dispatcher.send(record)
     record.save(update_fields=["delivered"])
+    if not is_delivery_live(channel):
+        logger.warning(
+            "%s notification %s (%s) was recorded but NOT delivered: no real %s provider is connected, only the sandbox "
+            "stand-in. Connect one in notifications/services.py get_active_dispatcher().",
+            channel, record.id, notification_type, channel,
+        )
     return record
 
 

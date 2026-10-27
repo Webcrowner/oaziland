@@ -15,6 +15,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import MediaUploader from "@/components/MediaUploader";
 import MediaThumbs from "@/components/MediaThumbs";
+import MarketplaceConditionsFields, { EMPTY_CONDITIONS, saveConditions, type ConditionsDraft } from "@/components/MarketplaceConditionsFields";
 import LocationCapture, { EMPTY_GPS, type GpsValue } from "@/components/LocationCapture";
 import ListerRoleBadge from "@/components/ListerRoleBadge";
 import WhatsAppShareButton from "@/components/WhatsAppShareButton";
@@ -23,10 +24,16 @@ import DirectChatButton from "@/components/DirectChatButton";
 
 export default function BusinessesMarketplacePage() {
   const t = useTranslations("MarketplaceCategoryPage");
+  const tc = useTranslations("MarketplaceConditions");
+  const [conditions, setConditions] = useState<ConditionsDraft>(EMPTY_CONDITIONS);
+  const [notice, setNotice] = useState("");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
+  const [sizeSqm, setSizeSqm] = useState("");
+  const [seatingCapacity, setSeatingCapacity] = useState("");
   const [includesGoodwill, setIncludesGoodwill] = useState(false);
   const [includesInventory, setIncludesInventory] = useState(false);
   const [annualRevenue, setAnnualRevenue] = useState("");
@@ -41,6 +48,8 @@ export default function BusinessesMarketplacePage() {
 
   useEffect(() => {
     listQuarters().then(setQuarters).catch(() => {});
+    // The "Sell" page links here with ?post=1 to open the posting form straight away.
+    if (new URLSearchParams(window.location.search).has("post")) Promise.resolve().then(() => setShowForm(true));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -51,15 +60,20 @@ export default function BusinessesMarketplacePage() {
       return;
     }
     setSubmitStatus("submitting");
+    setNotice("");
     try {
       const listing = await createMarketplaceListing("businesses", {
-        title, price_basis: "SALE", price_xaf: price, includes_goodwill: includesGoodwill,
+        title, description, price_basis: "SALE", price_xaf: price, size_sqm: sizeSqm || null,
+        seating_capacity: seatingCapacity ? Number(seatingCapacity) : null, includes_goodwill: includesGoodwill,
         includes_inventory: includesInventory, annual_revenue_xaf: annualRevenue || null, quarter: quarterId || null,
         latitude: gps.latitude, longitude: gps.longitude,
       }, token);
       for (const m of media) await addMarketplaceMedia("businesses", listing.id, m.url, m.media_type, token);
+      // The listing already exists at this point, so a conditions failure must not make the lister post it twice.
+      await saveConditions("businesses", listing.id, conditions, token, true).catch(() => setNotice(tc("savedWithoutConditions")));
+      setConditions(EMPTY_CONDITIONS);
       setShowForm(false);
-      setTitle(""); setPrice(""); setAnnualRevenue(""); setIncludesGoodwill(false); setIncludesInventory(false); setMedia([]); setGps(EMPTY_GPS);
+      setTitle(""); setDescription(""); setPrice(""); setSizeSqm(""); setSeatingCapacity(""); setAnnualRevenue(""); setIncludesGoodwill(false); setIncludesInventory(false); setMedia([]); setGps(EMPTY_GPS);
       setReloadKey((k) => k + 1);
     } catch {
       setSubmitStatus("error");
@@ -75,11 +89,16 @@ export default function BusinessesMarketplacePage() {
         action={<Button onClick={() => setShowForm(!showForm)}>{showForm ? t("cancel") : t("listABusiness")}</Button>}
       />
 
+      {notice && <p className="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800">{notice}</p>}
+
       {showForm && (
         <form onSubmit={handleSubmit} className="border border-gray-200 rounded-xl p-6 bg-white mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
           <input required placeholder={t("titlePlaceholder")} value={title} onChange={(e) => setTitle(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
-          <input required type="number" placeholder={t("askingPricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
-          <input type="number" placeholder={t("annualRevenuePlaceholder")} value={annualRevenue} onChange={(e) => setAnnualRevenue(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <textarea rows={3} placeholder={t("listingDescriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
+          <input required type="number" min="0.01" step="0.01" placeholder={t("askingPricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input type="number" min="0.01" step="0.01" placeholder={t("sizeSqmPlaceholder")} value={sizeSqm} onChange={(e) => setSizeSqm(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input type="number" min="1" step="1" placeholder={t("seatingCapacityPlaceholder")} value={seatingCapacity} onChange={(e) => setSeatingCapacity(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input type="number" min="0" step="0.01" placeholder={t("annualRevenuePlaceholder")} value={annualRevenue} onChange={(e) => setAnnualRevenue(e.target.value)} className="border rounded-lg px-3 py-2" />
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={includesGoodwill} onChange={(e) => setIncludesGoodwill(e.target.checked)} /> {t("includesGoodwill")}
           </label>
@@ -97,12 +116,13 @@ export default function BusinessesMarketplacePage() {
             {media.length > 0 && <p className="text-xs text-gray-500 mt-1">{t("mediaAttached", { count: media.length })}</p>}
             <MediaThumbs items={media.map((m) => ({ url: m.url, media_type: m.media_type }))} onRemove={(i) => setMedia((prev) => prev.filter((_, idx) => idx !== i))} />
           </div>
+          <MarketplaceConditionsFields category="businesses" value={conditions} onChange={setConditions} className="md:col-span-2" />
           {submitStatus === "error" && <p className="text-red-600 text-sm md:col-span-2">{t("submitFailed")}</p>}
           <Button className="md:col-span-2" size="lg">{submitStatus === "submitting" ? t("submitting") : t("submitListing")}</Button>
         </form>
       )}
 
-      <MarketplaceFilterBar value={filters} onChange={setFilters} showPriceBasis={false} />
+      <MarketplaceFilterBar value={filters} onChange={setFilters} showPriceBasis={false} quarters={quarters} showMinSize />
 
       {status === "loading" ? (
         <p className="text-gray-400">...</p>

@@ -37,6 +37,7 @@ export interface Listing {
 
 export interface PaginatedResponse<T> {
   count: number;
+  next?: string | null;
   results: T[];
 }
 
@@ -198,7 +199,32 @@ export async function attachListingCondition(payload: { target_content_type: str
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || "Could not set listing conditions");
+  // 204: posting empty conditions clears the listing's existing ones.
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const nested = Object.values(data.structured_conditions ?? {}).flat()[0];
+    throw new Error(data.detail ?? (typeof nested === "string" ? nested : "Could not set listing conditions"));
+  }
+  return data;
+}
+
+export interface ListingConditionItem {
+  id: string;
+  structured_conditions: Record<string, unknown>;
+  free_text_clause: string;
+}
+
+export async function getListingConditions(targetContentType: string, targetId: string): Promise<ListingConditionItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/listing-conditions/?target_content_type=${targetContentType}&target_id=${targetId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+// Unlike getListingConditions, a failed load throws, so an editor never mistakes "could not load" for "no conditions" and overwrites them.
+export async function loadListingConditions(targetContentType: string, targetId: string): Promise<ListingConditionItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/listing-conditions/?target_content_type=${targetContentType}&target_id=${targetId}`);
+  if (!res.ok) throw new Error("Could not load the listing's conditions");
   return res.json();
 }
 
@@ -286,6 +312,7 @@ export interface RoomTypeSummary {
 
 export interface Hotel {
   id: string;
+  name?: string;
   star_rating: number | null;
   verified: boolean;
   quarter: string;
@@ -510,6 +537,17 @@ export async function listConversations(): Promise<PaginatedResponse<Conversatio
   return res.json();
 }
 
+export async function getOrCreateConversation(participantId: string): Promise<ConversationSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/`, {
+    method: "POST",
+    headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+    body: JSON.stringify({ participant_id: participantId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not open the conversation");
+  return data;
+}
+
 export async function getConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
   const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error("Could not fetch messages");
@@ -553,12 +591,14 @@ export interface SocialPost {
   id: string;
   author: string;
   author_name: string;
+  is_mine: boolean;
+  my_reaction: string | null;
   is_verified_creator: boolean;
   poster_role: string;
   post_type: string;
   caption: string;
   tag_names: string[];
-  media: { id: string; media_type: string; file_url: string }[];
+  media: { id: string; media_type: "PHOTO" | "VIDEO" | "AUDIO" | string; file_url: string }[];
   linked_listing_id: string | null;
   status: string;
   published_at: string | null;
@@ -568,36 +608,75 @@ export interface SocialPost {
   is_sponsored: boolean;
 }
 
-export async function listFeedPosts(): Promise<PaginatedResponse<SocialPost>> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/`, { headers: await authHeaders() });
-  if (!res.ok) throw new Error("Could not fetch feed");
-  return res.json();
+async function fetchPostPage(path: string, page: number): Promise<PaginatedResponse<SocialPost>> {
+  const separator = path.includes("?") ? "&" : "?";
+  const url = `${API_BASE_URL}${path}${page > 1 ? `${separator}page=${page}` : ""}`;
+  const headers = await authHeaders();
+  let res = await fetch(url, { headers });
+  // A dead session must not take down a public feed: retry as an anonymous visitor.
+  if (res.status === 401 && headers.Authorization) res = await fetch(url);
+  if (!res.ok) throw new Error("Could not load posts");
+  const data = await res.json();
+  return { count: data.count ?? 0, next: data.next ?? null, results: data.results ?? [] };
 }
 
-export async function listFollowingFeed(): Promise<PaginatedResponse<SocialPost>> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/following/`, { headers: await authHeaders() });
-  if (!res.ok) throw new Error("Could not fetch following feed");
-  return res.json();
+export function listFeedPosts(page = 1) {
+  return fetchPostPage("/api/posts/", page);
 }
 
-export async function searchPosts(query: string): Promise<PaginatedResponse<SocialPost>> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/search/?q=${encodeURIComponent(query)}`);
-  if (!res.ok) throw new Error("Could not search posts");
-  return res.json();
+export function listFollowingFeed(page = 1) {
+  return fetchPostPage("/api/posts/following/", page);
+}
+
+export function listMyPosts(page = 1) {
+  return fetchPostPage("/api/posts/mine/", page);
+}
+
+export function listTopicFeed(tag: string, page = 1) {
+  return fetchPostPage(`/api/posts/topic/?tag=${encodeURIComponent(tag)}`, page);
+}
+
+export function searchPosts(query: string, page = 1) {
+  return fetchPostPage(`/api/posts/search/?q=${encodeURIComponent(query)}`, page);
+}
+
+export type CreatePostErrorKind = "moderation" | "validation" | "network";
+
+export class CreatePostError extends Error {
+  kind: CreatePostErrorKind;
+  constructor(message: string, kind: CreatePostErrorKind) {
+    super(message);
+    this.kind = kind;
+  }
 }
 
 export async function createPost(payload: { caption: string; tags?: string[]; linked_listing_id?: string; media_urls?: string[] }) {
-  const res = await fetch(`${API_BASE_URL}/api/posts/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Could not create post");
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/posts/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new CreatePostError("Could not reach the server", "network");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // A `detail` on a 400 is the moderation gate; DRF field errors come back keyed by field instead.
+    if (res.status === 400 && typeof data.detail === "string") throw new CreatePostError(data.detail, "moderation");
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new CreatePostError(typeof firstFieldError === "string" ? firstFieldError : "Could not create post", "validation");
+  }
   return data;
 }
 
-export async function reactToPost(postId: string, emoji: string) {
+export async function deletePost(postId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/`, { method: "DELETE", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not delete post");
+}
+
+export async function reactToPost(postId: string, emoji: string): Promise<SocialPost> {
   const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/react/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -607,22 +686,40 @@ export async function reactToPost(postId: string, emoji: string) {
   return res.json();
 }
 
+export async function removePostReaction(postId: string): Promise<SocialPost> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/remove-reaction/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not remove reaction");
+  return res.json();
+}
+
+export type PostReportReason = "INAPPROPRIATE_CONTENT" | "SCAM_SUSPECTED" | "HARASSMENT" | "OTHER";
+
+export async function reportPost(postId: string, reason: PostReportReason): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ target_post: postId, reason }),
+  });
+  if (!res.ok) throw new Error("Could not file report");
+}
+
 export interface PostComment {
   id: string;
   post: string;
   author: string;
   author_name: string;
+  is_mine: boolean;
   text: string;
   created_at: string;
 }
 
 export async function getPostComments(postId: string): Promise<PostComment[]> {
-  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/comments/`);
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/comments/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error("Could not fetch comments");
   return res.json();
 }
 
-export async function addPostComment(postId: string, text: string) {
+export async function addPostComment(postId: string, text: string): Promise<PostComment> {
   const res = await fetch(`${API_BASE_URL}/api/comments/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -630,6 +727,11 @@ export async function addPostComment(postId: string, text: string) {
   });
   if (!res.ok) throw new Error("Could not add comment");
   return res.json();
+}
+
+export async function deletePostComment(commentId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/comments/${commentId}/`, { method: "DELETE", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not delete comment");
 }
 
 // ---------------------------------------------------------------------------
@@ -837,6 +939,7 @@ interface BaseMarketplaceListing {
   description: string;
   price_basis: string;
   price_xaf: string;
+  security_deposit_xaf: string;
   availability_status: string;
   quarter: string | null;
   quarter_name: string | null;
@@ -848,7 +951,7 @@ export interface StoreListing extends BaseMarketplaceListing { size_sqm: string;
 export interface BusinessListing extends BaseMarketplaceListing {
   includes_goodwill: boolean; includes_inventory: boolean; annual_revenue_xaf: string | null;
 }
-export interface VehicleSpec { make: string; model: string; year: number; mileage_km: number | null }
+export interface VehicleSpec { make: string; model: string; year: number; mileage_km: number | null; engine_size_cc?: number | null }
 export interface CarListing extends BaseMarketplaceListing { vehicle_spec: VehicleSpec }
 
 const MARKETPLACE_ENDPOINTS = { warehouses: "warehouses", stores: "stores", businesses: "businesses", cars: "cars" } as const;
@@ -867,7 +970,7 @@ export async function getMarketplaceListing<T>(category: MarketplaceCategory, id
   return res.json();
 }
 
-export type MarketplaceOrderStatus = "PAID" | "HANDED_OVER" | "COMPLETED" | "CANCELLED" | "DISPUTED";
+export type MarketplaceOrderStatus = "PAYMENT_PENDING" | "PAID" | "HANDED_OVER" | "COMPLETED" | "CANCELLED" | "DISPUTED";
 
 export type MarketplaceAvailability = "AVAILABLE" | "UNDER_OFFER" | "UNAVAILABLE";
 
@@ -876,8 +979,17 @@ export interface MyMarketplaceListing {
   title: string;
   description: string;
   price_xaf: string;
+  price_basis: string;
+  security_deposit_xaf: string;
   availability_status: MarketplaceAvailability;
   removed_by_moderation: boolean;
+  size_sqm?: string | null;
+  frontage_meters?: string | null;
+  seating_capacity?: number | null;
+  includes_goodwill?: boolean;
+  includes_inventory?: boolean;
+  annual_revenue_xaf?: string | null;
+  vehicle_spec?: VehicleSpec;
 }
 
 // Everything the caller posted in one category, including sold or paused listings the public list hides.
@@ -900,7 +1012,7 @@ async function marketplaceMutationError(res: Response, fallback: string): Promis
   return new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : fallback));
 }
 
-export async function updateMarketplaceListing(category: MarketplaceCategory, id: string, payload: { title: string; price_xaf: string; description: string }) {
+export async function updateMarketplaceListing(category: MarketplaceCategory, id: string, payload: Record<string, unknown>) {
   const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
@@ -941,6 +1053,13 @@ export interface MarketplaceOrderItem {
   created_at: string;
   auto_release_at: string | null;
   seller_deadline: string | null;
+  deposit_xaf: string;
+  deposit_status: "NONE" | "HELD" | "CLAIMED" | "RETURNED" | "FORFEITED";
+  deposit_settled_at: string | null;
+  deposit_return_by: string | null;
+  total_xaf: string;
+  rental_starts_on: string | null;
+  rental_ends_on: string | null;
 }
 
 async function marketplaceOrderResponse(res: Response, fallback: string): Promise<MarketplaceOrderItem> {
@@ -967,13 +1086,13 @@ export async function listMyMarketplaceOrders(role: "buying" | "selling"): Promi
   return res.json();
 }
 
-export type MarketplaceOrderActionName = "hand-over" | "confirm" | "cancel" | "decline" | "dispute";
+export type MarketplaceOrderActionName = "hand-over" | "confirm" | "cancel" | "decline" | "dispute" | "return-deposit" | "claim-deposit";
 
 export async function marketplaceOrderAction(orderId: string, action: MarketplaceOrderActionName, reason?: string) {
   const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/${action}/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+    body: JSON.stringify(action === "dispute" || action === "claim-deposit" ? { reason } : {}),
   });
   return marketplaceOrderResponse(res, "That action could not be completed");
 }
@@ -1116,6 +1235,12 @@ export async function cancelRide(rideId: string) {
 export interface EmergencyContact {
   name: string;
   phone: string;
+  sms_delivery_live?: boolean;
+}
+
+export interface EmergencyContactState {
+  contact: EmergencyContact | null;
+  smsDeliveryLive: boolean;
 }
 
 export async function getMyEmergencyContact(): Promise<EmergencyContact | null> {
@@ -1125,11 +1250,21 @@ export async function getMyEmergencyContact(): Promise<EmergencyContact | null> 
   return res.json();
 }
 
+export async function getMyEmergencyContactState(): Promise<EmergencyContactState> {
+  const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, { headers: await authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404) {
+    return { contact: null, smsDeliveryLive: data.sms_delivery_live !== false };
+  }
+  if (!res.ok) throw new Error("Could not load your emergency contact");
+  return { contact: data, smsDeliveryLive: data.sms_delivery_live !== false };
+}
+
 export async function saveMyEmergencyContact(contact: EmergencyContact): Promise<EmergencyContact> {
   const res = await fetch(`${API_BASE_URL}/api/my-emergency-contact/`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify(contact),
+    body: JSON.stringify({ name: contact.name, phone: contact.phone }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -1144,10 +1279,16 @@ export async function deleteMyEmergencyContact() {
   if (!res.ok) throw new Error("Could not remove the contact");
 }
 
+export interface SosEmergencyContactResult {
+  name: string;
+  phone: string;
+  status: "sent" | "not_delivered" | "failed";
+}
+
 export async function raiseRideSos(
   rideId: string,
   coords?: { latitude: number; longitude: number } | null,
-): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact_alerted: boolean }> {
+): Promise<{ sos_raised_at: string; admins_alerted: number; emergency_contact: SosEmergencyContactResult | null }> {
   const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/sos/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },

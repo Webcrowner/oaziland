@@ -17,7 +17,7 @@ export default function TechniciansDirectoryPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
+    void Promise.resolve().then(() => setLoading(true));
     listTechnicianDirectory(specialty || undefined)
       .then(setTechnicians)
       .catch(() => setTechnicians([]))

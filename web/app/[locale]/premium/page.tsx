@@ -17,7 +17,7 @@ export default function PremiumPage() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      setLoggedIn(false);
+      void Promise.resolve().then(() => setLoggedIn(false));
       return;
     }
     getMyCreatorPremiumStatus(token).then((data) => setIsPremium(data.is_premium)).catch(() => {});

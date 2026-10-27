@@ -21,7 +21,7 @@ export default function WalletPage() {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
-    setLoggedIn(!!token);
+    void Promise.resolve().then(() => setLoggedIn(!!token));
   }, []);
 
   if (!loggedIn) {

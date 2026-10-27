@@ -25,7 +25,7 @@ export default function LandlordPortfolioPage() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      setStatus("signedOut");
+      void Promise.resolve().then(() => setStatus("signedOut"));
       return;
     }
     Promise.all([getMyProfile(token), getMyLandlordPortfolio(token)])

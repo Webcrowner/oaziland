@@ -46,4 +46,4 @@ EXPOSE 8000
 # The actual startup sequence: run migrations, collect static files,
 # THEN start the real production server (gunicorn, not Django's own
 # development server, which is not meant for production traffic).
-CMD ["sh", "-c", "python manage.py migrate --no-input && python manage.py collectstatic --no-input && gunicorn oaziland.wsgi:application --bind 0.0.0.0:8000 --workers 3 --log-file -"]
+CMD ["sh", "-c", "python manage.py migrate --no-input && python manage.py collectstatic --no-input && gunicorn oaziland.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 600 --log-file -"]

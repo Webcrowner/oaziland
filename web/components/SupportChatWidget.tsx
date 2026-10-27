@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
+import { IconMessageCircle } from "@/components/Icons";
 import { useRouter, Link } from "@/i18n/navigation";
 import {
   startSupportChat, continueSupportChat, askChatbotAnonymously,
@@ -92,6 +94,7 @@ function FormattedMessageText({ text, onNavigate }: { text: string; onNavigate: 
 }
 
 export default function SupportChatWidget() {
+  const t = useTranslations("SupportLauncher");
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -105,7 +108,8 @@ export default function SupportChatWidget() {
   const nextLocalId = useRef(-1);
 
   useEffect(() => {
-    setIsSignedIn(!!localStorage.getItem("access_token"));
+    const hasToken = !!localStorage.getItem("access_token");
+    void Promise.resolve().then(() => setIsSignedIn(hasToken));
   }, [isOpen]);
 
   useEffect(() => {
@@ -169,7 +173,7 @@ export default function SupportChatWidget() {
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
+    <div data-open={isOpen} className={`support-widget z-50 flex flex-col items-end gap-3 ${isOpen ? "fixed bottom-5 right-4 md:right-5" : "relative mx-auto my-6 w-fit md:fixed md:bottom-5 md:right-5 md:m-0"}`}>
       {isOpen && (
         <div className="w-[min(92vw,360px)] h-[min(70vh,520px)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
           <div className="bg-[var(--navy)] text-white px-4 py-3 flex items-center justify-between">
@@ -177,7 +181,7 @@ export default function SupportChatWidget() {
               <p className="font-bold text-sm">Oazi — Oaziland Support</p>
               <p className="text-[11px] text-white/70">{aiHandled ? "AI assistant" : "Connected to our team"}</p>
             </div>
-            <button onClick={() => setIsOpen(false)} className="text-white/80 hover:text-white text-lg leading-none">
+            <button aria-label={t("close")} onClick={() => setIsOpen(false)} className="min-h-11 min-w-11 text-white/80 hover:text-white text-lg leading-none">
               ×
             </button>
           </div>
@@ -248,10 +252,12 @@ export default function SupportChatWidget() {
 
       <button
         onClick={() => setIsOpen((v) => !v)}
-        className="w-14 h-14 rounded-full bg-[var(--navy)] text-white shadow-xl flex items-center justify-center text-2xl hover:opacity-90 transition-opacity"
-        aria-label="Chat with Oaziland support"
+        className="min-h-11 rounded-full bg-[var(--navy)] px-4 py-3 text-white shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity md:w-14 md:h-14 md:p-0"
+        aria-label={isOpen ? t("close") : t("open")}
+        aria-expanded={isOpen}
       >
-        {isOpen ? "×" : "💬"}
+        {isOpen ? <span aria-hidden="true">×</span> : <IconMessageCircle size={22} />}
+        <span className="text-sm font-semibold md:hidden">{isOpen ? t("close") : t("open")}</span>
       </button>
     </div>
   );

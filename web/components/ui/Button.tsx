@@ -10,12 +10,14 @@ import { Link } from "@/i18n/navigation";
 const VARIANTS = {
   primary: "gold-gradient text-[var(--navy)] font-bold hover:shadow-lg hover:shadow-amber-500/25",
   secondary: "border border-slate-300 text-slate-700 font-semibold hover:border-[var(--navy)] hover:bg-slate-50",
+  dark: "bg-slate-900 text-white font-bold hover:bg-slate-800",
+  success: "bg-emerald-600 text-white font-bold hover:bg-emerald-700 hover:shadow-lg hover:shadow-emerald-600/25",
   ghost: "text-[var(--navy)] font-medium hover:text-[var(--gold)] underline-offset-2 hover:underline",
 } as const;
 
 const SIZES = {
-  md: "px-4 py-2 text-sm",
-  lg: "px-6 py-3 text-base",
+  md: "min-h-11 px-4 py-2 text-sm",
+  lg: "min-h-12 px-6 py-3 text-base",
 } as const;
 
 type CommonProps = {

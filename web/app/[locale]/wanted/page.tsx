@@ -121,7 +121,7 @@ export default function WantedBoardPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
     listQuarters()
       .then((data) => {
         setQuarters(data);

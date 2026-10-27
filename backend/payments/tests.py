@@ -78,6 +78,53 @@ def test_fapshi_initiate_debit_live_api(mock_post):
     assert kwargs["json"]["externalId"] == "booking-live-777"
 
 
+@patch("requests.get")
+def test_fapshi_webhook_verification(mock_get):
+    gateway = FapshiGateway()
+    gateway.api_user = "test_user_fapshi"
+    gateway.api_key = "test_key_fapshi"
+
+    payload = json.dumps({
+        "transId": "FAPSHI-TX-101",
+        "externalId": "book-101",
+        "amount": 50000,
+        "status": "SUCCESSFUL",
+    }).encode("utf-8")
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "transId": "FAPSHI-TX-101",
+        "externalId": "book-101",
+        "amount": 50000,
+        "status": "SUCCESSFUL",
+    }
+    mock_get.return_value = response
+
+    result = gateway.verify_webhook(raw_payload=payload, signature_header="")
+
+    assert result.is_valid_signature is True
+    assert result.payment_succeeded is True
+    assert result.provider_reference == "FAPSHI-TX-101"
+    assert result.external_id == "book-101"
+    assert result.amount_xaf == Decimal("50000")
+
+
+def test_fapshi_webhook_fails_closed_without_credentials():
+    gateway = FapshiGateway()
+    gateway.api_user = ""
+    gateway.api_key = ""
+    payload = json.dumps({
+        "transId": "FORGED-TX",
+        "externalId": "book-101",
+        "amount": 50000,
+        "status": "SUCCESSFUL",
+    }).encode("utf-8")
+
+    result = gateway.verify_webhook(raw_payload=payload, signature_header="")
+
+    assert result.is_valid_signature is False
+    assert result.payment_succeeded is False
+
+
 @patch("requests.post")
 def test_fapshi_initiate_disbursement_payout(mock_post):
     gateway = FapshiGateway()
@@ -113,29 +160,6 @@ def test_fapshi_initiate_disbursement_payout(mock_post):
     assert kwargs["json"]["externalId"] == "payout-999"
 
 
-def test_fapshi_webhook_verification():
-    gateway = FapshiGateway()
-
-    # Valid payload
-    payload = json.dumps({
-        "transId": "FAPSHI-TX-101",
-        "externalId": "book-101",
-        "amount": 50000,
-        "status": "SUCCESSFUL",
-    }).encode("utf-8")
-
-    res = gateway.verify_webhook(raw_payload=payload, signature_header="valid")
-    assert isinstance(res, WebhookVerificationResult)
-    assert res.is_valid_signature is True
-    assert res.payment_succeeded is True
-    assert res.provider_reference == "FAPSHI-TX-101"
-
-    # Invalid signature test rejection
-    res_invalid = gateway.verify_webhook(raw_payload=payload, signature_header="invalid")
-    assert res_invalid.is_valid_signature is False
-    assert res_invalid.payment_succeeded is False
-
-
 def test_get_active_gateway_provider_switch(monkeypatch):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setenv("PAYMENT_GATEWAY_PROVIDER", "FAPSHI")
@@ -146,3 +170,6 @@ def test_get_active_gateway_provider_switch(monkeypatch):
     gw_sandbox = get_active_gateway()
     assert isinstance(gw_sandbox, SandboxGateway)
 
+    monkeypatch.setenv("PAYMENT_GATEWAY_PROVIDER", "")
+    with pytest.raises(RuntimeError):
+        get_active_gateway()

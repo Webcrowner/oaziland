@@ -17,7 +17,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      setStatus("signedOut");
+      void Promise.resolve().then(() => setStatus("signedOut"));
       return;
     }
     getMyAgentDashboard(token)

@@ -12,8 +12,6 @@ import {
   IconPhoneCall,
   IconEye,
   IconEyeOff,
-  IconGoogle,
-  IconFacebook,
   IconShieldCheck,
   IconSparkles,
 } from "@/components/Icons";
@@ -40,7 +38,9 @@ function RegisterForm() {
 
   useEffect(() => {
     const ref = searchParams.get("ref");
-    if (ref) setReferralCode(ref.toUpperCase());
+    if (ref) {
+      void Promise.resolve().then(() => setReferralCode(ref.toUpperCase()));
+    }
   }, [searchParams]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -102,35 +102,6 @@ function RegisterForm() {
               <span>{t("referralCodeApplied", { code: referralCode })}</span>
             </div>
           )}
-
-          {/* Social Sign up */}
-          <div className="space-y-2.5 mb-6">
-            <button
-              type="button"
-              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs sm:text-sm font-semibold transition-all duration-200 shadow-sm active:scale-[0.99] group"
-              onClick={() => alert("Google OAuth integration: Please configure Google Client ID in backend settings.")}
-            >
-              <IconGoogle size={18} className="shrink-0 transition-transform group-hover:scale-110" />
-              <span>{t("continueWithGoogle")}</span>
-            </button>
-
-            <button
-              type="button"
-              className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-700 text-xs sm:text-sm font-semibold transition-all duration-200 shadow-sm active:scale-[0.99] group"
-              onClick={() => alert("Facebook Login integration: Please configure Facebook App ID in backend settings.")}
-            >
-              <IconFacebook size={18} className="shrink-0 transition-transform group-hover:scale-110" />
-              <span>{t("continueWithFacebook")}</span>
-            </button>
-          </div>
-
-          {/* Divider */}
-          <div className="relative flex items-center justify-center mb-6">
-            <div className="border-t border-slate-200 w-full" />
-            <span className="bg-white px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 absolute">
-              {t("orDivider")}
-            </span>
-          </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

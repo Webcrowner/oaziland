@@ -39,7 +39,7 @@ export default function PrivacySettingsPage() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      setLoggedIn(false);
+      void Promise.resolve().then(() => setLoggedIn(false));
       return;
     }
     getMyPresenceSettings(token).then(setSettings).catch(() => {});

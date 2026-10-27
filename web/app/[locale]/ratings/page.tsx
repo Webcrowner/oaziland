@@ -25,7 +25,7 @@ export default function RatingsPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   if (status === "signedOut") {

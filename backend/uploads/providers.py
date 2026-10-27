@@ -18,6 +18,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 
+SINGLE_REQUEST_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024
+CHUNK_SIZE_BYTES = 20 * 1024 * 1024
+
+
 @dataclass
 class UploadResult:
     url: str
@@ -77,7 +81,13 @@ class CloudinaryStorageProvider(MediaStorageProvider):
 
         media_type = detect_media_type(file.content_type)
         resource_type = "video" if media_type == "VIDEO" else "image"
-        result = cloudinary.uploader.upload(file, folder=folder, resource_type=resource_type)
+        # Cloudinary's single-request upload is capped at 100 MB; bigger videos go up in chunks.
+        if media_type == "VIDEO" and file.size > SINGLE_REQUEST_UPLOAD_LIMIT_BYTES:
+            result = cloudinary.uploader.upload_large(
+                file, folder=folder, resource_type=resource_type, chunk_size=CHUNK_SIZE_BYTES,
+            )
+        else:
+            result = cloudinary.uploader.upload(file, folder=folder, resource_type=resource_type)
         return UploadResult(url=result["secure_url"], media_type=media_type)
 
 

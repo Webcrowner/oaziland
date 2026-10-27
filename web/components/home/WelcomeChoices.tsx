@@ -5,24 +5,14 @@ import { useRouter } from "@/i18n/navigation";
 
 const SEEN_KEY = "oaziland_onboarding_seen";
 
-/**
- * A real first-visit onboarding flow — shown once per browser (tracked
- * via localStorage, not a cookie/account flag, since this is about
- * orienting a NEW VISITOR, logged in or not). Presents the platform's
- * four real personas as a plain selection grid, not a numbered
- * sequence — choosing "who am I" isn't a step-by-step process, so no
- * 01/02/03 markers here, unlike the guided tour's own actual steps.
- * Each choice routes to a genuinely relevant, already-built starting
- * point — never a placeholder destination.
- */
-export default function OnboardingModal() {
+export default function WelcomeChoices() {
   const t = useTranslations("OnboardingModal");
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!localStorage.getItem(SEEN_KEY)) {
-      setOpen(true);
+      void Promise.resolve().then(() => setOpen(true));
     }
   }, []);
 
@@ -47,12 +37,12 @@ export default function OnboardingModal() {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--navy)]/60 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl max-w-lg w-full p-6 md:p-8 shadow-2xl animate-rise-in">
-        <h2 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-1">{t("title")}</h2>
+    <section aria-labelledby="welcome-title" className="px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl rounded-2xl border border-slate-200 bg-white p-6 md:p-8">
+        <h2 id="welcome-title" className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-1">{t("title")}</h2>
         <p className="text-gray-500 mb-6">{t("subtitle")}</p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           {personas.map((persona) => (
             <button
               key={persona.key}
@@ -65,10 +55,10 @@ export default function OnboardingModal() {
           ))}
         </div>
 
-        <button onClick={dismiss} className="text-sm text-gray-400 hover:text-gray-600 underline">
+        <button onClick={dismiss} className="min-h-11 text-sm text-slate-600 hover:text-slate-900 underline">
           {t("skip")}
         </button>
       </div>
-    </div>
+    </section>
   );
 }

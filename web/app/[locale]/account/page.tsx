@@ -104,7 +104,7 @@ export default function AccountPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   async function handleSaveProfile(e: React.FormEvent) {

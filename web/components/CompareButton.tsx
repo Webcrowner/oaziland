@@ -24,7 +24,7 @@ export default function CompareButton({ listingId }: { listingId: string }) {
 
   useEffect(() => {
     const raw = localStorage.getItem(STAGING_KEY);
-    setStaged(raw ? JSON.parse(raw) : []);
+    void Promise.resolve().then(() => setStaged(raw ? JSON.parse(raw) : []));
   }, []);
 
   const isStaged = staged.includes(listingId);

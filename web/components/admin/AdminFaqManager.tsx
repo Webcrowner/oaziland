@@ -35,7 +35,7 @@ export default function AdminFaqManager() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   function startNew() {

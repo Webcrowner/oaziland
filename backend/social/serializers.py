@@ -8,7 +8,7 @@ any of them over HTTP — no real inbox was possible).
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from .models import SocialAccountLink, Conversation, Message, Post, Comment, PostMedia, Rating, Review, Referral
-from .services import get_message_tick_status, get_post_reaction_counts, get_presence_info
+from .services import get_message_tick_status, get_presence_info
 
 
 class SocialAccountLinkSerializer(serializers.ModelSerializer):
@@ -85,13 +85,43 @@ class ConversationSerializer(serializers.ModelSerializer):
         ).count()
 
 
+MAX_CAPTION_LENGTH = 2200
+MAX_COMMENT_LENGTH = 1000
+MAX_POST_MEDIA = 10
+MAX_POST_TAGS = 20
+
+
+def _display_name(user) -> str:
+    # A blank full_name must never render as an anonymous, nameless author.
+    return user.full_name or user.username
+
+
+def _is_own(serializer, author_id) -> bool:
+    request = serializer.context.get("request")
+    return bool(request and request.user.is_authenticated and request.user.id == author_id)
+
+
 class CommentSerializer(serializers.ModelSerializer):
-    author_name = serializers.CharField(source="author.full_name", read_only=True)
+    author_name = serializers.SerializerMethodField()
+    is_mine = serializers.SerializerMethodField()
+    text = serializers.CharField(max_length=MAX_COMMENT_LENGTH)
 
     class Meta:
         model = Comment
-        fields = ["id", "post", "author", "author_name", "text", "created_at", "edited_at"]
+        fields = ["id", "post", "author", "author_name", "is_mine", "text", "created_at", "edited_at"]
         read_only_fields = ["author", "created_at", "edited_at"]
+
+    def get_author_name(self, comment) -> str:
+        return _display_name(comment.author)
+
+    def get_is_mine(self, comment) -> bool:
+        return _is_own(self, comment.author_id)
+
+    def validate_text(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("A comment can't be empty.")
+        return value
 
 
 class PostMediaSerializer(serializers.ModelSerializer):
@@ -105,7 +135,9 @@ class PostSerializer(serializers.ModelSerializer):
     read-side tag_names/media fields: creating a post takes plain
     strings (tag names, media URLs); reading one back should show the
     real tag names and PostMedia rows actually created."""
-    author_name = serializers.CharField(source="author.full_name", read_only=True)
+    author_name = serializers.SerializerMethodField()
+    is_mine = serializers.SerializerMethodField()
+    my_reaction = serializers.SerializerMethodField()
     is_verified_creator = serializers.SerializerMethodField()
     poster_role = serializers.CharField(source="attribution.poster_role", read_only=True)
     tag_names = serializers.SerializerMethodField()
@@ -114,17 +146,49 @@ class PostSerializer(serializers.ModelSerializer):
     comment_count = serializers.SerializerMethodField()
     is_sponsored = serializers.BooleanField(read_only=True)
 
-    tags = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
-    media_urls = serializers.ListField(child=serializers.URLField(), write_only=True, required=False)
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=50), write_only=True, required=False, max_length=MAX_POST_TAGS,
+    )
+    media_urls = serializers.ListField(
+        child=serializers.URLField(), write_only=True, required=False, max_length=MAX_POST_MEDIA,
+    )
 
     class Meta:
         model = Post
         fields = [
-            "id", "author", "author_name", "is_verified_creator", "poster_role", "post_type", "caption",
-            "tag_names", "tags", "media", "media_urls", "linked_listing_id", "status",
+            "id", "author", "author_name", "is_mine", "my_reaction", "is_verified_creator", "poster_role", "post_type",
+            "caption", "tag_names", "tags", "media", "media_urls", "linked_listing_id", "status",
             "published_at", "created_at", "reaction_counts", "comment_count", "is_sponsored",
         ]
         read_only_fields = ["author", "status", "published_at", "created_at"]
+
+    def validate_caption(self, value):
+        if len(value) > MAX_CAPTION_LENGTH:
+            raise serializers.ValidationError(f"A caption can be at most {MAX_CAPTION_LENGTH} characters.")
+        return value
+
+    def validate(self, attrs):
+        # Only enforced on create; a post with neither text nor media is an empty card in everyone's feed.
+        if self.instance is None and not attrs.get("caption", "").strip() and not attrs.get("media_urls"):
+            raise serializers.ValidationError({"caption": "A post needs a caption or at least one photo or video."})
+        if attrs.get("post_type") == "REEL":
+            from .services import has_video_url
+            if not has_video_url(attrs.get("media_urls") or []):
+                raise serializers.ValidationError({"media_urls": "A video post needs a video file."})
+        return attrs
+
+    def get_author_name(self, post) -> str:
+        return _display_name(post.author)
+
+    def get_is_mine(self, post) -> bool:
+        return _is_own(self, post.author_id)
+
+    def get_my_reaction(self, post) -> str | None:
+        request = self.context.get("request")
+        if not (request and request.user.is_authenticated):
+            return None
+        reaction = next((r for r in post.reactions.all() if r.author_id == request.user.id), None)
+        return reaction.emoji if reaction else None
 
     def get_is_verified_creator(self, post) -> bool:
         from monetization.services import is_premium_creator
@@ -134,10 +198,79 @@ class PostSerializer(serializers.ModelSerializer):
         return [tag.name for tag in post.tags.all()]
 
     def get_reaction_counts(self, post) -> dict:
-        return get_post_reaction_counts(post)
+        # post.reactions is prefetched by the feed views; reading it avoids one COUNT query per card.
+        counts: dict[str, int] = {}
+        for reaction in post.reactions.all():
+            counts[reaction.emoji] = counts.get(reaction.emoji, 0) + 1
+        return counts
 
     def get_comment_count(self, post) -> int:
         return post.comments.count()
+
+
+class ReelSerializer(PostSerializer):
+    """A post as one full-screen video card: everything PostSerializer gives, plus the
+    counters, the viewer's follow/save state, and a small preview of the linked listing
+    so the card can show price + place and link straight to the description page."""
+    author_username = serializers.CharField(source="author.username", read_only=True)
+    author_avatar = serializers.SerializerMethodField()
+    is_following_author = serializers.SerializerMethodField()
+    is_saved = serializers.SerializerMethodField()
+    share_count = serializers.SerializerMethodField()
+    listing_preview = serializers.SerializerMethodField()
+
+    class Meta(PostSerializer.Meta):
+        fields = PostSerializer.Meta.fields + [
+            "author_username", "author_avatar", "is_following_author", "is_saved", "share_count",
+            "view_count", "listing_preview",
+        ]
+        read_only_fields = PostSerializer.Meta.read_only_fields + ["view_count"]
+
+    def _viewer(self):
+        request = self.context.get("request")
+        return request.user if request and request.user.is_authenticated else None
+
+    def get_author_avatar(self, post) -> str | None:
+        return getattr(post.author, "profile_image_url", None) or None
+
+    def get_is_following_author(self, post) -> bool:
+        viewer = self._viewer()
+        if viewer is None or viewer.id == post.author_id:
+            return False
+        from .models import Follow
+        return Follow.objects.filter(follower=viewer, followee_id=post.author_id).exists()
+
+    def get_is_saved(self, post) -> bool:
+        viewer = self._viewer()
+        if viewer is None:
+            return False
+        from .models import Favorite
+        return Favorite.objects.filter(user=viewer, post=post).exists()
+
+    def get_share_count(self, post) -> int:
+        from .models import ShareEvent
+        return ShareEvent.objects.filter(post=post).count()
+
+    def get_listing_preview(self, post) -> dict | None:
+        if not post.linked_listing_id:
+            return None
+        from property.models import Listing, ListingStatus
+        listing = (
+            Listing.objects.select_related("property_asset__quarter")
+            .filter(id=post.linked_listing_id).first()
+        )
+        if listing is None:
+            return None
+        cover = listing.photos.filter(media_type="PHOTO").first()
+        return {
+            "id": str(listing.id),
+            "listing_type": listing.listing_type,
+            "property_type": listing.property_asset.type,
+            "price_xaf": str(listing.price_xaf),
+            "quarter": listing.property_asset.quarter.name,
+            "cover_url": cover.url if cover else None,
+            "is_available": listing.status == ListingStatus.PUBLISHED,
+        }
 
 
 class RatingSerializer(serializers.ModelSerializer):

@@ -104,7 +104,9 @@ export default function GuestHousesPage() {
     load();
     // Shared/chatbot links can preselect the area (?quarter=<id>).
     const presetQuarter = new URLSearchParams(window.location.search).get("quarter");
-    if (presetQuarter) setFilterQuarter(presetQuarter);
+    if (presetQuarter) {
+      void Promise.resolve().then(() => setFilterQuarter(presetQuarter));
+    }
     listQuarters()
       .then((data) => {
         setQuarters(data);

@@ -6,23 +6,43 @@ import {
   listMyMarketplaceOrders, marketplaceOrderAction,
   type MarketplaceOrderItem, type MarketplaceOrderStatus, type MarketplaceOrderActionName,
 } from "../lib/api";
+import RateAndReport from "../components/RateAndReport";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceOrders">;
 type Role = "buying" | "selling";
 
 const STATUS_LABELS: Record<MarketplaceOrderStatus, string> = {
-  PAID: "Paid, awaiting handover", HANDED_OVER: "Handed over", COMPLETED: "Completed", CANCELLED: "Cancelled and refunded", DISPUTED: "Under review",
+  PAYMENT_PENDING: "Waiting for payment confirmation", PAID: "Paid, awaiting handover", HANDED_OVER: "Handed over", COMPLETED: "Completed", CANCELLED: "Cancelled and refunded", DISPUTED: "Under review",
 };
 const STATUS_COLORS: Record<MarketplaceOrderStatus, string> = {
-  PAID: "#C9A227", HANDED_OVER: "#1B2A4A", COMPLETED: "#16A34A", CANCELLED: "#A8502E", DISPUTED: "#C9A227",
+  PAYMENT_PENDING: "#6B7280", PAID: "#C9A227", HANDED_OVER: "#1B2A4A", COMPLETED: "#16A34A", CANCELLED: "#A8502E", DISPUTED: "#C9A227",
+};
+
+const DEPOSIT_LABELS: Record<MarketplaceOrderItem["deposit_status"], string> = {
+  NONE: "none", HELD: "held in escrow", CLAIMED: "claimed by the seller, under review", RETURNED: "returned to the renter", FORFEITED: "paid to the seller",
 };
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+// Rental dates are plain calendar days, so they are shown without a time or a timezone shift.
+function formatDay(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+function depositHint(order: MarketplaceOrderItem, role: Role): string {
+  if (order.deposit_status === "CLAIMED") return "Support is reviewing the deposit claim and will decide who receives it.";
+  if (order.status !== "COMPLETED" || order.deposit_status !== "HELD" || !order.deposit_return_by) return "";
+  const date = formatDay(order.deposit_return_by);
+  return role === "buying"
+    ? `Your deposit is held and returns to you on ${date} unless the seller reports a problem.`
+    : `Return the deposit once the rental is back in good order, or claim it. It returns to the renter on ${date} if you do nothing.`;
+}
+
 function hint(order: MarketplaceOrderItem, role: Role): string {
   switch (order.status) {
+    case "PAYMENT_PENDING": return "Approve the Mobile Money prompt. The order will update after the provider confirms payment.";
     case "PAID":
       if (!order.seller_deadline) return "";
       return role === "buying"
@@ -45,7 +65,7 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
   const [orders, setOrders] = useState<MarketplaceOrderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [disputingId, setDisputingId] = useState<string | null>(null);
+  const [disputing, setDisputing] = useState<{ id: string; action: "dispute" | "claim-deposit" } | null>(null);
   const [reason, setReason] = useState("");
 
   const load = useCallback(async (which: Role) => {
@@ -66,7 +86,7 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
     setError("");
     try {
       await marketplaceOrderAction(orderId, action, why);
-      setDisputingId(null);
+      setDisputing(null);
       setReason("");
       await load(role);
     } catch (err) {
@@ -85,7 +105,7 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
     setRole(next);
     setLoading(true);
     setError("");
-    setDisputingId(null);
+    setDisputing(null);
   }
 
   return (
@@ -121,17 +141,26 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
               <Text style={styles.meta}>
                 {Number(order.amount_xaf).toLocaleString()} XAF · {role === "buying" ? `Seller: ${order.seller_name}` : `Buyer: ${order.buyer_name}`}
               </Text>
+              {Number(order.deposit_xaf) > 0 && (
+                <Text style={styles.meta}>Deposit: {Number(order.deposit_xaf).toLocaleString()} XAF · {DEPOSIT_LABELS[order.deposit_status]}</Text>
+              )}
+              {order.rental_starts_on && order.rental_ends_on && (
+                <Text style={styles.meta}>Rental: {formatDay(order.rental_starts_on)} to {formatDay(order.rental_ends_on)}</Text>
+              )}
               <Text style={styles.date}>{formatDate(order.created_at)}</Text>
-              <Text style={styles.hint}>{hint(order, role)}</Text>
+              <Text style={styles.hint}>{[hint(order, role), depositHint(order, role)].filter(Boolean).join(" ")}</Text>
 
-              {disputingId === order.id ? (
+              {disputing?.id === order.id ? (
                 <View>
-                  <TextInput style={styles.input} placeholder="Describe the problem" value={reason} onChangeText={setReason} multiline numberOfLines={3} />
+                  <TextInput
+                    style={styles.input} multiline numberOfLines={3} value={reason} onChangeText={setReason}
+                    placeholder={disputing.action === "dispute" ? "Describe the problem" : "Describe the damage or problem with the returned item"}
+                  />
                   <View style={styles.actions}>
-                    <TouchableOpacity style={[styles.primary, reason.trim().length < 5 && styles.disabled]} disabled={reason.trim().length < 5} onPress={() => run(order.id, "dispute", reason.trim())}>
-                      <Text style={styles.primaryText}>Send to support</Text>
+                    <TouchableOpacity style={[styles.primary, reason.trim().length < 5 && styles.disabled]} disabled={reason.trim().length < 5} onPress={() => run(order.id, disputing.action, reason.trim())}>
+                      <Text style={styles.primaryText}>{disputing.action === "dispute" ? "Send to support" : "Send claim to support"}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setDisputingId(null)}><Text style={styles.secondary}>Close</Text></TouchableOpacity>
+                    <TouchableOpacity onPress={() => setDisputing(null)}><Text style={styles.secondary}>Close</Text></TouchableOpacity>
                   </View>
                 </View>
               ) : (
@@ -140,6 +169,12 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
                     <>
                       <TouchableOpacity style={styles.primary} onPress={() => run(order.id, "hand-over")}><Text style={styles.primaryText}>Mark as handed over</Text></TouchableOpacity>
                       <TouchableOpacity onPress={() => confirmThen("Decline this order? The buyer will be refunded.", order.id, "decline")}><Text style={styles.danger}>Decline and refund</Text></TouchableOpacity>
+                    </>
+                  )}
+                  {role === "selling" && order.status === "COMPLETED" && order.deposit_status === "HELD" && (
+                    <>
+                      <TouchableOpacity style={styles.primary} onPress={() => confirmThen("Return the full deposit to the renter?", order.id, "return-deposit")}><Text style={styles.primaryText}>Return deposit</Text></TouchableOpacity>
+                      <TouchableOpacity onPress={() => { setDisputing({ id: order.id, action: "claim-deposit" }); setReason(""); }}><Text style={styles.danger}>Claim deposit</Text></TouchableOpacity>
                     </>
                   )}
                   {role === "buying" && order.status === "HANDED_OVER" && (
@@ -151,9 +186,12 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
                     <TouchableOpacity onPress={() => confirmThen("Cancel this order and get a refund?", order.id, "cancel")}><Text style={styles.danger}>Cancel and refund me</Text></TouchableOpacity>
                   )}
                   {(order.status === "PAID" || order.status === "HANDED_OVER") && (
-                    <TouchableOpacity onPress={() => { setDisputingId(order.id); setReason(""); }}><Text style={styles.secondary}>Report a problem</Text></TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setDisputing({ id: order.id, action: "dispute" }); setReason(""); }}><Text style={styles.secondary}>Report a problem</Text></TouchableOpacity>
                   )}
                 </View>
+              )}
+              {order.status === "COMPLETED" && (
+                <RateAndReport subjectUserId={role === "buying" ? order.seller : order.buyer} />
               )}
             </View>
           )}

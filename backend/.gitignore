@@ -25,3 +25,4 @@ staticfiles/
 .pytest_cache/
 .coverage
 htmlcov/
+private_media/
