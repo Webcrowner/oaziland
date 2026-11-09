@@ -40,7 +40,7 @@ export default function SellerTrustCard({ sellerId, listerRole, isSale }: { sell
           {seller.reply_time_hours != null && seller.reply_rate_pct != null && (
             <li>⏱ {replyText(seller.reply_time_hours)} · {t("replyRate", { pct: seller.reply_rate_pct })}</li>
           )}
-          {seller.last_seen_at && <li>{t("lastSeen", { when: format.relativeTime(new Date(seller.last_seen_at)) })}</li>}
+          {seller.last_seen_at && <li>{t("lastSeen", { when: format.relativeTime(new Date(seller.last_seen_at), new Date()) })}</li>}
         </ul>
       )}
       <div className="mt-3 border-t border-black/10 pt-3">
