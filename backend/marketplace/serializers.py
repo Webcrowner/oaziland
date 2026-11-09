@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from .models import (
     WarehouseListing, StoreListing, BusinessListing, CarListing, GoodsListing, VehicleSpec, MarketplaceMedia, RideBooking, RideMessage, ListingCondition,
-    RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder, RideEmergencyContact, LuggageSize, CarBlockedPeriod,
+    RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder, RideEmergencyContact, LuggageSize, CarBlockedPeriod, MarketplaceOffer,
 )
 
 MAX_LUGGAGE_PHOTOS = 3
@@ -26,6 +26,11 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
     distance_km = serializers.SerializerMethodField()
     expires_at = serializers.SerializerMethodField()
     is_expired = serializers.SerializerMethodField()
+    is_boosted = serializers.SerializerMethodField()
+
+    def get_is_boosted(self, obj) -> bool:
+        from django.utils import timezone
+        return bool(obj.boosted_until and obj.boosted_until > timezone.now())
 
     def get_expires_at(self, obj) -> str:
         from .engagement import expires_at
@@ -44,8 +49,9 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
             "id", "lister_user", "lister_name", "lister_role", "title", "description",
             "price_basis", "price_xaf", "security_deposit_xaf", "quarter", "quarter_name", "latitude", "longitude",
             "availability_status", "removed_by_moderation", "created_at", "media", "distance_km", "expires_at", "is_expired",
+            "allow_offers", "is_boosted", "boosted_until",
         ]
-        read_only_fields = ["lister_user", "lister_role", "availability_status", "removed_by_moderation", "created_at"]
+        read_only_fields = ["lister_user", "lister_role", "availability_status", "removed_by_moderation", "created_at", "boosted_until"]
         extra_kwargs = {
             "price_xaf": {"min_value": Decimal("0.01")},
             "security_deposit_xaf": {"min_value": Decimal("0")},
@@ -247,19 +253,52 @@ class CarRentalQuoteSerializer(serializers.Serializer):
 
 
 class GoodsListingSerializer(BaseMarketplaceListingSerializer):
+    DELIVERY_FIELDS = [
+        "pickup_available", "seller_delivery", "seller_delivery_fee_xaf", "seller_delivery_areas",
+        "courier_shipping", "courier_fee_xaf", "courier_note",
+    ]
+
     class Meta(BaseMarketplaceListingSerializer.Meta):
         model = GoodsListing
-        fields = BaseMarketplaceListingSerializer.Meta.fields + ["item_category", "condition", "quantity"]
+        fields = BaseMarketplaceListingSerializer.Meta.fields + [
+            "item_category", "condition", "quantity", "attributes",
+            "pickup_available", "seller_delivery", "seller_delivery_fee_xaf", "seller_delivery_areas",
+            "courier_shipping", "courier_fee_xaf", "courier_note",
+        ]
         extra_kwargs = {
             **BaseMarketplaceListingSerializer.Meta.extra_kwargs,
             "price_basis": {"required": False, "default": "SALE"},
             "quantity": {"min_value": 1, "max_value": 100000},
+            "seller_delivery_fee_xaf": {"min_value": Decimal("0"), "max_value": Decimal("1000000")},
+            "courier_fee_xaf": {"min_value": Decimal("0"), "max_value": Decimal("1000000")},
         }
 
     def validate(self, attrs):
+        from .goods_attributes import clean_attributes, AttributeError_
         attrs = super().validate(attrs)
         if attrs.get("price_basis", "SALE") != "SALE":
             raise serializers.ValidationError({"price_basis": "Goods can only be listed for sale."})
+
+        def current(field, default=None):
+            return attrs.get(field, getattr(self.instance, field, default))
+
+        category = current("item_category", "OTHER")
+        if "attributes" in attrs or "item_category" in attrs:
+            # A new category keeps only the details that still make sense for it.
+            raw = attrs.get("attributes", getattr(self.instance, "attributes", {}) if self.instance else {})
+            if "attributes" not in attrs:
+                from .goods_attributes import SCHEMAS
+                raw = {k: v for k, v in (raw or {}).items() if k in SCHEMAS.get(category, {})}
+            try:
+                attrs["attributes"] = clean_attributes(category, raw)
+            except AttributeError_ as e:
+                raise serializers.ValidationError({"attributes": str(e)})
+        if not (current("pickup_available", True) or current("seller_delivery", False) or current("courier_shipping", False)):
+            raise serializers.ValidationError({"pickup_available": "Offer at least one way for the buyer to get the item."})
+        if not current("seller_delivery", False):
+            attrs["seller_delivery_fee_xaf"] = Decimal("0")
+        if not current("courier_shipping", False):
+            attrs["courier_fee_xaf"] = Decimal("0")
         return attrs
 
 
@@ -530,6 +569,11 @@ class PlaceOrderSerializer(serializers.Serializer):
     end_date = serializers.DateField(required=False)
     with_driver = serializers.BooleanField(required=False, default=False)
     delivery = serializers.BooleanField(required=False, default=False)
+    # Paying the price agreed in an accepted offer.
+    offer_id = serializers.UUIDField(required=False, allow_null=True)
+    # Goods: how the buyer gets the item.
+    delivery_method = serializers.ChoiceField(choices=["PICKUP", "SELLER", "COURIER"], required=False, allow_blank=True)
+    delivery_address = serializers.CharField(required=False, allow_blank=True, max_length=300)
 
 
 class OrderDisputeSerializer(serializers.Serializer):
@@ -558,6 +602,7 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
             "deposit_xaf", "deposit_status", "deposit_settled_at", "deposit_return_by", "total_xaf",
             "rental_starts_on", "rental_ends_on", "booked_dates", "rental_days", "with_driver", "delivery_requested",
             "price_breakdown", "free_cancellation_until", "needs_approval", "owner_approved_at", "approval_deadline",
+            "offer", "delivery_method", "delivery_fee_xaf", "delivery_address",
         ]
         read_only_fields = fields
 
@@ -624,3 +669,66 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
             from .car_rentals import handover_deadline
             return handover_deadline(obj).isoformat()
         return (obj.created_at + timedelta(days=ORDER_SELLER_RESPONSE_DAYS)).isoformat()
+
+
+class MakeOfferSerializer(serializers.Serializer):
+    category = serializers.ChoiceField(choices=["warehouses", "stores", "businesses", "cars", "goods"])
+    listing_id = serializers.UUIDField()
+    amount_xaf = serializers.DecimalField(max_digits=14, decimal_places=0, min_value=Decimal("1"))
+    message = serializers.CharField(required=False, allow_blank=True, max_length=500, default="")
+
+
+class CounterOfferSerializer(serializers.Serializer):
+    amount_xaf = serializers.DecimalField(max_digits=14, decimal_places=0, min_value=Decimal("1"))
+
+
+class MarketplaceOfferSerializer(serializers.ModelSerializer):
+    listing_id = serializers.UUIDField(source="listing.id", read_only=True)
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
+    listing_price_xaf = serializers.DecimalField(source="listing.price_xaf", max_digits=14, decimal_places=2, read_only=True)
+    price_basis = serializers.CharField(source="listing.price_basis", read_only=True)
+    category = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
+    buyer_name = serializers.SerializerMethodField()
+    seller = serializers.UUIDField(source="listing.lister_user_id", read_only=True)
+    seller_name = serializers.SerializerMethodField()
+    agreed_amount_xaf = serializers.SerializerMethodField()
+    respond_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MarketplaceOffer
+        fields = [
+            "id", "listing_id", "listing_title", "listing_price_xaf", "price_basis", "category", "photo_url",
+            "buyer", "buyer_name", "seller", "seller_name", "amount_xaf", "counter_amount_xaf", "agreed_amount_xaf",
+            "message", "status", "created_at", "responded_at", "accepted_at", "pay_by", "respond_by",
+        ]
+        read_only_fields = fields
+
+    def get_category(self, obj) -> str:
+        from .offers import category_of
+        return category_of(obj.listing)
+
+    def get_photo_url(self, obj) -> Optional[str]:
+        photo = next((m for m in obj.listing.media.all() if m.media_type == "PHOTO"), None)
+        return photo.file_url if photo else None
+
+    def get_buyer_name(self, obj) -> str:
+        return obj.buyer.full_name or obj.buyer.username
+
+    def get_seller_name(self, obj) -> str:
+        return obj.listing.lister_user.full_name or obj.listing.lister_user.username
+
+    def get_agreed_amount_xaf(self, obj) -> Optional[str]:
+        return str(obj.agreed_amount_xaf) if obj.status in ("ACCEPTED", "PAID") else None
+
+    def get_respond_by(self, obj) -> Optional[str]:
+        from .offers import respond_by
+        moment = respond_by(obj)
+        return moment.isoformat() if moment else None
+
+
+class BoostListingSerializer(serializers.Serializer):
+    duration_unit = serializers.ChoiceField(choices=["DAILY", "MONTHLY"])
+    quantity = serializers.IntegerField(min_value=1, max_value=30)
+    pay_with = serializers.ChoiceField(choices=["WALLET", "MOMO"])
+    phone_number = serializers.CharField(required=False, allow_blank=True, max_length=50, default="")

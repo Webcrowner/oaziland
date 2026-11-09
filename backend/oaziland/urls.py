@@ -67,7 +67,7 @@ from property_management.views import (
     DisputeMessagesView,
 )
 from marketplace.views import (
-    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, GoodsListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet,
+    WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, GoodsListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet, MarketplaceOfferViewSet, MarketplaceBoostOptionsView,
     MyDriverProfileView, MyDriverLocationView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView, AdminSosRideViewSet, MarketplaceFeedView, MarketplaceSellerView,
 )
 from services.views import (
@@ -102,6 +102,7 @@ router.register(r"businesses", BusinessListingViewSet, basename="business")
 router.register(r"cars", CarListingViewSet, basename="car")
 router.register(r"goods", GoodsListingViewSet, basename="goods")
 router.register(r"marketplace-orders", MarketplaceOrderViewSet, basename="marketplace-order")
+router.register(r"marketplace-offers", MarketplaceOfferViewSet, basename="marketplace-offer")
 router.register(r"rides", RideViewSet, basename="ride")
 router.register(r"my-vehicles", MyVehicleViewSet, basename="my-vehicle")
 router.register(r"admin/drivers", AdminDriverViewSet, basename="admin-driver")
@@ -179,6 +180,7 @@ def health_check(request):
 urlpatterns = [
     path('api/marketplace-feed/', MarketplaceFeedView.as_view(), name='marketplace-feed'),
     path('api/marketplace-sellers/<uuid:user_id>/', MarketplaceSellerView.as_view(), name='marketplace-seller'),
+    path('api/marketplace-boost-options/', MarketplaceBoostOptionsView.as_view(), name='marketplace-boost-options'),
     path('admin/', admin.site.urls),
     path('api/admin/data-admin-ticket/', DataAdminTicketView.as_view(), name='data-admin-ticket'),
     path('health/', health_check, name='health-check'),

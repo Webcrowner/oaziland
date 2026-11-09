@@ -20,13 +20,13 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, GoodsListing, GoodsCategory, GoodsCondition, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, MarketplaceOrderStatus, PriceBasis, RideEmergencyContact
+from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, GoodsListing, GoodsCategory, GoodsCondition, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, MarketplaceOrderStatus, MarketplaceOffer, PriceBasis, RideEmergencyContact
 from .models import CarBodyType, FuelType, Transmission, Drivetrain, VehicleCondition, CarBlockedPeriod
 from .serializers import (
     PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer, EmergencyContactSerializer, EmergencyContactStatusSerializer, AdminSosRideSerializer,
     AddMediaSerializer, SetAvailabilitySerializer,
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer, GoodsListingSerializer,
-    CarBlockedPeriodSerializer, CarRentalQuoteSerializer,
+    CarBlockedPeriodSerializer, CarRentalQuoteSerializer, BoostListingSerializer,
     RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer, RideSosSerializer,
     ListingConditionSerializer, AttachConditionSerializer,
     DriverProfileSerializer, DriverRegistrationSerializer, DriverLocationSerializer, VehicleSerializer,
@@ -128,6 +128,18 @@ def parse_listing_filters(params) -> dict:
         if params["item_category"] not in GoodsCategory.values:
             raise ValidationError({"item_category": "Enter a valid item category."})
         filters["item_category"] = params["item_category"]
+        from .goods_attributes import parse_attribute_filters, AttributeError_
+        try:
+            attributes = parse_attribute_filters(params["item_category"], params)
+        except AttributeError_ as e:
+            raise ValidationError({"attributes": str(e)})
+        if attributes:
+            filters["attributes"] = attributes
+    if params.get("lister_id"):
+        try:
+            filters["lister_id"] = uuid.UUID(params["lister_id"])
+        except ValueError:
+            raise ValidationError({"lister_id": "Enter a valid id."})
     if params.get("condition"):
         if params["condition"] not in GoodsCondition.values:
             raise ValidationError({"condition": "Enter a valid condition."})
@@ -200,7 +212,7 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [IsKycVerified()]
-        if self.action in ("update", "partial_update", "destroy", "set_status", "renew"):
+        if self.action in ("update", "partial_update", "destroy", "set_status", "renew", "boost"):
             return [permissions.IsAuthenticated(), IsListerOrAdmin()]
         if self.action == "mine":
             return [permissions.IsAuthenticated()]
@@ -283,6 +295,26 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         for row in data:
             row["stats"] = stats.get(str(row["id"]), {"views": 0, "saves": 0, "chats": 0})
         return self.get_paginated_response(data)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=BoostListingSerializer, responses={200: dict, 400: dict, 403: dict})
+    def boost(self, request, pk=None):
+        """Buy a TOP boost for this listing, paid from the wallet or by Mobile Money (see boosts.py)."""
+        from payments.gateways import get_active_gateway
+        from .boosts import boost_listing, BoostError
+        listing = self.get_object()
+        data = BoostListingSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        try:
+            listing, price = boost_listing(
+                listing=listing, user=request.user, duration_unit=data.validated_data["duration_unit"],
+                quantity=data.validated_data["quantity"], pay_with=data.validated_data["pay_with"],
+                phone_number=data.validated_data["phone_number"],
+                payment_gateway=get_active_gateway() if data.validated_data["pay_with"] == "MOMO" else None,
+            )
+        except BoostError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"id": str(listing.id), "boosted_until": listing.boosted_until.isoformat(), "price_xaf": str(price)})
 
     @action(detail=True, methods=["post"])
     @extend_schema(request=None, responses={200: dict, 403: dict})
@@ -1094,6 +1126,8 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
                 listing=listing, buyer=request.user, lock_client=get_booking_lock_client(),
                 payment_gateway=get_active_gateway(), phone_number=data["phone_number"],
                 rental={key: data.get(key) for key in ("start_date", "end_date", "with_driver", "delivery")},
+                offer_id=data.get("offer_id"),
+                delivery={"method": data.get("delivery_method", ""), "address": data.get("delivery_address", "")},
             )
         except ListingNotAvailableError as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
@@ -1169,3 +1203,110 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
         input_serializer = OrderDisputeSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         return self._run(request, claim_deposit, seller=request.user, reason=input_serializer.validated_data["reason"])
+
+
+class MarketplaceOfferViewSet(viewsets.ReadOnlyModelViewSet):
+    """Offers on marketplace listings (see offers.py). The list is the caller's own (?role=buying|selling); detail
+    actions check who may do what and answer 403 rather than hiding the offer."""
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = MarketplaceOffer.objects.select_related("listing__lister_user", "buyer").prefetch_related("listing__media")
+
+    def get_serializer_class(self):
+        from .serializers import MarketplaceOfferSerializer
+        return MarketplaceOfferSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, "swagger_fake_view", False):
+            return queryset.none()
+        if self.action != "list":
+            return queryset
+        from django.db.models import Q
+        user, role = self.request.user, self.request.query_params.get("role")
+        if role == "buying":
+            queryset = queryset.filter(buyer=user)
+        elif role == "selling":
+            queryset = queryset.filter(listing__lister_user=user)
+        else:
+            queryset = queryset.filter(Q(buyer=user) | Q(listing__lister_user=user))
+        if self.request.query_params.get("listing_id"):
+            try:
+                queryset = queryset.filter(listing_id=uuid.UUID(self.request.query_params["listing_id"]))
+            except ValueError:
+                raise ValidationError({"listing_id": "Enter a valid id."})
+        return queryset
+
+    def retrieve(self, request, *args, **kwargs):
+        offer = self.get_object()
+        if request.user.id not in (offer.buyer_id, offer.listing.lister_user_id):
+            raise Http404
+        return Response(self.get_serializer(offer).data)
+
+    @extend_schema(request=None, responses={201: dict, 400: dict, 404: dict})
+    def create(self, request, *args, **kwargs):
+        from .serializers import MakeOfferSerializer
+        from .offers import make_offer, OfferError
+        data = MakeOfferSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        listing = category_models()[data.validated_data["category"]].objects.filter(pk=data.validated_data["listing_id"]).first()
+        if listing is None:
+            return Response({"detail": "That listing was not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            offer = make_offer(listing=listing, buyer=request.user, amount_xaf=data.validated_data["amount_xaf"], message=data.validated_data["message"])
+        except OfferError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(offer).data, status=status.HTTP_201_CREATED)
+
+    def _run(self, func, **kwargs):
+        from .offers import OfferError
+        offer = self.get_object()
+        try:
+            func(offer=offer, **kwargs)
+        except PermissionError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except OfferError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        offer.refresh_from_db()
+        return Response(self.get_serializer(offer).data)
+
+    @extend_schema(request=None, responses={200: dict, 400: dict, 403: dict})
+    @action(detail=True, methods=["post"])
+    def accept(self, request, pk=None):
+        """The seller accepts the buyer's offer, or the buyer accepts the seller's counter-offer."""
+        from .offers import accept_offer, accept_counter
+        offer = self.get_object()
+        if offer.status == "COUNTERED":
+            return self._run(accept_counter, buyer=request.user)
+        return self._run(accept_offer, seller=request.user)
+
+    @extend_schema(request=None, responses={200: dict, 400: dict, 403: dict})
+    @action(detail=True, methods=["post"])
+    def decline(self, request, pk=None):
+        """The seller declines the offer. (A buyer turning down a counter-offer uses withdraw.)"""
+        from .offers import decline_offer
+        return self._run(decline_offer, seller=request.user)
+
+    @extend_schema(request=None, responses={200: dict, 400: dict, 403: dict})
+    @action(detail=True, methods=["post"])
+    def counter(self, request, pk=None):
+        from .serializers import CounterOfferSerializer
+        from .offers import counter_offer
+        data = CounterOfferSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        return self._run(counter_offer, seller=request.user, amount_xaf=data.validated_data["amount_xaf"])
+
+    @extend_schema(request=None, responses={200: dict, 400: dict, 403: dict})
+    @action(detail=True, methods=["post"])
+    def withdraw(self, request, pk=None):
+        from .offers import withdraw_offer
+        return self._run(withdraw_offer, buyer=request.user)
+
+
+class MarketplaceBoostOptionsView(APIView):
+    """The TOP boost lengths on sale and their unit prices (set by admins in the pricing editor)."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .boosts import boost_options
+        return Response({"options": boost_options()})

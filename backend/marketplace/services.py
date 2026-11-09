@@ -13,7 +13,8 @@ from django.db.models import Q
 logger = logging.getLogger(__name__)
 
 LISTING_ORDERINGS = {
-    "newest": ("-created_at",),
+    # Paid TOP listings (boost_rank 0, see boosts.py) come first in the default order, like Jiji's TOP ads.
+    "newest": ("boost_rank", "-created_at"),
     "oldest": ("created_at",),
     "price_asc": ("price_xaf", "-created_at"),
     "price_desc": ("-price_xaf", "-created_at"),
@@ -90,8 +91,13 @@ def marketplace_listing_queryset(*, listing_class, filters: dict = None):
     from .models import AvailabilityStatus
 
     filters = filters or {}
+    from django.db.models import Case, When, Value, IntegerField
+    from django.utils import timezone
     from .engagement import expiry_cutoff
     queryset = listing_class.objects.filter(availability_status=AvailabilityStatus.AVAILABLE, renewed_at__gte=expiry_cutoff())
+    queryset = queryset.annotate(
+        boost_rank=Case(When(boosted_until__gt=timezone.now(), then=Value(0)), default=Value(1), output_field=IntegerField()),
+    )
 
     if "min_price" in filters:
         queryset = queryset.filter(price_xaf__gte=Decimal(str(filters["min_price"])))
@@ -105,6 +111,10 @@ def marketplace_listing_queryset(*, listing_class, filters: dict = None):
         queryset = queryset.filter(price_basis=filters["price_basis"])
     if filters.get("item_category") and hasattr(listing_class, "item_category"):
         queryset = queryset.filter(item_category=filters["item_category"])
+        for key, (lookup, value) in filters.get("attributes", {}).items():
+            queryset = queryset.filter(**{f"attributes__{key}__{lookup}": value})
+    if filters.get("lister_id"):
+        queryset = queryset.filter(lister_user_id=filters["lister_id"])
     if filters.get("condition") and hasattr(listing_class, "condition"):
         queryset = queryset.filter(condition=filters["condition"])
     is_car = hasattr(listing_class, "vehicle_spec")
@@ -800,22 +810,61 @@ def _set_order_listing_status(order, status: str):
         _set_listing_status(order.listing_id, status)
 
 
-def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: str, rental: dict = None):
+def _goods_delivery(listing, delivery: dict):
+    """The checked delivery choice for a goods order: (method, fee, address)."""
+    from .models import DeliveryMethod
+    method = (delivery or {}).get("method") or ""
+    address = ((delivery or {}).get("address") or "").strip()
+    offered = {
+        DeliveryMethod.PICKUP: (listing.pickup_available, Decimal("0")),
+        DeliveryMethod.SELLER: (listing.seller_delivery, listing.seller_delivery_fee_xaf),
+        DeliveryMethod.COURIER: (listing.courier_shipping, listing.courier_fee_xaf),
+    }
+    if not method:
+        available = [m for m, (on, _) in offered.items() if on]
+        if len(available) != 1:
+            raise OrderError("Choose how you want to get the item.")
+        method = available[0]
+    if method not in offered or not offered[method][0]:
+        raise OrderError("The seller doesn't offer that delivery option.")
+    if method != DeliveryMethod.PICKUP and len(address) < 5:
+        raise OrderError("Enter the delivery address.")
+    return method, offered[method][1], address if method != DeliveryMethod.PICKUP else ""
+
+
+def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: str, rental: dict = None,
+                offer_id=None, delivery: dict = None):
     """Starts payment and reserves the listing until the provider confirms it by webhook. A car rented by the day
-    needs `rental` (start_date, end_date, with_driver, delivery): only those days are reserved."""
+    needs `rental` (start_date, end_date, with_driver, delivery): only those days are reserved. offer_id pays the
+    price agreed in an accepted offer; goods take a `delivery` choice (method, address) whose fee is added."""
     from .car_rentals import is_dated_car_rental
+    from .offers import offer_for_checkout, reserving_offer, OfferError
+    offer = None
+    if offer_id:
+        try:
+            offer = offer_for_checkout(offer_id=offer_id, listing=listing, buyer=buyer)
+        except OfferError as e:
+            raise OrderError(str(e))
     if is_dated_car_rental(listing):
         return _place_dated_car_rental(
             car=listing, buyer=buyer, lock_client=lock_client, payment_gateway=payment_gateway,
-            phone_number=phone_number, rental=rental or {},
+            phone_number=phone_number, rental=rental or {}, offer=offer,
         )
     from django.db import transaction as db_transaction
     from transactions.services import reserve_booking, initiate_booking_payment, fail_payment, InventoryConflictError
     from transactions.models import BookingType
-    from .models import MarketplaceListingBase, AvailabilityStatus, MarketplaceOrder, MarketplaceOrderStatus
+    from .models import MarketplaceListingBase, AvailabilityStatus, MarketplaceOrder, MarketplaceOrderStatus, GoodsListing
 
     if listing.lister_user_id == buyer.id:
         raise OrderError("You cannot buy your own listing.")
+    holder = reserving_offer(listing)
+    if holder is not None and holder.buyer_id != buyer.id:
+        raise ListingNotAvailableError(f"This item is reserved for another buyer until {holder.pay_by:%d %b %H:%M}.")
+    price = offer.agreed_amount_xaf if offer is not None else listing.price_xaf
+    method, delivery_fee, address = "", Decimal("0"), ""
+    if isinstance(listing, GoodsListing):
+        method, delivery_fee, address = _goods_delivery(listing, delivery)
+    amount = price + delivery_fee
     # A rental deposit is paid in the same charge as the rent and held separately once the payment is confirmed.
     deposit_xaf = listing.security_deposit_xaf if is_rental(listing) else Decimal("0")
     # One conditional update decides who gets the listing when two buyers race for it.
@@ -833,7 +882,7 @@ def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: s
         booking = reserve_booking(
             lock_client=lock_client, requester=buyer, booking_type=BookingType.MARKETPLACE_ITEM,
             target_content_type=f"marketplace.{type(listing).__name__}", target_id=listing.pk,
-            amount_xaf=listing.price_xaf + deposit_xaf,
+            amount_xaf=amount + deposit_xaf,
         )
         debit = initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
         if not debit.success:
@@ -841,8 +890,10 @@ def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: s
             raise OrderPaymentFailedError("The payment could not be completed. Please try again.")
         with db_transaction.atomic():
             order = MarketplaceOrder.objects.create(
-                listing=listing, buyer=buyer, booking=booking, amount_xaf=listing.price_xaf, deposit_xaf=deposit_xaf,
-                status=MarketplaceOrderStatus.PAYMENT_PENDING,
+                listing=listing, buyer=buyer, booking=booking, amount_xaf=amount, deposit_xaf=deposit_xaf,
+                status=MarketplaceOrderStatus.PAYMENT_PENDING, offer=offer,
+                delivery_method=method, delivery_fee_xaf=delivery_fee, delivery_address=address,
+                price_breakdown={"price_xaf": str(price), "delivery_fee_xaf": str(delivery_fee)} if method or offer else {},
             )
     except InventoryConflictError as e:
         _set_listing_status(listing.pk, AvailabilityStatus.AVAILABLE)
@@ -853,7 +904,7 @@ def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: s
     return order
 
 
-def _place_dated_car_rental(*, car, buyer, lock_client, payment_gateway, phone_number: str, rental: dict):
+def _place_dated_car_rental(*, car, buyer, lock_client, payment_gateway, phone_number: str, rental: dict, offer=None):
     """Books a car for chosen days. The booking lock on the car is held until the payment settles, so the
     calendar is re-checked after taking it: two renters can't both get overlapping days."""
     from django.db import transaction as db_transaction
@@ -877,6 +928,7 @@ def _place_dated_car_rental(*, car, buyer, lock_client, payment_gateway, phone_n
             return quote_car_rental(
                 car, start=rental["start_date"], end=rental["end_date"],
                 with_driver=bool(rental.get("with_driver")), delivery=bool(rental.get("delivery")),
+                daily_rate=offer.agreed_amount_xaf if offer is not None else None,
             )
         except CarRentalError as e:
             raise OrderError(str(e))
@@ -904,7 +956,7 @@ def _place_dated_car_rental(*, car, buyer, lock_client, payment_gateway, phone_n
             status=MarketplaceOrderStatus.PAYMENT_PENDING, booked_dates=True,
             rental_starts_on=priced["start_date"], rental_ends_on=priced["end_date"], rental_days=priced["days"],
             with_driver=priced["with_driver"], delivery_requested=priced["delivery"], price_breakdown=breakdown_for_storage(priced),
-            needs_approval=not car.instant_book,
+            needs_approval=not car.instant_book, offer=offer,
         )
 
 
@@ -951,6 +1003,9 @@ def confirm_marketplace_order_payment(*, booking):
         ).update(status=MarketplaceOrderStatus.PAID)
         if updated and order.deposit_xaf > 0:
             _split_deposit(order)
+        if updated and order.offer_id:
+            from .models import MarketplaceOffer, OfferStatus
+            MarketplaceOffer.objects.filter(pk=order.offer_id).update(status=OfferStatus.PAID)
     if updated:
         order.status = MarketplaceOrderStatus.PAID
         if order.needs_approval:

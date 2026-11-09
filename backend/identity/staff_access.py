@@ -42,10 +42,10 @@ NEVER_ALLOWED_PREFIXES = (
 # Actions that move money or commit the owner to pay, matched as whole path segments.
 NEVER_ALLOWED_ACTIONS = {
     "pay", "pay-balance", "pay-deposit", "fund", "withdraw", "recharge", "payout", "convert", "confirm", "release",
-    "approve-quote", "block",
+    "approve-quote", "block", "boost",
 }
 # Creating one of these spends the owner's money (it starts a payment), so staff can manage them but not start them.
-PURCHASE_COLLECTIONS = ("bookings/", "marketplace-orders/", "reservations/", "event-bookings/", "service-requests/")
+PURCHASE_COLLECTIONS = ("bookings/", "marketplace-orders/", "marketplace-offers/", "reservations/", "event-bookings/", "service-requests/")
 
 SCOPES = {
     StaffPermission.LISTINGS: (
@@ -55,7 +55,7 @@ SCOPES = {
     ),
     StaffPermission.MESSAGES: ("conversations/", "disputes/"),
     StaffPermission.BOOKINGS: (
-        "bookings/", "reservations/", "event-bookings/", "marketplace-orders/", "service-requests/", "tenant-screenings/",
+        "bookings/", "reservations/", "event-bookings/", "marketplace-orders/", "marketplace-offers/", "service-requests/", "tenant-screenings/",
         "leases/", "maintenance-requests/", "project-cases/", "facility-contracts/",
     ),
     StaffPermission.POSTS: ("posts/", "comments/", "flyers/", "my-agent-profile/", "media/upload/"),

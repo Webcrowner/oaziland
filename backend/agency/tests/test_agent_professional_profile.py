@@ -124,12 +124,12 @@ def test_an_intro_video_can_be_reported_and_a_confirmed_report_removes_it(video_
 
 
 @pytest.mark.django_db
-def test_intro_videos_are_capped_at_300_mb_and_must_be_videos():
+def test_every_video_upload_is_capped_at_500_mb_and_intro_videos_must_be_videos():
     from uploads.services import MediaTooLargeError, UnsupportedMediaTypeError, validate_upload_size
 
-    validate_upload_size(content_type="video/mp4", size_bytes=300 * 1024 * 1024, folder="agent-intro")
-    with pytest.raises(MediaTooLargeError):
-        validate_upload_size(content_type="video/mp4", size_bytes=300 * 1024 * 1024 + 1, folder="agent-intro")
+    for folder in ("agent-intro", "videos", "marketplace", "posts"):
+        validate_upload_size(content_type="video/mp4", size_bytes=500 * 1024 * 1024, folder=folder)
+        with pytest.raises(MediaTooLargeError):
+            validate_upload_size(content_type="video/mp4", size_bytes=500 * 1024 * 1024 + 1, folder=folder)
     with pytest.raises(UnsupportedMediaTypeError):
         validate_upload_size(content_type="image/jpeg", size_bytes=1000, folder="agent-intro")
-    validate_upload_size(content_type="video/mp4", size_bytes=400 * 1024 * 1024, folder="videos")  # other folders keep 500 MB

@@ -3878,7 +3878,7 @@
     "notAgent": "Cette page est réservée aux agents. Votre compte n'a pas le rôle d'agent.",
     "loadFailed": "Impossible de charger votre profil. Veuillez actualiser.",
     "videoTitle": "Vidéo de présentation",
-    "videoHint": "Présentez-vous en 5 minutes maximum (MP4 ou MOV, 300 Mo max). Elle apparaît sur votre profil dès l'envoi.",
+    "videoHint": "Présentez-vous en 5 minutes maximum (MP4 ou MOV, 500 Mo max). Elle apparaît sur votre profil dès l'envoi.",
     "videoUpload": "Envoyer une vidéo",
     "videoReplace": "Remplacer la vidéo",
     "videoRemove": "Retirer la vidéo",
@@ -3887,7 +3887,7 @@
     "videoUploading": "Envoi de la vidéo",
     "videoUploadingPercent": "Envoi… {percent} %",
     "videoWrongType": "Choisissez une vidéo MP4 ou MOV.",
-    "videoTooBig": "Cette vidéo fait {size} Mo — la limite est de 300 Mo.",
+    "videoTooBig": "Cette vidéo fait {size} Mo : la limite est de 500 Mo.",
     "videoTooLong": "Cette vidéo dure plus de 5 minutes. Veuillez la raccourcir.",
     "videoUnreadable": "Impossible de lire cette vidéo. Essayez un autre fichier.",
     "videoUploadFailed": "L'envoi a échoué. Veuillez réessayer.",
@@ -3906,7 +3906,8 @@
     "saving": "Enregistrement…",
     "saved": "Votre profil a été enregistré.",
     "saveFailed": "Impossible d'enregistrer votre profil.",
-    "viewPublic": "Voir mon profil public"
+    "viewPublic": "Voir mon profil public",
+    "videoProcessing": "Envoi terminé, enregistrement…"
   },
   "StaffAccess": {
     "title": "Accès du personnel",

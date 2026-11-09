@@ -7,9 +7,9 @@ extension alone, since that's trivial to fake.
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime"}
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
-MAX_VIDEO_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
-# Tighter caps for particular upload folders.
-FOLDER_VIDEO_LIMITS = {"agent-intro": 300 * 1024 * 1024}
+MAX_VIDEO_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB, for every video upload
+# Tighter caps for particular upload folders (none at present: every video folder allows 500 MB).
+FOLDER_VIDEO_LIMITS: dict[str, int] = {}
 # Folders that accept only one kind of file.
 FOLDER_MEDIA_TYPES = {"agent-intro": "VIDEO", "luggage": "PHOTO"}
 

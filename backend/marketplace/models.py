@@ -69,6 +69,10 @@ class MarketplaceListingBase(models.Model):
     expiry_reminded_at = models.DateTimeField(null=True, blank=True)
     # Detail-page views by people other than the lister (at most one per viewer per day).
     view_count = models.PositiveIntegerField(default=0)
+    # Buyers may propose a lower price (the lister can switch this off).
+    allow_offers = models.BooleanField(default=True)
+    # A paid "TOP" boost: shown first, with a badge, until this moment (see marketplace/boosts.py).
+    boosted_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "marketplace_listings"
@@ -232,13 +236,70 @@ class GoodsCondition(models.TextChoices):
 
 class GoodsListing(MarketplaceListingBase):
     """An everyday item for sale — a phone, a sofa, a sack of rice. Always a sale (never a rental), so the
-    price basis is fixed by the serializer; the item's own details are the category, condition and quantity."""
+    price basis is fixed by the serializer; the item's own details are the category, condition and quantity,
+    plus category-specific attributes (a phone's storage, a dress's size…) checked by goods_attributes.py.
+
+    How the buyer gets it: any mix of pickup, delivery by the seller (for a fee, to the areas they name) and
+    shipping by courier or bus agency (for a fee). The buyer picks one at checkout and the fee is paid into
+    escrow with the price."""
     item_category = models.CharField(max_length=20, choices=GoodsCategory.choices, default=GoodsCategory.OTHER)
     condition = models.CharField(max_length=10, choices=GoodsCondition.choices, default=GoodsCondition.USED)
     quantity = models.PositiveIntegerField(default=1)
+    attributes = models.JSONField(default=dict, blank=True)
+    pickup_available = models.BooleanField(default=True)
+    seller_delivery = models.BooleanField(default=False)
+    seller_delivery_fee_xaf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    seller_delivery_areas = models.CharField(max_length=200, blank=True)
+    courier_shipping = models.BooleanField(default=False)
+    courier_fee_xaf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    courier_note = models.CharField(max_length=200, blank=True)
 
     class Meta:
         db_table = "goods_listings"
+
+
+class DeliveryMethod(models.TextChoices):
+    PICKUP = "PICKUP", "Pickup"
+    SELLER = "SELLER", "Seller delivers"
+    COURIER = "COURIER", "Courier / agency"
+
+
+class OfferStatus(models.TextChoices):
+    PENDING = "PENDING", "Waiting for the seller"
+    COUNTERED = "COUNTERED", "Seller made a counter-offer"
+    ACCEPTED = "ACCEPTED", "Accepted, waiting for payment"
+    PAID = "PAID", "Paid"
+    DECLINED = "DECLINED", "Declined"
+    WITHDRAWN = "WITHDRAWN", "Withdrawn"
+    EXPIRED = "EXPIRED", "Expired"
+
+
+class MarketplaceOffer(models.Model):
+    """A buyer's price proposal on a listing, like "Make offer" on Leboncoin or Facebook Marketplace. The seller
+    accepts, declines or counters; once a price is agreed the buyer has a short window to pay exactly that price
+    through escrow, and meanwhile nobody else can buy the item. For rentals the price is per rental period (per
+    day for a car rented by the day)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    listing = models.ForeignKey(MarketplaceListingBase, on_delete=models.CASCADE, related_name="offers")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="marketplace_offers")
+    amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
+    counter_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    message = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=10, choices=OfferStatus.choices, default=OfferStatus.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    # Set on acceptance: the buyer must pay before this, or the offer expires and the item is free again.
+    pay_by = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "marketplace_offers"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["listing", "status"])]
+
+    @property
+    def agreed_amount_xaf(self):
+        return self.counter_amount_xaf if self.counter_amount_xaf is not None else self.amount_xaf
 
 
 class VehicleSpec(models.Model):
@@ -371,6 +432,12 @@ class MarketplaceOrder(models.Model):
     # A booking request on a car without instant booking: the owner must accept it before the handover.
     needs_approval = models.BooleanField(default=False)
     owner_approved_at = models.DateTimeField(null=True, blank=True)
+    # Bought at a negotiated price.
+    offer = models.ForeignKey("MarketplaceOffer", on_delete=models.SET_NULL, null=True, blank=True, related_name="orders")
+    # Goods only: how the buyer gets the item. The fee is part of amount_xaf and goes to the seller with the price.
+    delivery_method = models.CharField(max_length=10, choices=DeliveryMethod.choices, blank=True)
+    delivery_fee_xaf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    delivery_address = models.CharField(max_length=300, blank=True)
 
     class Meta:
         db_table = "marketplace_orders"

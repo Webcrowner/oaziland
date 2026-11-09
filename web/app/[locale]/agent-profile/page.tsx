@@ -10,7 +10,7 @@ import {
   type AgentLanguage, type AgentProfileDetails, type AgentSpecialty, type Quarter,
 } from "@/lib/api";
 
-const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 const MAX_VIDEO_SECONDS = 5 * 60;
 const MAX_AREAS = 15;
 const inputCls = "mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium";
@@ -41,6 +41,8 @@ export default function AgentProfileEditorPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [upload, setUpload] = useState<{ percent: number; error: string } | null>(null);
+  // True from the moment a video is picked until it is uploaded and saved, so the bar shows from 0%.
+  const [uploading, setUploading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -119,6 +121,7 @@ export default function AgentProfileEditorPage() {
     const controller = new AbortController();
     abortRef.current = controller;
     setUpload({ percent: 0, error: "" });
+    setUploading(true);
     try {
       const result = await uploadMediaFile(file, "agent-intro", token, { onProgress: (percent) => setUpload({ percent, error: "" }), signal: controller.signal });
       const ok = await save({ intro_video_url: result.url, intro_video_seconds: Math.max(1, Math.round(seconds)) }, t("videoSaved"));
@@ -128,6 +131,7 @@ export default function AgentProfileEditorPage() {
       else setUpload({ percent: 0, error: err instanceof Error ? err.message : t("videoUploadFailed") });
     } finally {
       abortRef.current = null;
+      setUploading(false);
     }
   }
 
@@ -169,14 +173,16 @@ export default function AgentProfileEditorPage() {
                 </button>
               </div>
             ) : null}
-            {upload && upload.percent > 0 && !upload.error ? (
+            {uploading && upload && !upload.error ? (
               <div className="max-w-xl">
                 <div className="h-2 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={upload.percent} aria-label={t("videoUploading")}>
                   <div className="h-full bg-amber-500 transition-all" style={{ width: `${upload.percent}%` }} />
                 </div>
                 <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
-                  <span>{t("videoUploadingPercent", { percent: upload.percent })}</span>
-                  <button type="button" onClick={() => abortRef.current?.abort()} className="font-semibold underline cursor-pointer">{t("cancel")}</button>
+                  <span>{upload.percent < 100 ? t("videoUploadingPercent", { percent: upload.percent }) : t("videoProcessing")}</span>
+                  {upload.percent < 100 && (
+                    <button type="button" onClick={() => abortRef.current?.abort()} className="font-semibold underline cursor-pointer">{t("cancel")}</button>
+                  )}
                 </div>
               </div>
             ) : (

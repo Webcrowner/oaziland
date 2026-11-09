@@ -3878,7 +3878,7 @@
     "notAgent": "This page is for agents. Your account doesn't have the agent role.",
     "loadFailed": "Your profile couldn't be loaded. Please refresh.",
     "videoTitle": "Intro video",
-    "videoHint": "Introduce yourself in up to 5 minutes (MP4 or MOV, 300 MB max). It appears on your profile as soon as it's uploaded.",
+    "videoHint": "Introduce yourself in up to 5 minutes (MP4 or MOV, 500 MB max). It appears on your profile as soon as it's uploaded.",
     "videoUpload": "Upload a video",
     "videoReplace": "Replace the video",
     "videoRemove": "Remove the video",
@@ -3887,7 +3887,7 @@
     "videoUploading": "Uploading video",
     "videoUploadingPercent": "Uploading… {percent}%",
     "videoWrongType": "Choose an MP4 or MOV video.",
-    "videoTooBig": "This video is {size} MB — the limit is 300 MB.",
+    "videoTooBig": "This video is {size} MB: the limit is 500 MB.",
     "videoTooLong": "This video is longer than 5 minutes. Please trim it.",
     "videoUnreadable": "This video couldn't be read. Try another file.",
     "videoUploadFailed": "The upload failed. Please try again.",
@@ -3906,7 +3906,8 @@
     "saving": "Saving…",
     "saved": "Your profile was saved.",
     "saveFailed": "Your profile couldn't be saved.",
-    "viewPublic": "View my public profile"
+    "viewPublic": "View my public profile",
+    "videoProcessing": "Upload complete, saving…"
   },
   "StaffAccess": {
     "title": "Staff & team access",

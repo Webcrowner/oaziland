@@ -75,9 +75,11 @@ def overlaps(periods, start: date, end: date) -> bool:
     return any(p["start"] < end and start < p["end"] for p in periods)
 
 
-def quote_car_rental(car, *, start: date, end: date, with_driver: bool = False, delivery: bool = False, today: date = None) -> dict:
-    """Checks a requested rental against the owner's terms and the calendar and prices it. Raises
-    CarRentalError naming the field that is wrong."""
+def quote_car_rental(car, *, start: date, end: date, with_driver: bool = False, delivery: bool = False, today: date = None,
+                     daily_rate=None) -> dict:
+    """Checks a requested rental against the owner's terms and the calendar and prices it. daily_rate replaces the
+    listed rate when the renter negotiated one (an accepted offer). Raises CarRentalError naming the field that is
+    wrong."""
     from django.utils import timezone
     from .models import DriverOption
     today = today or timezone.localdate()
@@ -104,7 +106,7 @@ def quote_car_rental(car, *, start: date, end: date, with_driver: bool = False, 
     if overlaps(busy_periods(car, today=today), start, end):
         raise CarRentalError("The car is not available for all of those days. Pick other dates.", "start_date")
 
-    daily = _money(car.price_xaf)
+    daily = _money(daily_rate if daily_rate is not None else car.price_xaf)
     base = daily * days
     discount_pct = 0
     if days >= MONTHLY_DISCOUNT_FROM_DAYS and car.monthly_discount_pct:

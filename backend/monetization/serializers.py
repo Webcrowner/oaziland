@@ -157,7 +157,8 @@ class BoostPriceQuoteSerializer(serializers.Serializer):
 
 
 class PurchaseCampaignBoostSerializer(serializers.Serializer):
-    placement = serializers.ChoiceField(choices=AdPlacement.choices)
+    # Marketplace TOP boosts are bought from the listing itself (marketplace/boosts.py), which also ranks the listing.
+    placement = serializers.ChoiceField(choices=[c for c in AdPlacement.choices if c[0] != AdPlacement.MARKETPLACE_TOP])
     duration_unit = serializers.ChoiceField(choices=BoostDurationUnit.choices)
     duration_quantity = serializers.IntegerField(min_value=1)
     phone_number = serializers.CharField(max_length=50)

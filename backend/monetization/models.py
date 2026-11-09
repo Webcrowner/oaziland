@@ -13,6 +13,7 @@ class AdPlacement(models.TextChoices):
     FEED_BOOSTED_POST = "FEED_BOOSTED_POST", "Boosted in Feed"
     SEARCH_TOP_PLACEMENT = "SEARCH_TOP_PLACEMENT", "Top of Search Results"
     QUARTER_FEATURED_LISTING = "QUARTER_FEATURED_LISTING", "Featured in Quarter"
+    MARKETPLACE_TOP = "MARKETPLACE_TOP", "Marketplace TOP listing"
 
 
 class AdStatus(models.TextChoices):
