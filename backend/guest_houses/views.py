@@ -39,7 +39,11 @@ class GuestHouseLodgeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return GuestHouseLodge.objects.none()
-        return GuestHouseLodge.objects.select_related("owner__agent_profile").prefetch_related("asset_photos").order_by("-created_at")
+        from trust_safety.report_targets import visible_places
+        return visible_places(
+            GuestHouseLodge.objects.select_related("owner__agent_profile").prefetch_related("asset_photos").order_by("-created_at"),
+            self.request.user,
+        )
 
     @extend_schema(request=GuestHouseLodgeCreateSerializer, responses={201: GuestHouseLodgeSerializer})
     def create(self, request, *args, **kwargs):

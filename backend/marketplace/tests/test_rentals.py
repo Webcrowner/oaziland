@@ -227,6 +227,26 @@ def test_a_claimed_deposit_is_decided_by_an_admin(rental, outcome, deposit_statu
 
 
 @pytest.mark.django_db
+def test_a_claimed_deposit_can_be_split(rental):
+    seller, buyer, _ = rental
+    order = _completed_rental(rental)
+    base = f"/api/marketplace-orders/{order.id}"
+    assert _auth_client(seller).post(f"{base}/claim-deposit/", {"reason": "One window was broken"}, format="json").status_code == 200
+    order.refresh_from_db()
+    deposit = order.deposit_booking.escrow
+    seller_before = Wallet.objects.get(owner=seller).balance_xaf
+
+    resolve_dispute(dispute=DisputeCase.objects.get(escrow=deposit), outcome="SPLIT", payer_amount_xaf=deposit.gross_amount_xaf - 15000)
+
+    order.refresh_from_db()
+    deposit.refresh_from_db()
+    assert order.deposit_status == DepositStatus.SPLIT and order.deposit_settled_at is not None
+    assert deposit.status == EscrowStatus.RELEASED and deposit.refunded_amount_xaf == deposit.gross_amount_xaf - 15000
+    assert Wallet.objects.get(owner=seller).balance_xaf == seller_before + deposit.payee_amount_xaf
+    assert Wallet.objects.get(owner=buyer).balance_xaf == deposit.refunded_amount_xaf
+
+
+@pytest.mark.django_db
 def test_cancelling_before_the_handover_refunds_the_deposit_too(rental):
     seller, buyer, listing_id = rental
     order = _paid_order(rental)

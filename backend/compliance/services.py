@@ -42,6 +42,44 @@ def get_current_policy(document_type: str):
 # ---------------------------------------------------------------------------
 # Data export — the actual right-of-access mechanism.
 # ---------------------------------------------------------------------------
+EXPORT_LIFETIME_DAYS = 7
+EXPORT_COOLDOWN_MINUTES = 10
+
+
+class DataExportError(Exception):
+    pass
+
+
+def request_data_export(user):
+    """The user-facing way to get an export: one at a time, so a burst of clicks can't fill the disk."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from .models import DataExportRequest
+
+    recent = DataExportRequest.objects.filter(
+        user=user, requested_at__gte=timezone.now() - timedelta(minutes=EXPORT_COOLDOWN_MINUTES),
+    ).exists()
+    if recent:
+        raise DataExportError("You asked for an export a few minutes ago. Download that one, or try again shortly.")
+    return generate_data_export(user)
+
+
+def expire_data_exports(now=None):
+    """Deletes export files past their lifetime and marks them expired. Returns how many were expired."""
+    from django.utils import timezone
+    from .models import DataExportRequest, DataExportRequestStatus
+
+    now = now or timezone.now()
+    count = 0
+    for export in DataExportRequest.objects.filter(status=DataExportRequestStatus.READY, expires_at__lte=now):
+        if export.export_file:
+            export.export_file.delete(save=False)
+        export.status = DataExportRequestStatus.EXPIRED
+        export.save(update_fields=["export_file", "status"])
+        count += 1
+    return count
+
+
 def generate_data_export(user):
     """Aggregates a user's real data across the platform into one JSON
     file — profile, KYC (if submitted), bookings, reviews, and wallet
@@ -96,10 +134,12 @@ def generate_data_export(user):
 
     json_bytes = json.dumps(data, indent=2).encode("utf-8")
 
+    from datetime import timedelta
     from django.utils import timezone
-    export_request.export_file.save(f"export_{user.id}.json", ContentFile(json_bytes), save=False)
+    export_request.export_file.save("export.json", ContentFile(json_bytes), save=False)
     export_request.status = DataExportRequestStatus.READY
     export_request.completed_at = timezone.now()
+    export_request.expires_at = export_request.completed_at + timedelta(days=EXPORT_LIFETIME_DAYS)
     export_request.save()
 
     return export_request
@@ -121,13 +161,25 @@ def complete_account_deletion(user):
     # Scrub personal identifying fields on the User itself — financial
     # records that FK to this user keep working (the row still exists),
     # they just no longer carry personally-identifying contact info.
+    # phone and email are unique: a blank phone (or blank email) on a second deleted account would collide, so
+    # phone gets a per-account placeholder and email becomes NULL (many NULLs are allowed).
     user.username = f"deleted_user_{user.id}"
-    user.phone = ""
-    user.email = ""
+    user.phone = f"del-{user.id.hex[:16]}"
+    user.email = None
     user.first_name = ""
     user.last_name = ""
+    user.profile_image_url = ""
+    user.is_active = False  # no more sign-in, and existing tokens stop working
+    user.set_unusable_password()
     user.deleted_at = timezone.now()
-    user.save(update_fields=["username", "phone", "email", "first_name", "last_name", "deleted_at"])
+    user.save(update_fields=[
+        "username", "phone", "email", "first_name", "last_name", "profile_image_url", "is_active", "password", "deleted_at",
+    ])
+
+    # The person's own export files are personal data too.
+    for export in user.data_export_requests.exclude(export_file=""):
+        export.export_file.delete(save=False)
+    user.data_export_requests.update(export_file="", status="EXPIRED")
 
     # KYCProfile holds the most sensitive PII on the platform (national
     # ID number, date of birth, ID document images) — deleted entirely,

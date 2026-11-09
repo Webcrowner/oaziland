@@ -340,6 +340,24 @@ def test_an_admin_decision_on_a_disputed_order_pays_the_seller_or_refunds_the_bu
 
 
 @pytest.mark.django_db
+def test_an_admin_can_split_a_disputed_order_between_buyer_and_seller(deal):
+    seller, buyer, listing_id = deal
+    order = MarketplaceOrder.objects.get(pk=_order(_auth_client(buyer), listing_id).data["id"])
+    dispute_order(order=order, user=buyer, reason="Arrived with a cracked door")
+
+    resolve_dispute(dispute=order.booking.escrow.dispute_case, outcome="SPLIT", payer_amount_xaf=400000, notes="Damage confirmed")
+
+    order.refresh_from_db()
+    escrow = order.booking.escrow
+    assert order.status == MarketplaceOrderStatus.COMPLETED and _status(listing_id) == "UNAVAILABLE"
+    # 1,000,000 paid with a 5% fee: 400,000 back to the buyer; the seller's 600,000 share carries a 30,000 fee.
+    assert (escrow.refunded_amount_xaf, escrow.platform_fee_xaf, escrow.payee_amount_xaf) == (Decimal("400000"), Decimal("30000"), Decimal("570000"))
+    assert Wallet.objects.get(owner=buyer).balance_xaf == Decimal("400000")
+    assert Wallet.objects.get(owner=seller).balance_xaf == Decimal("570000")
+    assert Notification.objects.filter(recipient=seller, title="Support decision on your order", message__contains="split").exists()
+
+
+@pytest.mark.django_db
 def test_sweep_refunds_unfulfilled_orders_and_releases_unconfirmed_handovers(deal, quarter):
     seller, buyer, listing_id = deal
     silent = MarketplaceOrder.objects.get(pk=_order(_auth_client(buyer), listing_id).data["id"])
@@ -376,6 +394,43 @@ def test_the_sweep_leaves_disputed_orders_alone(deal):
     assert process_marketplace_orders() == {"refunded": [], "released": [], "expired": [], "relisted": [], "deposits_returned": []}
     order.refresh_from_db()
     assert order.status == MarketplaceOrderStatus.DISPUTED
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("failure", ["missing_package", "redis_down"])
+def test_unavailable_payment_infrastructure_is_a_503_and_never_locks_the_listing(deal, monkeypatch, failure):
+    seller, buyer, listing_id = deal
+    if failure == "missing_package":
+        def broken_locks():
+            raise ModuleNotFoundError("No module named 'redis'")
+    else:
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        class DownLockClient:
+            def acquire_owned(self, *args, **kwargs):
+                raise RedisConnectionError("Connection refused")
+
+        def broken_locks():
+            return DownLockClient()
+
+    monkeypatch.setattr("transactions.locks.get_booking_lock_client", broken_locks)
+    response = _order(_auth_client(buyer), listing_id)
+
+    assert response.status_code == 503
+    assert response.data["detail"] == "Payments are temporarily unavailable. Please try again later."
+    assert _status(listing_id) == "AVAILABLE"
+    assert MarketplaceOrder.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_order_party_names_fall_back_to_the_username_when_no_name_is_set(deal):
+    seller, buyer, listing_id = deal
+    order = _order(_auth_client(buyer), listing_id)
+    assert order.data["buyer_name"] == "mo_buyer" and order.data["seller_name"] == "mo_seller"
+
+    seller.first_name, seller.last_name = "Amina", "Fotso"
+    seller.save()
+    assert _auth_client(buyer).get(f"/api/marketplace-orders/{order.data['id']}/").data["seller_name"] == "Amina Fotso"
 
 
 @pytest.mark.django_db

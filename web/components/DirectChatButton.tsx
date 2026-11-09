@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { getOrCreateConversation } from "@/lib/api";
 
@@ -16,6 +17,7 @@ export default function DirectChatButton({
   className = "",
   label,
 }: DirectChatButtonProps) {
+  const t = useTranslations("ListingChat");
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -32,7 +34,7 @@ export default function DirectChatButton({
       const conv = await getOrCreateConversation(recipientId, token);
       router.push(`/messages?conversation=${conv.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not open conversation");
+      setError(err instanceof Error ? err.message : t("failed"));
     } finally {
       setLoading(false);
     }
@@ -49,7 +51,7 @@ export default function DirectChatButton({
         }
       >
         <span>💬</span>
-        <span>{loading ? "Opening..." : label || `Chat with ${recipientName || "User"}`}</span>
+        <span>{loading ? t("opening") : label || (recipientName ? t("chatWith", { name: recipientName }) : t("chatLister"))}</span>
       </button>
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>

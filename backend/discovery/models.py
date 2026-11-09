@@ -8,6 +8,11 @@ from django.conf import settings
 from django.db import models
 
 
+class SavedSearchScope(models.TextChoices):
+    PROPERTY = "PROPERTY", "Property"
+    MARKETPLACE = "MARKETPLACE", "Marketplace"
+
+
 class SavedSearch(models.Model):
     """A user's stored search criteria — e.g. '2BR under 100,000 XAF in
     Bastos'. WHY filters is a JSONField rather than individual columns:
@@ -19,6 +24,9 @@ class SavedSearch(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_searches")
     name = models.CharField(max_length=200, blank=True)  # e.g. a user-given label
     filters = models.JSONField(default=dict)
+    # Which listings it watches: property listings, or the marketplace (filters are then the marketplace's
+    # browse query, plus an optional "category").
+    scope = models.CharField(max_length=12, choices=SavedSearchScope.choices, default=SavedSearchScope.PROPERTY)
     created_at = models.DateTimeField(auto_now_add=True)
     last_notified_at = models.DateTimeField(null=True, blank=True)
 

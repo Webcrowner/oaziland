@@ -314,7 +314,7 @@ def property_section(area, price_min, price_max, listing_type, property_type) ->
 def hotel_section(area, price_min, price_max) -> str:
     from hotels.models import Hotel
 
-    qs = Hotel.objects.filter(verified=True).select_related("quarter", "quarter__village_or_district").annotate(min_rate=Min("room_types__base_rate_xaf"))
+    qs = Hotel.objects.filter(verified=True, deleted_at__isnull=True).select_related("quarter", "quarter__village_or_district").annotate(min_rate=Min("room_types__base_rate_xaf"))
     header = f"HOTEL SEARCH — area: {area.label or 'not specified'}; budget per night: {_budget_text(price_min, price_max)}"
     general = _query("/hotels", max_price=int(price_max) if price_max else None)
     if not area.found:
@@ -355,7 +355,7 @@ def hostel_section(area, price_min, price_max) -> str:
     from student_hostels.models import StudentHostel, HostelUnit
 
     header = f"STUDENT HOSTEL SEARCH — area: {area.label or 'not specified'}; budget per semester: {_budget_text(price_min, price_max)}"
-    qs = StudentHostel.objects.select_related("quarter", "quarter__village_or_district")
+    qs = StudentHostel.objects.filter(deleted_at__isnull=True).select_related("quarter", "quarter__village_or_district")
     if not area.found:
         popular = [(f"{h.quarter.name} ({h.quarter.village_or_district.name})", 1, _query("/student-hostels", quarter=h.quarter_id)) for h in qs[:4]]
         return "\n".join([header] + _no_area_lines(area, "a student hostel", "/student-hostels", popular))
@@ -397,7 +397,7 @@ def guest_house_section(area) -> str:
     from property.models import GuestHouseLodge
 
     header = f"GUEST HOUSE SEARCH — area: {area.label or 'not specified'} (nightly prices are shown on each guest house page)"
-    qs = GuestHouseLodge.objects.select_related("quarter", "quarter__village_or_district")
+    qs = GuestHouseLodge.objects.filter(deleted_at__isnull=True).select_related("quarter", "quarter__village_or_district")
     if not area.found:
         popular = [(f"{g.quarter.name} ({g.quarter.village_or_district.name})", 1, _query("/guest-houses", quarter=g.quarter_id)) for g in qs[:4]]
         return "\n".join([header] + _no_area_lines(area, "a guest house", "/guest-houses", popular))
@@ -421,7 +421,7 @@ def venue_section(area, price_min, price_max) -> str:
     from events.models import Venue
 
     header = f"EVENT VENUE SEARCH — area: {area.label or 'not specified'}; budget per hour: {_budget_text(price_min, price_max)}"
-    qs = Venue.objects.select_related("quarter", "quarter__village_or_district").annotate(min_rate=Min("spaces__base_price_per_hour_xaf"))
+    qs = Venue.objects.filter(deleted_at__isnull=True).select_related("quarter", "quarter__village_or_district").annotate(min_rate=Min("spaces__base_price_per_hour_xaf"))
     if not area.found:
         popular = [(f"{v.quarter.name} ({v.quarter.village_or_district.name})", 1, _query("/events", quarter=v.quarter_id)) for v in qs[:4]]
         return "\n".join([header] + _no_area_lines(area, "an event venue", "/events", popular))

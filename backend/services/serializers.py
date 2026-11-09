@@ -111,7 +111,7 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _review_payload(review) -> dict:
-        return {"score": float(review.score), "comment": review.comment}
+        return {"id": review.id, "score": float(review.score), "comment": review.comment}
 
     def get_my_review(self, obj) -> dict:
         viewer_id = self._viewer_id()

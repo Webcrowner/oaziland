@@ -35,6 +35,9 @@ class ContentModerationProvider(ABC):
 # is a genuine, working implementation for tests and local development,
 # not a provider that always says "everything's fine."
 _TEST_PROFANITY_WORDS = {"scamword", "badword", "profanitytest"}
+# Trigger words that make the sandbox flag text for a person to look at, without blocking it.
+_TEST_REVIEW_WORDS = {"reviewtest"}
+_TEST_ESCALATE_WORDS = {"escalatetest"}
 
 
 class SandboxModerationProvider(ContentModerationProvider):
@@ -51,6 +54,18 @@ class SandboxModerationProvider(ContentModerationProvider):
                 category=ModerationCategory.TEXT_PROFANITY,
                 confidence_score=Decimal("0.950"),
                 action=ModerationAction.AUTO_REMOVE,
+            )]
+        if any(word in lowered for word in _TEST_ESCALATE_WORDS):
+            return [ModerationScore(
+                category=ModerationCategory.HATE_SPEECH,
+                confidence_score=Decimal("0.850"),
+                action=ModerationAction.ESCALATE_ADMIN,
+            )]
+        if any(word in lowered for word in _TEST_REVIEW_WORDS):
+            return [ModerationScore(
+                category=ModerationCategory.SPAM,
+                confidence_score=Decimal("0.700"),
+                action=ModerationAction.FLAG_FOR_REVIEW,
             )]
         return [ModerationScore(
             category=ModerationCategory.SPAM,

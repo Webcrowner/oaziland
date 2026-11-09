@@ -63,7 +63,13 @@ export default function SavedSearchesPage() {
           {searches.map((search) => (
             <div key={search.id} className="border rounded-lg p-4 bg-white flex items-center justify-between">
               <div>
-                <p className="font-semibold text-[var(--navy)]">{search.name || t("title")}</p>
+                <p className="font-semibold text-[var(--navy)]">
+                  {search.scope === "MARKETPLACE" && <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">{t("marketplaceBadge")}</span>}
+                  {search.name || t("title")}
+                </p>
+                {search.scope === "MARKETPLACE" && (
+                  <Link href={`/marketplace?${new URLSearchParams(search.filters).toString()}`} className="text-xs font-semibold text-[var(--navy)] underline">{t("openSearch")}</Link>
+                )}
                 <p className="text-xs text-gray-500 mt-1">
                   {search.last_notified_at
                     ? t("lastNotified", { date: new Date(search.last_notified_at).toLocaleDateString(locale === "fr" ? "fr-FR" : "en-US") })

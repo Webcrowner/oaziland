@@ -6,6 +6,7 @@ schedule_message() all existed and were tested, but nothing exposed
 any of them over HTTP — no real inbox was possible).
 """
 from rest_framework import serializers
+from typing import Optional
 from drf_spectacular.utils import extend_schema_field
 from .models import SocialAccountLink, Conversation, Message, Post, Comment, PostMedia, Rating, Review, Referral
 from .services import get_message_tick_status, get_presence_info
@@ -21,14 +22,29 @@ class SocialAccountLinkSerializer(serializers.ModelSerializer):
 class MessageSerializer(serializers.ModelSerializer):
     tick_status = serializers.SerializerMethodField()
     sender_name = serializers.CharField(source="sender.full_name", read_only=True)
+    listing = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ["id", "conversation", "sender", "sender_name", "text", "folder", "sent_at", "created_at", "tick_status"]
+        fields = ["id", "conversation", "sender", "sender_name", "text", "folder", "sent_at", "created_at", "tick_status", "listing"]
         read_only_fields = ["sender", "folder", "sent_at", "created_at"]
 
     def get_tick_status(self, message) -> dict:
         return get_message_tick_status(message)
+
+    def get_listing(self, message) -> Optional[dict]:
+        """A card for the marketplace listing the message is about (title, price, photo, link), or null. Listings
+        an admin removed are no longer shown."""
+        if not message.marketplace_listing_id:
+            return None
+        cache = self.context.setdefault("listing_summaries", {})
+        key = str(message.marketplace_listing_id)
+        if key not in cache:
+            from marketplace.services import marketplace_summaries_for_ids
+            for summary in marketplace_summaries_for_ids([message.marketplace_listing_id]):
+                cache[summary["id"]] = summary
+            cache.setdefault(key, None)
+        return cache[key]
 
 
 class ConversationSerializer(serializers.ModelSerializer):

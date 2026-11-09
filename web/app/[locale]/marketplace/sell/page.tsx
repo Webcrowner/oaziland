@@ -11,28 +11,17 @@ import MediaThumbs from "@/components/MediaThumbs";
 import QuarterOptions from "@/components/QuarterOptions";
 import MissingAreaRequest from "@/components/MissingAreaRequest";
 import LocationCapture, { EMPTY_GPS, type GpsValue } from "@/components/LocationCapture";
+import SellGateNotice, { useSellGate } from "@/components/MarketplaceSellGate";
+import { listingErrorMessage } from "@/lib/marketplaceErrors";
 
 const OTHER_CATEGORIES = [
-  { href: "/marketplace/cars?post=1", icon: "🚗", key: "cars" },
-  { href: "/marketplace/stores?post=1", icon: "🏬", key: "stores" },
-  { href: "/marketplace/warehouses?post=1", icon: "🏭", key: "warehouses" },
-  { href: "/marketplace/businesses?post=1", icon: "💼", key: "businesses" },
+  { href: "/marketplace/sell/cars", icon: "🚗", key: "cars" },
+  { href: "/marketplace/sell/stores", icon: "🏬", key: "stores" },
+  { href: "/marketplace/sell/warehouses", icon: "🏭", key: "warehouses" },
+  { href: "/marketplace/sell/businesses", icon: "💼", key: "businesses" },
 ] as const;
 
 const MAX_MEDIA = 20;
-
-/** Pulls a readable message out of the JSON error text createMarketplaceListing throws. */
-function errorMessage(error: unknown, fallback: string): string {
-  try {
-    const data = JSON.parse((error as Error).message);
-    if (typeof data.detail === "string") return data.detail;
-    const first = Object.values(data).flat()[0];
-    if (typeof first === "string") return first;
-  } catch {
-    // Not a JSON API error — fall through to the generic message.
-  }
-  return fallback;
-}
 
 /** Post an everyday item for sale. Mobile-first: one column, big tap targets, photos first. */
 export default function SellPage() {
@@ -52,11 +41,10 @@ export default function SellPage() {
   const [gps, setGps] = useState<GpsValue>(EMPTY_GPS);
   const [status, setStatus] = useState<"idle" | "submitting">("idle");
   const [error, setError] = useState("");
-  const [signedIn, setSignedIn] = useState(true);
+  const gate = useSellGate();
 
   useEffect(() => {
     listQuarters().then(setQuarters).catch(() => {});
-    Promise.resolve().then(() => setSignedIn(Boolean(localStorage.getItem("access_token"))));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -82,7 +70,7 @@ export default function SellPage() {
       }
       router.push(`/marketplace/goods/${listing.id}${failed ? `?mediaFailed=${failed}` : ""}`);
     } catch (err) {
-      setError(errorMessage(err, t("submitFailed")));
+      setError(listingErrorMessage(err, t("submitFailed")));
       setStatus("idle");
     }
   }
@@ -96,11 +84,7 @@ export default function SellPage() {
       <h1 className="mb-1 font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[var(--navy)] md:text-3xl">{t("title")}</h1>
       <p className="mb-6 text-sm text-slate-500 md:text-base">{t("subtitle")}</p>
 
-      {!signedIn && (
-        <p className="mb-5 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {t("signInNeeded")} <Link href="/login" className="font-bold underline">{t("signIn")}</Link>
-        </p>
-      )}
+      <SellGateNotice gate={gate} />
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
         <div>

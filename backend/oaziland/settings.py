@@ -39,6 +39,9 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="django-insecure-dev-only-CHANGE-I
 # can actually load. Only matters for LocalFileStorageProvider —
 # Cloudinary already returns absolute URLs on its own.
 BACKEND_BASE_URL = env("BACKEND_BASE_URL", default="http://localhost:8000")
+# The website (Next.js). The data admin (/admin/) has no login of its own and sends people to this site's
+# admin console login instead (see oaziland/admin_site.py).
+WEB_BASE_URL = env("WEB_BASE_URL", default="http://localhost:3000").rstrip("/")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # WHY default=False here specifically: the env schema above already
@@ -55,7 +58,7 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
+    'oaziland.apps.OaziAdminConfig',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -95,10 +98,25 @@ INSTALLED_APPS = [
     'notifications',
     'monetization',
     'trust_safety',
+    'visitors',
     'uploads',
 ]
 
 AUTH_USER_MODEL = 'identity.User'
+
+# ---------------------------------------------------------------------------
+# Visitor analytics (the `visitors` app). Anonymous: no cookies, no raw IPs.
+# ---------------------------------------------------------------------------
+# Read the visitor's address from the proxy's forwarded headers. Leave on when
+# the API runs behind a proxy/CDN (Railway, Cloudflare...); turn off if clients
+# connect directly, since the header could then be forged to skew the stats.
+VISITOR_TRUST_FORWARDED_FOR = env.bool("VISITOR_TRUST_FORWARDED_FOR", default=True)
+# How long individual page-view rows are kept; `manage.py prune_visitor_events` enforces it.
+VISITOR_RETENTION_DAYS = env.int("VISITOR_RETENTION_DAYS", default=180)
+# Optional MaxMind GeoLite2/GeoIP2 *City* database (.mmdb) for city and region
+# lookups. Needs `pip install geoip2`. Without it, country comes from the bundled
+# offline database, and city/region from CDN location headers when present.
+VISITOR_GEOIP_CITY_DB = env.str("VISITOR_GEOIP_CITY_DB", default="")
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -112,6 +130,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'trust_safety.audit.AdminAuditMiddleware',
+    'identity.staff_access.StaffActivityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'oaziland.error_translation.FrenchErrorMiddleware',
@@ -129,6 +149,8 @@ if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 else:
     CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+# Lets the web app tell a rate-limited user how long to wait.
+CORS_EXPOSE_HEADERS = ["Retry-After"]
 
 ROOT_URLCONF = 'oaziland.urls'
 
@@ -239,6 +261,8 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # the three CLOUDINARY_* env vars below) once real production
 # credentials exist — see uploads.providers.get_active_provider().
 MEDIA_STORAGE_PROVIDER = env('MEDIA_STORAGE_PROVIDER', default='LOCAL')
+# Lets uploads.services.is_platform_media_url recognise files stored on Cloudinary.
+CLOUDINARY_CLOUD_NAME = env('CLOUDINARY_CLOUD_NAME', default='')
 
 # ---------------------------------------------------------------------------
 # Django REST Framework — Prompt 16.
@@ -252,7 +276,8 @@ MEDIA_STORAGE_PROVIDER = env('MEDIA_STORAGE_PROVIDER', default='LOCAL')
 # ---------------------------------------------------------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        # simplejwt's JWT check, plus the limits on staff sessions (identity/staff_access.py).
+        'identity.staff_access.DelegatedJWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -261,16 +286,20 @@ REST_FRAMEWORK = {
         'django_filters.rest_framework.DjangoFilterBackend',
     ],
     'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.UserRateThrottle',
+        'oaziland.throttling.RoleAwareUserRateThrottle',
         'rest_framework.throttling.AnonRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
         'user': '300/hour',
+        # Admins working the console (see oaziland/throttling.py).
+        'admin': '5000/hour',
         'anon': '60/hour',
         # A higher rate for search specifically — browsing listings is
         # the platform's single most common action and shouldn't be
         # rate-limited as tightly as, say, account creation.
         'search': '600/hour',
+        # Marketplace browsing: the "All" tab issues one request per category on every load or filter change.
+        'marketplace_browse': '3000/hour',
         # A dedicated, tighter bucket for login attempts specifically —
         # separate from the general anon budget so credential-stuffing
         # against one account can't also exhaust ordinary anonymous
@@ -283,6 +312,8 @@ REST_FRAMEWORK = {
         'chat': '4000/hour',
         # Scrolling the video feed fires a page fetch plus a view ping per clip.
         'videos': '3000/hour',
+        # Anonymous page-view pings from the website (visitor analytics).
+        'visitor_tracking': '1500/hour',
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',

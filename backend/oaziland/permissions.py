@@ -14,6 +14,18 @@ class IsAdminRole(permissions.BasePermission):
         return bool(request.user and request.user.is_authenticated and hasattr(request.user, "admin_profile"))
 
 
+class IsSuperAdmin(IsAdminRole):
+    """An admin with full access (see identity.services.is_super_admin) —
+    for the few actions that must not be open to every admin, such as
+    granting the admin role, changing fees or reading the audit log.
+    Extends IsAdminRole so the audit middleware still records what these views do."""
+    message = "Only a full-access administrator can do this."
+
+    def has_permission(self, request, view):
+        from identity.services import is_super_admin
+        return super().has_permission(request, view) and is_super_admin(request.user)
+
+
 class IsOwnerOrReadOnly(permissions.BasePermission):
     """Anyone can read; only the object's own listed_by/owner/requester
     can modify it. WHY a shared class checks several possible field

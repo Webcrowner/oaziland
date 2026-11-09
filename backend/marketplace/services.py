@@ -5,6 +5,7 @@ lifecycle settling through the SAME Booking/PaymentEscrow machinery as
 every other transaction on the platform.
 """
 import logging
+import math
 from decimal import Decimal
 
 from django.db.models import Q
@@ -16,7 +17,25 @@ LISTING_ORDERINGS = {
     "oldest": ("created_at",),
     "price_asc": ("price_xaf", "-created_at"),
     "price_desc": ("-price_xaf", "-created_at"),
+    # Only valid together with a near_lat/near_lng point, which is what adds the distance_km column.
+    "distance": ("distance_km", "-created_at"),
 }
+
+
+def _car_orderings():
+    from django.db.models import F
+    # Cars with no mileage given go last rather than looking like the lowest-mileage cars.
+    return {
+        "year_desc": ("-vehicle_spec__year", "-created_at"),
+        "year_asc": ("vehicle_spec__year", "-created_at"),
+        "mileage_asc": (F("vehicle_spec__mileage_km").asc(nulls_last=True), "-created_at"),
+    }
+
+
+# Sorts that only exist on the cars list (the combined feed can't sort other categories by a car's year).
+CAR_ORDERINGS = ("year_desc", "year_asc", "mileage_asc")
+
+EARTH_RADIUS_KM = 6371.0
 
 
 def attach_condition(*, listing, created_by, structured_conditions: dict = None, free_text_clause: str = ""):
@@ -66,15 +85,13 @@ def take_down_listing(listing_id) -> bool:
     ))
 
 
-def search_marketplace_listings(*, listing_class, filters: dict = None):
-    """Filtered search for one marketplace category at a time (warehouse
-    OR store OR business OR car) — mirrors discovery.services.
-    search_listings_with_filters's shape so both search systems feel
-    consistent to whichever app calls them."""
+def marketplace_listing_queryset(*, listing_class, filters: dict = None):
+    """The filtered, ordered, still-lazy queryset behind every marketplace browse surface."""
     from .models import AvailabilityStatus
 
     filters = filters or {}
-    queryset = listing_class.objects.filter(availability_status=AvailabilityStatus.AVAILABLE)
+    from .engagement import expiry_cutoff
+    queryset = listing_class.objects.filter(availability_status=AvailabilityStatus.AVAILABLE, renewed_at__gte=expiry_cutoff())
 
     if "min_price" in filters:
         queryset = queryset.filter(price_xaf__gte=Decimal(str(filters["min_price"])))
@@ -90,26 +107,175 @@ def search_marketplace_listings(*, listing_class, filters: dict = None):
         queryset = queryset.filter(item_category=filters["item_category"])
     if filters.get("condition") and hasattr(listing_class, "condition"):
         queryset = queryset.filter(condition=filters["condition"])
+    is_car = hasattr(listing_class, "vehicle_spec")
+    if is_car:
+        if filters.get("make"):
+            queryset = queryset.filter(vehicle_spec__make__icontains=filters["make"])
+        if filters.get("model"):
+            queryset = queryset.filter(vehicle_spec__model__icontains=filters["model"])
+        if "min_year" in filters:
+            queryset = queryset.filter(vehicle_spec__year__gte=filters["min_year"])
+        if "max_year" in filters:
+            queryset = queryset.filter(vehicle_spec__year__lte=filters["max_year"])
+        if "max_mileage_km" in filters:
+            queryset = queryset.filter(vehicle_spec__mileage_km__lte=filters["max_mileage_km"])
+        queryset = _apply_car_filters(queryset, filters)
     if filters.get("q"):
-        queryset = queryset.filter(Q(title__icontains=filters["q"]) | Q(description__icontains=filters["q"]))
-    queryset = queryset.order_by(*LISTING_ORDERINGS[filters.get("ordering", "newest")])
+        text_match = Q(title__icontains=filters["q"]) | Q(description__icontains=filters["q"])
+        if is_car:
+            text_match |= Q(vehicle_spec__make__icontains=filters["q"]) | Q(vehicle_spec__model__icontains=filters["q"])
+        queryset = queryset.filter(text_match)
+    if "near_lat" in filters:
+        queryset = _within_radius(queryset, filters["near_lat"], filters["near_lng"], filters.get("radius_km", DEFAULT_NEAR_RADIUS_KM))
+    ordering = filters.get("ordering", "newest")
+    if ordering in CAR_ORDERINGS:
+        fields = _car_orderings()[ordering] if is_car else LISTING_ORDERINGS["newest"]
+    else:
+        fields = LISTING_ORDERINGS[ordering]
+    queryset = queryset.order_by(*fields, "id")
+    return queryset
 
-    results = list(queryset)
+
+DEFAULT_NEAR_RADIUS_KM = 25
+MAX_NEAR_RADIUS_KM = 500
+
+
+def _apply_car_filters(queryset, filters: dict):
+    from .models import CarBlockedPeriod, MarketplaceOrder, MarketplaceOrderStatus, DriverOption
+    for key in ("body_type", "fuel_type", "transmission", "drivetrain", "vehicle_condition"):
+        if filters.get(key):
+            queryset = queryset.filter(**{f"vehicle_spec__{key}__in": filters[key]})
+    if "min_seats" in filters:
+        queryset = queryset.filter(vehicle_spec__seats__gte=filters["min_seats"])
+    if filters.get("customs_cleared"):
+        queryset = queryset.filter(vehicle_spec__customs_cleared=True)
+    if filters.get("negotiable"):
+        queryset = queryset.filter(price_basis="SALE", price_negotiable=True)
+    if filters.get("with_driver"):
+        queryset = queryset.filter(price_basis="RENT_NIGHTLY", driver_option__in=[DriverOption.WITH_DRIVER, DriverOption.EITHER])
+    if filters.get("delivery"):
+        queryset = queryset.filter(price_basis="RENT_NIGHTLY", delivery_available=True)
+    if filters.get("instant_book"):
+        queryset = queryset.filter(price_basis="RENT_NIGHTLY", instant_book=True)
+    if "available_from" in filters:
+        start, end = filters["available_from"], filters["available_to"]
+        live = (
+            MarketplaceOrderStatus.PAYMENT_PENDING, MarketplaceOrderStatus.PAID, MarketplaceOrderStatus.HANDED_OVER,
+            MarketplaceOrderStatus.DISPUTED, MarketplaceOrderStatus.COMPLETED,
+        )
+        booked = MarketplaceOrder.objects.filter(
+            booked_dates=True, status__in=live, rental_starts_on__lt=end, rental_ends_on__gt=start,
+        ).values("listing_id")
+        blocked = CarBlockedPeriod.objects.filter(starts_on__lt=end, ends_on__gt=start).values("car_id")
+        queryset = queryset.filter(price_basis="RENT_NIGHTLY").exclude(pk__in=booked).exclude(pk__in=blocked)
+    return queryset
+
+def _within_radius(queryset, latitude: float, longitude: float, radius_km: float):
+    """Keeps listings that have a map position within radius_km of the point and annotates `distance_km`.
+
+    A cheap bounding box on the plain columns narrows the rows first; the exact great-circle distance (spherical
+    law of cosines, in SQL so it also orders and pages in the database) then trims the box's corners.
+    """
+    from django.db.models import ExpressionWrapper, FloatField, Value
+    from django.db.models.functions import ACos, Cast, Cos, Greatest, Least, Radians, Sin
+
+    lat_span = radius_km / 111.0
+    lng_span = radius_km / (111.0 * max(math.cos(math.radians(latitude)), 0.01))
+    queryset = queryset.filter(latitude__isnull=False, longitude__isnull=False, latitude__range=(latitude - lat_span, latitude + lat_span))
+    if abs(longitude) + lng_span <= 180:
+        queryset = queryset.filter(longitude__range=(longitude - lng_span, longitude + lng_span))
+
+    def number(value):
+        return Value(float(value), output_field=FloatField())
+
+    listing_lat = Radians(Cast("latitude", FloatField()))
+    lng_gap = Radians(Cast("longitude", FloatField()) - number(longitude))
+    cosine = Sin(Radians(number(latitude))) * Sin(listing_lat) + Cos(Radians(number(latitude))) * Cos(listing_lat) * Cos(lng_gap)
+    distance = ExpressionWrapper(number(EARTH_RADIUS_KM) * ACos(Least(number(1), Greatest(number(-1), cosine))), output_field=FloatField())
+    return queryset.annotate(distance_km=distance).filter(distance_km__lte=radius_km)
+
+
+def with_listing_related(queryset):
+    """Loads what the listing serializers read (lister, area, photos and a car's spec) without a query per row."""
+    queryset = queryset.select_related("quarter", "lister_user").prefetch_related("media")
+    if hasattr(queryset.model, "vehicle_spec"):
+        queryset = queryset.select_related("vehicle_spec")
+    return queryset
+
+
+def search_marketplace_listings(*, listing_class, filters: dict = None):
+    """Filtered search for one marketplace category at a time (warehouse
+    OR store OR business OR car) — mirrors discovery.services.
+    search_listings_with_filters's shape so both search systems feel
+    consistent to whichever app calls them. Stays a lazy queryset (so callers can page in the
+    database) unless a condition filter forces a Python pass over the rows."""
+    filters = filters or {}
+    queryset = marketplace_listing_queryset(listing_class=listing_class, filters=filters)
+    if "required_conditions" not in filters:
+        return queryset
 
     # Condition-based filtering happens in Python, since conditions live
     # in a separate generic table, not columns on the listing itself.
-    if "required_conditions" in filters:
-        matching = []
-        for listing in results:
-            conditions = get_conditions_for(listing)
-            combined = {}
-            for c in conditions:
-                combined.update(c.structured_conditions)
-            if all(combined.get(k) == v for k, v in filters["required_conditions"].items()):
-                matching.append(listing)
-        results = matching
+    matching = []
+    for listing in queryset:
+        conditions = get_conditions_for(listing)
+        combined = {}
+        for c in conditions:
+            combined.update(c.structured_conditions)
+        if all(combined.get(k) == v for k, v in filters["required_conditions"].items()):
+            matching.append(listing)
+    return matching
 
-    return results
+
+class MarketplaceFeed:
+    """A lazily-paged, merged view over several listing categories, shaped for Django's Paginator.
+
+    Counting is one COUNT per category, and a page needs only the sort keys of the first `offset + size`
+    rows of each category (a k-way merge); the full rows are then fetched for just the ids on that page.
+    """
+
+    def __init__(self, sources: dict, filters: dict):
+        self._querysets = {
+            category: marketplace_listing_queryset(listing_class=listing_class, filters=filters)
+            for category, listing_class in sources.items()
+        }
+        self._ordering = LISTING_ORDERINGS[filters.get("ordering", "newest")]
+        self._near = "near_lat" in filters
+        self._count = None
+
+    def __len__(self):
+        if self._count is None:
+            self._count = sum(queryset.count() for queryset in self._querysets.values())
+        return self._count
+
+    def __getitem__(self, window):
+        start, stop = window.start or 0, window.stop
+        fields = [field.lstrip("-") for field in self._ordering]
+        # The distance column is carried along even when sorting by something else, so cards can show it.
+        carried = fields + (["distance_km"] if self._near and "distance_km" not in fields else [])
+        candidates = []
+        for category, queryset in self._querysets.items():
+            for row in queryset.values_list("pk", *carried)[:stop]:
+                candidates.append((category, *row))
+        # Sorting by each key from least to most significant (stable) reproduces the per-category order.
+        for position in reversed(range(len(fields))):
+            candidates.sort(key=lambda candidate: candidate[2 + position], reverse=self._ordering[position].startswith("-"))
+        page = candidates[start:stop]
+
+        wanted: dict = {}
+        for category, pk, *_ in page:
+            wanted.setdefault(category, []).append(pk)
+        loaded = {
+            category: {obj.pk: obj for obj in with_listing_related(self._querysets[category].model.objects.filter(pk__in=pks))}
+            for category, pks in wanted.items()
+        }
+        entries = []
+        for category, pk, *values in page:
+            listing = loaded[category][pk]
+            if self._near:
+                listing.distance_km = values[carried.index("distance_km")]
+            entries.append((category, listing))
+        return entries
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +317,8 @@ def infer_ride_distance_km(*, fare_estimate_xaf, ride_category: str = "STANDARD"
 
 
 def request_ride(*, rider, pickup_description, dropoff_description, fare_estimate_xaf, pickup_coords=None, dropoff_coords=None,
-                  ride_category="STANDARD", transport_type="PASSENGER", has_luggage=False, cargo_description="", distance_km=None):
+                  ride_category="STANDARD", transport_type="PASSENGER", has_luggage=False, cargo_description="", distance_km=None,
+                  luggage_count=None, luggage_size="", luggage_photo_urls=None):
     from .models import RideBooking
     pickup_lat, pickup_lon = pickup_coords or (None, None)
     dropoff_lat, dropoff_lon = dropoff_coords or (None, None)
@@ -166,6 +333,8 @@ def request_ride(*, rider, pickup_description, dropoff_description, fare_estimat
         pickup_latitude=pickup_lat, pickup_longitude=pickup_lon,
         dropoff_latitude=dropoff_lat, dropoff_longitude=dropoff_lon,
         ride_category=ride_category, transport_type=transport_type, has_luggage=has_luggage, cargo_description=cargo_description,
+        luggage_count=luggage_count if has_luggage else None, luggage_size=luggage_size if has_luggage else "",
+        luggage_photo_urls=list(luggage_photo_urls or [])[:3] if has_luggage else [],
     )
 
 
@@ -625,8 +794,21 @@ def _set_listing_status(listing_id, status: str):
     MarketplaceListingBase.objects.filter(pk=listing_id, removed_by_moderation=False).update(availability_status=status)
 
 
-def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: str):
-    """Starts payment and reserves the listing until the provider confirms it by webhook."""
+def _set_order_listing_status(order, status: str):
+    # A car booked for dates never took the listing off the market, so its order never changes the listing status.
+    if not order.booked_dates:
+        _set_listing_status(order.listing_id, status)
+
+
+def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: str, rental: dict = None):
+    """Starts payment and reserves the listing until the provider confirms it by webhook. A car rented by the day
+    needs `rental` (start_date, end_date, with_driver, delivery): only those days are reserved."""
+    from .car_rentals import is_dated_car_rental
+    if is_dated_car_rental(listing):
+        return _place_dated_car_rental(
+            car=listing, buyer=buyer, lock_client=lock_client, payment_gateway=payment_gateway,
+            phone_number=phone_number, rental=rental or {},
+        )
     from django.db import transaction as db_transaction
     from transactions.services import reserve_booking, initiate_booking_payment, fail_payment, InventoryConflictError
     from transactions.models import BookingType
@@ -637,7 +819,10 @@ def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: s
     # A rental deposit is paid in the same charge as the rent and held separately once the payment is confirmed.
     deposit_xaf = listing.security_deposit_xaf if is_rental(listing) else Decimal("0")
     # One conditional update decides who gets the listing when two buyers race for it.
-    claimed = MarketplaceListingBase.objects.filter(pk=listing.pk, availability_status=AvailabilityStatus.AVAILABLE).update(
+    from .engagement import expiry_cutoff
+    claimed = MarketplaceListingBase.objects.filter(
+        pk=listing.pk, availability_status=AvailabilityStatus.AVAILABLE, renewed_at__gte=expiry_cutoff(),
+    ).update(
         availability_status=AvailabilityStatus.UNDER_OFFER,
     )
     if not claimed:
@@ -666,6 +851,61 @@ def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: s
         _set_listing_status(listing.pk, AvailabilityStatus.AVAILABLE)
         raise
     return order
+
+
+def _place_dated_car_rental(*, car, buyer, lock_client, payment_gateway, phone_number: str, rental: dict):
+    """Books a car for chosen days. The booking lock on the car is held until the payment settles, so the
+    calendar is re-checked after taking it: two renters can't both get overlapping days."""
+    from django.db import transaction as db_transaction
+    from transactions.services import reserve_booking, initiate_booking_payment, fail_payment, InventoryConflictError
+    from transactions.models import BookingType
+    from .models import AvailabilityStatus, MarketplaceOrder, MarketplaceOrderStatus
+    from .car_rentals import quote_car_rental, breakdown_for_storage, CarRentalError
+
+    if car.lister_user_id == buyer.id:
+        raise OrderError("You cannot rent your own car.")
+    if car.availability_status != AvailabilityStatus.AVAILABLE or car.removed_by_moderation:
+        raise ListingNotAvailableError("This car is not available for rent right now.")
+    from .engagement import is_expired
+    if is_expired(car):
+        raise ListingNotAvailableError("This listing has expired. Ask the owner to renew it.")
+    if not rental.get("start_date") or not rental.get("end_date"):
+        raise OrderError("Choose the days you want to rent the car.")
+
+    def quote():
+        try:
+            return quote_car_rental(
+                car, start=rental["start_date"], end=rental["end_date"],
+                with_driver=bool(rental.get("with_driver")), delivery=bool(rental.get("delivery")),
+            )
+        except CarRentalError as e:
+            raise OrderError(str(e))
+
+    priced = quote()
+    try:
+        booking = reserve_booking(
+            lock_client=lock_client, requester=buyer, booking_type=BookingType.MARKETPLACE_ITEM,
+            target_content_type="marketplace.CarListing", target_id=car.pk, amount_xaf=priced["total_xaf"],
+        )
+    except InventoryConflictError:
+        raise ListingNotAvailableError("Someone else is booking this car right now. Try again in a few minutes.")
+    try:
+        priced = quote()
+    except OrderError:
+        fail_payment(lock_client=lock_client, booking=booking)
+        raise ListingNotAvailableError("Those days were just booked by someone else. Pick other dates.")
+    debit = initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
+    if not debit.success:
+        fail_payment(lock_client=lock_client, booking=booking)
+        raise OrderPaymentFailedError("The payment could not be completed. Please try again.")
+    with db_transaction.atomic():
+        return MarketplaceOrder.objects.create(
+            listing=car, buyer=buyer, booking=booking, amount_xaf=priced["rent_total_xaf"], deposit_xaf=priced["deposit_xaf"],
+            status=MarketplaceOrderStatus.PAYMENT_PENDING, booked_dates=True,
+            rental_starts_on=priced["start_date"], rental_ends_on=priced["end_date"], rental_days=priced["days"],
+            with_driver=priced["with_driver"], delivery_requested=priced["delivery"], price_breakdown=breakdown_for_storage(priced),
+            needs_approval=not car.instant_book,
+        )
 
 
 def _split_deposit(order):
@@ -713,6 +953,17 @@ def confirm_marketplace_order_payment(*, booking):
             _split_deposit(order)
     if updated:
         order.status = MarketplaceOrderStatus.PAID
+        if order.needs_approval:
+            from .car_rentals import approval_deadline
+            deadline = timezone_local_text(approval_deadline(order))
+            _notify_order(
+                order.listing.lister_user, "New booking request",
+                f"{order.buyer.full_name or order.buyer.username} wants to rent \"{order.listing.title}\" from "
+                f"{order.rental_starts_on} to {order.rental_ends_on} and has paid into escrow. Accept or decline before "
+                f"{deadline}, otherwise the request expires and they are refunded.",
+                order,
+            )
+            return order
         _notify_order(
             order.listing.lister_user,
             "New order on your listing",
@@ -730,7 +981,7 @@ def fail_marketplace_order_payment(*, booking):
     if order is None or order.status != MarketplaceOrderStatus.PAYMENT_PENDING:
         return order
     MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
-    _set_listing_status(order.listing_id, AvailabilityStatus.AVAILABLE)
+    _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
     order.status = MarketplaceOrderStatus.CANCELLED
     return order
 
@@ -743,6 +994,30 @@ def _require_buyer(order, user):
 def _require_seller(order, user):
     if order.listing.lister_user_id != user.id:
         raise NotPartyToOrderError("Only the seller can do this.")
+
+
+def timezone_local_text(moment) -> str:
+    from django.utils import timezone
+    return timezone.localtime(moment).strftime("%d %b %Y %H:%M")
+
+
+def approve_rental_request(*, order, seller):
+    """The owner of a car without instant booking accepts a paid booking request; the dates are then confirmed."""
+    from django.utils import timezone
+    from .models import MarketplaceOrder, MarketplaceOrderStatus
+    _require_seller(order, seller)
+    updated = MarketplaceOrder.objects.filter(
+        pk=order.pk, status=MarketplaceOrderStatus.PAID, needs_approval=True, owner_approved_at__isnull=True,
+    ).update(owner_approved_at=timezone.now())
+    if not updated:
+        raise OrderError("There is no booking request waiting for your answer on this order.")
+    order.refresh_from_db()
+    _notify_order(
+        order.buyer, "Your booking was accepted",
+        f"The owner accepted your booking of \"{order.listing.title}\" from {order.rental_starts_on} to {order.rental_ends_on}.",
+        order,
+    )
+    return order
 
 
 def _escrow_is_held(order) -> bool:
@@ -758,7 +1033,15 @@ def mark_handed_over(*, order, seller):
     _require_seller(order, seller)
     now = timezone.now()
     changes = {"status": MarketplaceOrderStatus.HANDED_OVER, "handed_over_at": now}
-    if is_rental(order.listing):
+    if order.booked_dates:
+        from datetime import timedelta
+        from .car_rentals import EARLY_HANDOVER_DAYS, awaiting_approval
+        if awaiting_approval(order):
+            raise OrderError("Accept the booking request before handing the car over.")
+        earliest = order.rental_starts_on - timedelta(days=EARLY_HANDOVER_DAYS)
+        if timezone.localdate(now) < earliest:
+            raise OrderError(f"The car can be handed over from {earliest.isoformat()}, the day before the rental starts.")
+    elif is_rental(order.listing):
         # The rental runs for one period from the day it is handed over.
         start = timezone.localdate(now)
         changes.update(rental_starts_on=start, rental_ends_on=rental_end_date(start, order.listing.price_basis))
@@ -781,7 +1064,7 @@ def _release_to_seller(order):
     from .models import MarketplaceOrder, MarketplaceOrderStatus, AvailabilityStatus
     complete_booking(booking=order.booking)
     MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.COMPLETED, completed_at=timezone.now())
-    _set_listing_status(order.listing_id, AvailabilityStatus.UNAVAILABLE)
+    _set_order_listing_status(order, AvailabilityStatus.UNAVAILABLE)
     order.refresh_from_db()
 
 
@@ -789,16 +1072,21 @@ def _deposit_escrow(order):
     return getattr(order.deposit_booking, "escrow", None) if order.deposit_booking_id else None
 
 
-def _return_deposit(order) -> bool:
-    """Gives the held deposit back to the renter. Returns False when there is no unsettled deposit to return."""
+def _return_deposit(order, *, to_wallet: bool = False) -> bool:
+    """Gives the held deposit back to the renter (into their wallet when to_wallet). Returns False when there is
+    no unsettled deposit to return."""
     from django.utils import timezone
     from transactions.models import EscrowStatus
     from .models import MarketplaceOrder, DepositStatus
     escrow = _deposit_escrow(order)
     if escrow is None or escrow.status not in (EscrowStatus.HELD, EscrowStatus.DISPUTED):
         return False
-    escrow.refund()
-    order.deposit_booking.cancel()
+    if to_wallet:
+        from transactions.services import settle_escrow
+        settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"deposit, order #{order.pk}")
+    else:
+        escrow.refund()
+        order.deposit_booking.cancel()
     MarketplaceOrder.objects.filter(pk=order.pk).update(deposit_status=DepositStatus.RETURNED, deposit_settled_at=timezone.now())
     order.deposit_status = DepositStatus.RETURNED
     return True
@@ -812,7 +1100,7 @@ def _refund_to_buyer(order):
     # A refunded rental also gives back the deposit that was paid with it.
     _return_deposit(order)
     MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
-    _set_listing_status(order.listing_id, AvailabilityStatus.AVAILABLE)
+    _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
     order.refresh_from_db()
 
 
@@ -822,6 +1110,10 @@ def _relist_after_rental(order) -> bool:
     from django.utils import timezone
     from .models import MarketplaceListingBase, MarketplaceOrder, MarketplaceOrderStatus, AvailabilityStatus
     if order.rental_ends_on is None or order.relisted_at is not None:
+        return False
+    if order.booked_dates:
+        # The car stayed listed for other dates the whole time, so there is nothing to put back.
+        MarketplaceOrder.objects.filter(pk=order.pk).update(relisted_at=timezone.now())
         return False
     live = (
         MarketplaceOrderStatus.PAYMENT_PENDING, MarketplaceOrderStatus.PAID,
@@ -877,22 +1169,37 @@ def claim_deposit(*, order, seller, reason: str):
     return order
 
 
-def _resolve_deposit_dispute(order, outcome: str):
-    """An admin's decision on a claimed deposit: RELEASE pays it to the seller, REFUND returns it to the renter."""
+def _resolve_deposit_dispute(order, payer_amount):
+    """An admin's decision on a claimed deposit: payer_amount goes back to the renter's wallet and the rest to the
+    seller (0 pays it all to the seller, the full deposit returns it all)."""
     from django.utils import timezone
-    from transactions.services import complete_booking
+    from transactions.services import complete_booking, settle_escrow
     from .models import MarketplaceOrder, DepositStatus
     if order.deposit_status != DepositStatus.CLAIMED:
         return order
-    if outcome == "RELEASE":
+    escrow = _deposit_escrow(order)
+    if payer_amount == 0:
         complete_booking(booking=order.deposit_booking)
-        MarketplaceOrder.objects.filter(pk=order.pk).update(deposit_status=DepositStatus.FORFEITED, deposit_settled_at=timezone.now())
+        status = DepositStatus.FORFEITED
+    elif payer_amount >= escrow.gross_amount_xaf:
+        _return_deposit(order, to_wallet=True)
+        status = DepositStatus.RETURNED
     else:
-        _return_deposit(order)
+        settle_escrow(escrow=escrow, payer_amount_xaf=payer_amount, reference=f"deposit, order #{order.pk}")
+        status = DepositStatus.SPLIT
+    MarketplaceOrder.objects.filter(pk=order.pk).update(deposit_status=status, deposit_settled_at=timezone.now())
     _relist_after_rental(order)
     order.refresh_from_db()
+    escrow.refresh_from_db()
+    message = {
+        DepositStatus.FORFEITED: "Support paid the deposit to the seller.",
+        DepositStatus.RETURNED: "Support returned the deposit to the renter's Oaziland wallet.",
+    }.get(status) or (
+        f"Support split the deposit: {escrow.refunded_amount_xaf:.0f} XAF back to the renter's wallet, "
+        f"{escrow.payee_amount_xaf:.0f} XAF to the seller's wallet (after the platform fee)."
+    )
     for party in (order.buyer, order.listing.lister_user):
-        _notify_order(party, "Support decision on the deposit", "Support paid the deposit to the seller." if outcome == "RELEASE" else "Support returned the deposit to the renter.", order)
+        _notify_order(party, "Support decision on the deposit", message, order)
     return order
 
 
@@ -902,17 +1209,34 @@ def confirm_receipt(*, order, buyer):
     _require_buyer(order, buyer)
     if order.status not in (MarketplaceOrderStatus.PAID, MarketplaceOrderStatus.HANDED_OVER) or not _escrow_is_held(order):
         raise OrderError("This order cannot be confirmed right now.")
+    from .car_rentals import awaiting_approval
+    if awaiting_approval(order):
+        raise OrderError("The owner hasn't accepted this booking request yet.")
     _release_to_seller(order)
     _notify_order(order.listing.lister_user, "Payment released", f"The buyer confirmed \"{order.listing.title}\". {order.amount_xaf} XAF was released to your wallet (minus the platform fee).", order)
     return order
 
 
 def cancel_order(*, order, buyer):
-    """The buyer backs out before the seller has handed anything over; the money comes back in full."""
-    from .models import MarketplaceOrderStatus
+    """The buyer backs out before the seller has handed anything over; the money comes back in full. A car booked
+    for dates is free to cancel until FREE_CANCELLATION_HOURS before it starts; after that the owner keeps one
+    day's rent and the rest (with the whole deposit) goes back to the renter's wallet."""
+    from transactions.services import settle_escrow
+    from .models import MarketplaceOrder, MarketplaceOrderStatus
+    from .car_rentals import late_cancellation_fee
     _require_buyer(order, buyer)
     if order.status != MarketplaceOrderStatus.PAID or not _escrow_is_held(order):
         raise OrderError("This order can no longer be cancelled. Report a problem if something went wrong.")
+    fee = late_cancellation_fee(order)
+    if fee > 0:
+        payment = order.booking.escrow
+        settle_escrow(escrow=payment, payer_amount_xaf=payment.gross_amount_xaf - fee, reference=f"late cancellation, order #{order.pk}")
+        _return_deposit(order, to_wallet=True)
+        MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
+        order.refresh_from_db()
+        _notify_order(order.buyer, "Rental cancelled", f"Your rental of \"{order.listing.title}\" was cancelled less than a day before it started, so one day's rent ({fee:.0f} XAF) went to the owner. The rest was returned to your Oaziland wallet.", order)
+        _notify_order(order.listing.lister_user, "Rental cancelled", f"The renter cancelled \"{order.listing.title}\" late. One day's rent ({fee:.0f} XAF, minus the platform fee) was paid to your wallet.", order)
+        return order
     _refund_to_buyer(order)
     _notify_order(order.listing.lister_user, "Order cancelled", f"The buyer cancelled their order for \"{order.listing.title}\". The listing is available again.", order)
     return order
@@ -945,22 +1269,45 @@ def dispute_order(*, order, user, reason: str):
     return order
 
 
-def resolve_order_dispute(*, order, outcome: str, escrow=None):
-    """Applies an admin's decision on a disputed order: RELEASE pays the seller, REFUND returns the money.
-    When the disputed escrow is the order's rental deposit, only the deposit is decided."""
-    from .models import MarketplaceOrderStatus
-    if outcome not in ("RELEASE", "REFUND"):
-        raise ValueError("outcome must be 'RELEASE' or 'REFUND'")
+def resolve_order_dispute(*, order, outcome: str = "", escrow=None, payer_amount_xaf=None):
+    """Applies an admin's decision on a disputed order. payer_amount_xaf is what goes back to the buyer's wallet
+    (0 pays the seller in full, the full amount refunds the order); when it is not given, outcome RELEASE or
+    REFUND decides. When the disputed escrow is the order's rental deposit, only the deposit is decided."""
+    from django.utils import timezone
+    from transactions.services import settle_escrow
+    from .models import MarketplaceOrder, MarketplaceOrderStatus, AvailabilityStatus
+    if payer_amount_xaf is None:
+        if outcome not in ("RELEASE", "REFUND"):
+            raise ValueError("outcome must be 'RELEASE' or 'REFUND'")
+        target = escrow if escrow is not None else order.booking.escrow
+        payer_amount_xaf = 0 if outcome == "RELEASE" else target.gross_amount_xaf
     if escrow is not None and order.deposit_booking_id and escrow.booking_id == order.deposit_booking_id:
-        return _resolve_deposit_dispute(order, outcome)
+        return _resolve_deposit_dispute(order, payer_amount_xaf)
     if order.status in (MarketplaceOrderStatus.COMPLETED, MarketplaceOrderStatus.CANCELLED):
         return order
-    if outcome == "RELEASE":
+    payment = order.booking.escrow
+    if payer_amount_xaf == 0:
         _release_to_seller(order)
+        message = "Support released the payment to the seller."
+    elif payer_amount_xaf >= payment.gross_amount_xaf:
+        settle_escrow(escrow=payment, payer_amount_xaf=payment.gross_amount_xaf, reference=f"order #{order.pk}")
+        # A refunded rental also gives back the deposit that was paid with it.
+        _return_deposit(order, to_wallet=True)
+        MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
+        _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
+        message = "Support refunded the buyer in full to their Oaziland wallet."
     else:
-        _refund_to_buyer(order)
+        settle_escrow(escrow=payment, payer_amount_xaf=payer_amount_xaf, reference=f"order #{order.pk}")
+        MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.COMPLETED, completed_at=timezone.now())
+        _set_order_listing_status(order, AvailabilityStatus.UNAVAILABLE)
+        payment.refresh_from_db()
+        message = (
+            f"Support split the payment: {payment.refunded_amount_xaf:.0f} XAF back to the buyer's wallet, "
+            f"{payment.payee_amount_xaf:.0f} XAF to the seller's wallet (after the platform fee)."
+        )
+    order.refresh_from_db()
     for party in (order.buyer, order.listing.lister_user):
-        _notify_order(party, "Support decision on your order", "Support released the payment to the seller." if outcome == "RELEASE" else "Support refunded the buyer.", order)
+        _notify_order(party, "Support decision on your order", message, order)
     return order
 
 
@@ -995,13 +1342,27 @@ def process_marketplace_orders(*, now=None) -> dict:
         fail_marketplace_order_payment(booking=order.booking)
         expired.append(order)
     stale = MarketplaceOrder.objects.filter(
-        status=MarketplaceOrderStatus.PAID, created_at__lt=now - timedelta(days=ORDER_SELLER_RESPONSE_DAYS),
+        status=MarketplaceOrderStatus.PAID, booked_dates=False, created_at__lt=now - timedelta(days=ORDER_SELLER_RESPONSE_DAYS),
     ).select_related("listing__lister_user", "buyer", "booking")
+    from .car_rentals import HANDOVER_GRACE_DAYS
+    stale = list(stale) + list(MarketplaceOrder.objects.filter(
+        status=MarketplaceOrderStatus.PAID, booked_dates=True, rental_starts_on__lt=today - timedelta(days=HANDOVER_GRACE_DAYS),
+    ).select_related("listing__lister_user", "buyer", "booking"))
     for order in stale:
         if _escrow_is_held(order):
             _refund_to_buyer(order)
             _notify_order(order.buyer, "Order refunded", f"The seller did not hand over \"{order.listing.title}\" in time, so you were refunded in full.", order)
-            _notify_order(order.listing.lister_user, "Order cancelled", f"You did not hand over \"{order.listing.title}\" within {ORDER_SELLER_RESPONSE_DAYS} days, so the order was cancelled and refunded.", order)
+            _notify_order(order.listing.lister_user, "Order cancelled", f"You did not hand over \"{order.listing.title}\" in time, so the order was cancelled and refunded.", order)
+            refunded.append(order)
+    from .car_rentals import approval_deadline
+    unanswered = MarketplaceOrder.objects.filter(
+        status=MarketplaceOrderStatus.PAID, needs_approval=True, owner_approved_at__isnull=True,
+    ).select_related("listing__lister_user", "buyer", "booking")
+    for order in unanswered:
+        if approval_deadline(order) <= now and _escrow_is_held(order):
+            _refund_to_buyer(order)
+            _notify_order(order.buyer, "Booking request expired", f"The owner of \"{order.listing.title}\" did not answer your request in time, so you were refunded in full.", order)
+            _notify_order(order.listing.lister_user, "Booking request expired", f"You did not answer the booking request for \"{order.listing.title}\" in time, so it expired and the renter was refunded.", order)
             refunded.append(order)
     overdue = MarketplaceOrder.objects.filter(
         status=MarketplaceOrderStatus.HANDED_OVER, handed_over_at__lt=now - timedelta(hours=ORDER_AUTO_RELEASE_HOURS),

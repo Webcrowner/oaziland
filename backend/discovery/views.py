@@ -61,7 +61,13 @@ class SavedSearchViewSet(viewsets.ModelViewSet):
         return SavedSearch.objects.filter(user=self.request.user).order_by("-id")
 
     def perform_create(self, serializer):
+        from rest_framework.exceptions import ValidationError
+        if SavedSearch.objects.filter(user=self.request.user).count() >= MAX_SAVED_SEARCHES:
+            raise ValidationError({"detail": f"You can keep up to {MAX_SAVED_SEARCHES} saved searches. Delete one first."})
         serializer.save(user=self.request.user)
+
+
+MAX_SAVED_SEARCHES = 50
 
 
 class MyComparisonView(views.APIView):

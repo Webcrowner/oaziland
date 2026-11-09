@@ -49,12 +49,16 @@ class ContentReport(models.Model):
     target_user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name="reports_received",
     )
+    # Everything else that can be reported (places, comments, reviews, job postings) is named by kind + id —
+    # see trust_safety/report_targets.py. Not a foreign key, so removing the item never deletes the report.
+    target_kind = models.CharField(max_length=30, blank=True)
+    target_object_id = models.CharField(max_length=64, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "content_reports"
-        indexes = [models.Index(fields=["status"])]
+        indexes = [models.Index(fields=["status"]), models.Index(fields=["target_kind", "target_object_id"])]
 
 
 class ModerationCategory(models.TextChoices):
@@ -86,6 +90,12 @@ class AIModerationResult(models.Model):
     target_listing_id = models.UUIDField(null=True, blank=True)
     target_comment = models.ForeignKey("social.Comment", on_delete=models.CASCADE, null=True, blank=True)
     scored_at = models.DateTimeField(auto_now_add=True)
+    # Set when an admin looked at a flagged result and decided what to do about it.
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="ai_flags_reviewed",
+    )
+    review_outcome = models.CharField(max_length=10, blank=True)  # KEPT or REMOVED
 
     class Meta:
         db_table = "ai_moderation_results"
@@ -125,3 +135,73 @@ class UserWarning(models.Model):
             subject=subject, reason=reason, issued_by=issued_by,
             strike_number=last_strike + 1,
         )
+
+
+class ContentTakedown(models.Model):
+    """An admin pulling a published item (property listing, marketplace listing or post) off the platform,
+    with the reason given to its owner. restored_at stays empty while the takedown is in force."""
+    class ContentType(models.TextChoices):
+        PROPERTY = "property", "Property listing"
+        MARKETPLACE = "marketplace", "Marketplace listing"
+        POST = "post", "Post"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    content_type = models.CharField(max_length=20, choices=ContentType.choices)
+    content_id = models.UUIDField()
+    title = models.CharField(max_length=200, blank=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="content_takedowns",
+    )
+    reason = models.CharField(max_length=500)
+    previous_status = models.CharField(max_length=30, blank=True)
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="content_takedowns_made",
+    )
+    removed_at = models.DateTimeField(auto_now_add=True)
+    restored_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="content_restores_made",
+    )
+    restored_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "content_takedowns"
+        ordering = ["-removed_at"]
+        indexes = [models.Index(fields=["content_type", "content_id", "restored_at"])]
+
+
+class AuditLog(models.Model):
+    """An append-only record of something an admin did (or tried to do) in
+    the admin console. Rows are written by trust_safety.audit and are never
+    edited: the actor's username is copied in so the entry still reads
+    correctly if the account is later renamed or deleted."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_entries",
+    )
+    actor_username = models.CharField(max_length=150)
+    action = models.CharField(max_length=120)
+    target_type = models.CharField(max_length=60, blank=True)
+    target_id = models.CharField(max_length=64, blank=True)
+    target_label = models.CharField(max_length=200, blank=True)
+    details = models.JSONField(default=dict, blank=True)
+    status_code = models.PositiveSmallIntegerField()
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "admin_audit_log"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["action", "-created_at"]),
+            models.Index(fields=["actor", "-created_at"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise PermissionError("Audit log entries cannot be edited.")
+        super().save(*args, **kwargs)
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status_code < 400

@@ -1,11 +1,19 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useRouter, Link } from "@/i18n/navigation";
-import { loginUser, getMyProfile } from "@/lib/api";
+import { loginUser, getMyProfile, getDataAdminLink, ApiStatusError } from "@/lib/api";
 import Button from "@/components/ui/Button";
 import { IconUser, IconLock, IconEye, IconEyeOff, IconShield } from "@/components/Icons";
+
+/** Set when the data admin (/admin/ on the backend) sent the visitor here to sign in. */
+function dataAdminTarget(): { next?: string } | null {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("to") !== "data-admin") return null;
+  const next = params.get("next") || "";
+  return { next: next.startsWith("/admin/") && !next.includes("//") ? next : undefined };
+}
 
 export default function AdminLoginPage() {
   const t = useTranslations("AdminLoginPage");
@@ -15,6 +23,30 @@ export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [handingOver, setHandingOver] = useState(false);
+
+  /** Sends a signed-in admin on to the data admin. Returns false when the session can't be used. */
+  async function goToDataAdmin(accessToken: string, next?: string): Promise<boolean> {
+    try {
+      window.location.href = await getDataAdminLink(accessToken, next);
+      return true;
+    } catch (err) {
+      if (err instanceof ApiStatusError && err.status === 403) setError(t("dataAdminFullAccessOnly"));
+      return false;
+    }
+  }
+
+  // Already signed in to the console: go straight through to the data admin.
+  useEffect(() => {
+    const target = dataAdminTarget();
+    const token = localStorage.getItem("access_token");
+    if (!target || !token) return;
+    void Promise.resolve().then(async () => {
+      setHandingOver(true);
+      if (!(await goToDataAdmin(token, target.next))) setHandingOver(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,7 +70,15 @@ export default function AdminLoginPage() {
 
       localStorage.setItem("access_token", tokens.access);
       localStorage.setItem("refresh_token", tokens.refresh);
-      router.push("/admin");
+      const target = dataAdminTarget();
+      if (target) {
+        setHandingOver(true);
+        if (!(await goToDataAdmin(tokens.access, target.next))) setHandingOver(false);
+        return;
+      }
+      // Back to the console tab the admin was trying to open; only a plain tab name is passed on.
+      const wanted = new URLSearchParams(window.location.search).get("tab");
+      router.push(wanted && /^[a-z]{2,20}$/.test(wanted) ? `/admin?tab=${wanted}` : "/admin");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("invalidCredentials"));
     } finally {
@@ -76,6 +116,12 @@ export default function AdminLoginPage() {
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1.5">{t("subtitle")}</p>
           </div>
+
+          {handingOver && (
+            <p role="status" className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-medium text-center">
+              {t("openingDataAdmin")}
+            </p>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -130,7 +176,7 @@ export default function AdminLoginPage() {
               </div>
             )}
 
-            <Button disabled={loading} className="w-full py-3 rounded-xl text-sm font-bold shadow-md shadow-amber-500/20">
+            <Button disabled={loading || handingOver} className="w-full py-3 rounded-xl text-sm font-bold shadow-md shadow-amber-500/20">
               {loading ? t("signingIn") : t("signIn")}
             </Button>
           </form>

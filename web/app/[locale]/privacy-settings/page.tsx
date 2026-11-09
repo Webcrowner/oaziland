@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import Avatar from "@/components/Avatar";
+import PrivacyDataControls from "@/components/PrivacyDataControls";
 import { IconEye, IconEyeOff, IconMessageCircle, IconCheckCircle } from "@/components/Icons";
 import {
   getMyPresenceSettings,
@@ -28,6 +29,7 @@ export default function PrivacySettingsPage() {
   const [loggedIn, setLoggedIn] = useState(true);
   const [saved, setSaved] = useState(false);
   const [blocked, setBlocked] = useState<BlockedUser[]>([]);
+  const [token, setToken] = useState<string | null>(null);
 
   async function handleUnblock(userId: string) {
     const token = localStorage.getItem("access_token");
@@ -44,6 +46,7 @@ export default function PrivacySettingsPage() {
     }
     getMyPresenceSettings(token).then(setSettings).catch(() => {});
     listBlockedUsers(token).then((data) => setBlocked(data.results)).catch(() => {});
+    void Promise.resolve().then(() => setToken(token));
   }, []);
 
   async function handleToggle(field: keyof PresenceSettings) {
@@ -181,6 +184,8 @@ export default function PrivacySettingsPage() {
             </ul>
           )}
         </section>
+
+        {token && <PrivacyDataControls token={token} />}
       </div>
     </AccountSidebarLayout>
   );

@@ -94,6 +94,11 @@ class VerificationRequestType(models.TextChoices):
     BUSINESS_VERIFICATION = "BUSINESS_VERIFICATION", "Business Verification"
     IDENTITY_VERIFICATION = "IDENTITY_VERIFICATION", "Identity Verification"
     VEHICLE_OWNERSHIP = "VEHICLE_OWNERSHIP", "Vehicle Ownership"
+    AGENT_VERIFICATION = "AGENT_VERIFICATION", "Agent Verification"
+    AGENCY_VERIFICATION = "AGENCY_VERIFICATION", "Agency Verification"
+    LANDLORD_VERIFICATION = "LANDLORD_VERIFICATION", "Landlord Verification"
+    HOSTEL_VERIFICATION = "HOSTEL_VERIFICATION", "Student Hostel Verification"
+    GUEST_HOUSE_VERIFICATION = "GUEST_HOUSE_VERIFICATION", "Guest House Verification"
 
 
 class VerificationRequestStatus(models.TextChoices):
@@ -118,6 +123,7 @@ class VerificationRequest(models.Model):
     submitted_at = models.DateTimeField(auto_now_add=True)
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="verification_requests_reviewed")
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=300, blank=True)
 
     class Meta:
         db_table = "verification_requests"
@@ -193,6 +199,12 @@ class AccountDeletionRequest(models.Model):
     requested_at = models.DateTimeField(auto_now_add=True)
     retention_expires_at = models.DateTimeField()
     completed_at = models.DateTimeField(null=True, blank=True)
+    reason = models.CharField(max_length=500, blank=True)  # optional, from the user
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    cancellation_reason = models.CharField(max_length=300, blank=True)  # set when an admin stops the deletion
 
 
 class SupportTicketStatus(models.TextChoices):

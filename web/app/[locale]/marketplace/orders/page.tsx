@@ -1,4 +1,5 @@
 "use client";
+import ListingChatButton from "@/components/ListingChatButton";
 import { useCallback, useEffect, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
@@ -113,7 +114,36 @@ export default function MarketplaceOrdersPage() {
                   {order.rental_starts_on && order.rental_ends_on && (
                     <p className="text-sm text-slate-600">{t("rentalPeriod", { start: day(order.rental_starts_on), end: day(order.rental_ends_on) })}</p>
                   )}
+                  {order.booked_dates && (
+                    <p className="text-sm text-slate-600">
+                      {[
+                        t("rentalDays", { count: order.rental_days ?? 0 }),
+                        order.with_driver ? t("withDriver") : t("selfDrive"),
+                        order.delivery_requested ? t("deliveryRequested") : "",
+                      ].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                  {order.status === "PAID" && order.approval_deadline && (
+                    <p className="text-xs font-semibold text-amber-700">
+                      {t(role === "buying" ? "awaitingApprovalBuyer" : "awaitingApprovalSeller", { date: date(order.approval_deadline) })}
+                    </p>
+                  )}
+                  {order.status === "PAID" && order.free_cancellation_until && (
+                    <p className="text-xs text-slate-500">
+                      {new Date(order.free_cancellation_until) > new Date()
+                        ? t("freeCancellationUntil", { date: date(order.free_cancellation_until) })
+                        : t("lateCancellationNow")}
+                    </p>
+                  )}
                   <p className="text-xs text-slate-400">{date(order.created_at)}</p>
+                  {order.category && (
+                    <div className="mt-1">
+                      <ListingChatButton
+                        compact category={order.category} listingId={order.listing_id}
+                        recipientId={role === "buying" ? order.seller : order.buyer} isSale={!order.booked_dates}
+                      />
+                    </div>
+                  )}
                 </div>
                 <Badge variant={order.status === "COMPLETED" ? "green" : order.status === "DISPUTED" ? "gold" : "neutral"}>{t(`status_${order.status}`)}</Badge>
               </div>
@@ -141,7 +171,11 @@ export default function MarketplaceOrdersPage() {
                 <div className="flex flex-wrap items-center gap-3">
                   {role === "selling" && order.status === "PAID" && (
                     <>
-                      <Button onClick={() => run(order.id, "hand-over")}>{t("handOver")}</Button>
+                      {order.approval_deadline ? (
+                        <Button onClick={() => confirmThen(t("confirmApprove"), order.id, "approve")}>{t("approveRequest")}</Button>
+                      ) : (
+                        <Button onClick={() => run(order.id, "hand-over")}>{t("handOver")}</Button>
+                      )}
                       <button onClick={() => confirmThen(t("confirmDecline"), order.id, "decline")} className="text-sm font-semibold text-red-700 underline cursor-pointer">{t("decline")}</button>
                     </>
                   )}
@@ -155,7 +189,10 @@ export default function MarketplaceOrdersPage() {
                     <Button onClick={() => confirmThen(t("confirmReceipt"), order.id, "confirm")}>{t("confirmReceiptButton")}</Button>
                   )}
                   {role === "buying" && order.status === "PAID" && (
-                    <button onClick={() => confirmThen(t("confirmCancel"), order.id, "cancel")} className="text-sm font-semibold text-red-700 underline cursor-pointer">{t("cancelOrder")}</button>
+                    <button onClick={() => confirmThen(
+                      order.free_cancellation_until && new Date(order.free_cancellation_until) <= new Date() ? t("confirmCancelLate") : t("confirmCancel"),
+                      order.id, "cancel",
+                    )} className="text-sm font-semibold text-red-700 underline cursor-pointer">{t("cancelOrder")}</button>
                   )}
                   {(order.status === "PAID" || order.status === "HANDED_OVER") && (
                     <button onClick={() => { setDisputing({ id: order.id, action: "dispute" }); setReason(""); }} className="text-sm font-semibold text-[var(--navy)] underline cursor-pointer">{t("reportProblem")}</button>

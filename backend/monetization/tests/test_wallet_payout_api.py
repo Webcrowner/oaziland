@@ -78,6 +78,11 @@ def test_complete_booking_auto_credits_payee_wallet(landlord_user, seeker_user):
 
 @pytest.mark.django_db
 def test_wallet_api_and_momo_withdrawal(landlord_user):
+    from identity.models import KYCProfile, VerificationStatus
+    KYCProfile.objects.create(
+        user=landlord_user, legal_full_name="Test Landlord", date_of_birth="1980-01-01",
+        national_id_number="ID-landlord-unique", residential_address="Yaoundé", kyc_status=VerificationStatus.VERIFIED,
+    )
     client = APIClient()
     client.force_authenticate(user=landlord_user)
 
@@ -94,16 +99,19 @@ def test_wallet_api_and_momo_withdrawal(landlord_user):
     res_fail = client.post("/api/wallet/withdraw/", {"amount_xaf": 80000, "phone_number": "+237699887766"})
     assert res_fail.status_code == 400
 
-    # 3. Successful withdrawal to MTN MoMo
+    # 3. A withdrawal is only requested here; an admin pays it out later
     res_success = client.post(
         "/api/wallet/withdraw/",
         {"amount_xaf": 20000, "phone_number": "+237699887766", "provider": "MTN_MOMO"},
     )
-    assert res_success.status_code == 200
-    assert res_success.data["status"] == WithdrawalStatus.PAID_OUT
+    assert res_success.status_code == 202
+    assert res_success.data["status"] == WithdrawalStatus.PENDING
     assert Decimal(str(res_success.data["balance_xaf"])) == Decimal("30000")
 
     wallet.refresh_from_db()
     assert wallet.balance_xaf == Decimal("30000")
     assert wallet.withdrawal_requests.count() == 1
-    assert wallet.withdrawal_requests.first().status == WithdrawalStatus.PAID_OUT
+    withdrawal = wallet.withdrawal_requests.first()
+    assert withdrawal.status == WithdrawalStatus.PENDING
+    assert withdrawal.phone_number == "+237699887766"
+    assert withdrawal.provider == "MTN_MOMO"

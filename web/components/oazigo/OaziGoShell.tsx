@@ -13,8 +13,12 @@ const TABS = [
   { href: "/oazigo/trips", key: "navTrips" },
   { href: "/oazigo/requests", key: "navRequests", driversOnly: true },
   { href: "/oazigo/drive", key: "navDrive" },
+  { href: "/oazigo/cars", key: "navCars" },
   { href: "/oazigo/safety", key: "navSafety" },
 ] as const;
+
+// Pages anyone can browse without signing in.
+const PUBLIC_PATHS = ["/oazigo/cars"];
 
 function Frame({ children }: { children: React.ReactNode }) {
   const t = useTranslations("OaziGoPage");
@@ -22,7 +26,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   const { status, driverProfile } = useOaziGo();
   const isVerifiedDriver = Boolean(driverProfile?.is_verified);
 
-  if (status === "signedOut") {
+  if (status === "signedOut" && !PUBLIC_PATHS.includes(pathname)) {
     return (
       <main className="max-w-md mx-auto px-4 py-16">
         <div className={`${cardCls} text-center`}>
@@ -38,7 +42,7 @@ function Frame({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="bg-slate-200 min-h-[70vh]">
-    <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+    <main className={`${pathname === "/oazigo/cars" ? "max-w-6xl" : "max-w-3xl"} mx-auto px-4 sm:px-6 py-8`}>
       <nav aria-label="OaziGo" className="mb-6 -mx-4 sm:mx-0 overflow-x-auto px-4 sm:px-0">
         <ul className="flex gap-1.5 w-max sm:w-auto rounded-2xl border border-slate-300/80 bg-white p-1.5 shadow-sm">
           {TABS.filter((tab) => !("driversOnly" in tab) || isVerifiedDriver).map((tab) => {

@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { getAgentPublicProfile } from "@/lib/api";
 import RateAndReport from "@/components/RateAndReport";
+import ReportContentButton from "@/components/ReportContentButton";
+import AgentListingsGrid from "@/components/AgentListingsGrid";
 import FollowButton from "@/components/FollowButton";
 import AgentShareButton from "@/components/AgentShareButton";
 import DirectChatButton from "@/components/DirectChatButton";
@@ -41,6 +43,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function AgentProfilePage({ params }: { params: Promise<{ id: string; locale: string }> }) {
   const { id, locale } = await params;
   const t = await getTranslations("AgentProfilePage");
+  const tDir = await getTranslations("AgentsDirectoryPage");
   const profile = await getAgentPublicProfile(id).catch(() => null);
   if (!profile) notFound();
 
@@ -49,9 +52,14 @@ export default async function AgentProfilePage({ params }: { params: Promise<{ i
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 text-white shadow-xl shadow-slate-900/10 mb-6">
         <div className="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full bg-amber-400/20 blur-3xl" />
         <div className="relative p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center gap-5">
+          {profile.profile_image_url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- user uploads from arbitrary storage hosts
+            <img src={profile.profile_image_url} alt="" className="h-24 w-24 shrink-0 rounded-3xl object-cover ring-4 ring-white/10 shadow-lg" />
+          ) : (
           <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-3xl bg-slate-800 text-4xl font-black text-amber-400 ring-4 ring-white/10 shadow-lg">
             {profile.full_name.charAt(0).toUpperCase()}
           </div>
+          )}
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight">{profile.full_name}</h1>
             {profile.agency_name && (
@@ -109,6 +117,46 @@ export default async function AgentProfilePage({ params }: { params: Promise<{ i
       <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm mb-6">
         <RateAndReport subjectUserId={id} />
       </div>
+
+      {profile.intro_video_url && (
+        <section aria-labelledby="agent-video" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm mb-6">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 id="agent-video" className="text-lg font-black tracking-tight text-slate-900">{t("introVideoTitle", { name: profile.full_name })}</h2>
+            <ReportContentButton kind="agent_video" id={id} ownerId={id} variant="inline" />
+          </div>
+          <video src={profile.intro_video_url} controls preload="metadata" playsInline className="w-full rounded-2xl bg-black aspect-video">
+            {t("videoUnsupported")}
+          </video>
+        </section>
+      )}
+
+      {(profile.bio || (profile.specialties?.length ?? 0) > 0 || (profile.areas_served?.length ?? 0) > 0 || (profile.languages?.length ?? 0) > 0 || profile.years_experience != null) && (
+        <section aria-labelledby="agent-about" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm mb-6">
+          <h2 id="agent-about" className="mb-3 text-lg font-black tracking-tight text-slate-900">{t("aboutTitle")}</h2>
+          {profile.bio && <p className="mb-4 whitespace-pre-line text-sm leading-relaxed text-slate-700">{profile.bio}</p>}
+          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            {profile.years_experience != null && (
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("experienceLabel")}</dt><dd className="mt-0.5 font-semibold text-slate-800">{t("yearsExperience", { count: profile.years_experience })}</dd></div>
+            )}
+            {(profile.specialties?.length ?? 0) > 0 && (
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("specialtiesLabel")}</dt><dd className="mt-0.5 font-semibold text-slate-800">{profile.specialties!.map((c) => tDir(`specialty_${c}`)).join(", ")}</dd></div>
+            )}
+            {(profile.languages?.length ?? 0) > 0 && (
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("languagesLabel")}</dt><dd className="mt-0.5 font-semibold text-slate-800">{profile.languages!.map((c) => tDir(`language_${c}`)).join(", ")}</dd></div>
+            )}
+            {(profile.areas_served?.length ?? 0) > 0 && (
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("areasLabel")}</dt><dd className="mt-0.5 font-semibold text-slate-800">{profile.areas_served!.map((a) => a.name).join(", ")}</dd></div>
+            )}
+          </dl>
+        </section>
+      )}
+
+      {profile.listings && (
+        <section id="listings" aria-labelledby="agent-listings" className="scroll-mt-24 rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm mb-6">
+          <h2 id="agent-listings" className="mb-3 text-lg font-black tracking-tight text-slate-900">{t("listingsTitle", { count: profile.listings.count })}</h2>
+          <AgentListingsGrid userId={id} initial={profile.listings} />
+        </section>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <DirectChatButton

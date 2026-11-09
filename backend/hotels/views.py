@@ -40,11 +40,12 @@ class HotelViewSet(viewsets.ModelViewSet):
             if user.is_authenticated and hasattr(user, "admin_profile"):
                 return Hotel.objects.all().select_related("owner__agent_profile").prefetch_related("room_types", "asset_photos").order_by("-created_at")
             from django.db.models import Q
-            base = Q(verified=True)
+            base = Q(verified=True, deleted_at__isnull=True)
             if user.is_authenticated:
                 base |= Q(owner=user)
             return Hotel.objects.filter(base).select_related("owner__agent_profile").prefetch_related("room_types", "asset_photos").order_by("-created_at")
-        return Hotel.objects.select_related("owner__agent_profile").prefetch_related("room_types", "asset_photos")
+        from trust_safety.report_targets import visible_places
+        return visible_places(Hotel.objects.select_related("owner__agent_profile").prefetch_related("room_types", "asset_photos"), self.request.user)
 
     @extend_schema(request=HotelCreateSerializer, responses={201: HotelSerializer})
     def create(self, request, *args, **kwargs):

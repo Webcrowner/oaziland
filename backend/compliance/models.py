@@ -5,7 +5,19 @@ personal identifying data actually gets scrubbed.
 """
 import uuid
 from django.conf import settings
+from django.core.files.storage import FileSystemStorage
 from django.db import models
+
+
+def private_export_storage():
+    """Data exports hold a person's contact details, ID data and money: they live outside MEDIA_ROOT (which is
+    publicly served) and are only ever handed out by the owner-only download endpoint."""
+    return FileSystemStorage(location=settings.BASE_DIR / "private_media")
+
+
+def export_file_path(instance, filename):
+    # A random name, so a file can never be found from a (public) user id.
+    return f"data_exports/{uuid.uuid4().hex}.json"
 
 
 class ConsentType(models.TextChoices):
@@ -68,18 +80,21 @@ class DataExportRequestStatus(models.TextChoices):
     PENDING = "PENDING", "Pending"
     READY = "READY", "Ready"
     FAILED = "FAILED", "Failed"
+    EXPIRED = "EXPIRED", "Expired"
 
 
 class DataExportRequest(models.Model):
     """A user's 'download all my data' request — the actual right-of-
     access mechanism. export_file holds a real generated JSON file, not
-    a promise of one."""
+    a promise of one. The file is private and deleted once expires_at passes."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="data_export_requests")
     status = models.CharField(max_length=10, choices=DataExportRequestStatus.choices, default=DataExportRequestStatus.PENDING)
-    export_file = models.FileField(upload_to="data_exports/", null=True, blank=True)
+    export_file = models.FileField(upload_to=export_file_path, storage=private_export_storage, null=True, blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    downloaded_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "data_export_requests"

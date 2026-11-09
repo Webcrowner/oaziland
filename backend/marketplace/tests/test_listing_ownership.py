@@ -137,12 +137,12 @@ def test_the_full_edit_form_payload_can_change_and_clear_every_field(quarter):
     }, format="json")
     assert car.status_code == 201, car.data
     edited = client.patch(f"/api/cars/{car.data['id']}/", {
-        "title": "Corolla LE", "description": "Clean", "price_xaf": "3900000", "price_basis": "RENT_MONTHLY", "quarter": None,
+        "title": "Corolla LE", "description": "Clean", "price_xaf": "39000", "price_basis": "RENT_NIGHTLY", "quarter": None,
         "vehicle_spec": {"make": "Toyota", "model": "Corolla", "year": 2013, "mileage_km": None, "engine_size_cc": None},
     }, format="json")
     assert edited.status_code == 200, edited.data
     saved = CarListing.objects.get(pk=car.data["id"])
-    assert (saved.price_basis, saved.quarter_id, saved.vehicle_spec.year) == ("RENT_MONTHLY", None, 2013)
+    assert (saved.price_basis, saved.quarter_id, saved.vehicle_spec.year) == ("RENT_NIGHTLY", None, 2013)
     assert saved.vehicle_spec.mileage_km is None and saved.vehicle_spec.engine_size_cc is None
 
     business = client.post("/api/businesses/", {

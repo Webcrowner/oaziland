@@ -9,7 +9,12 @@ import {
 import AssetDetailView from "@/components/AssetDetailView";
 import MarketplaceBuyBox from "@/components/MarketplaceBuyBox";
 import FavoriteButton from "@/components/FavoriteButton";
-import ReportListingButton from "@/components/ReportListingButton";
+import ReportContentButton from "@/components/ReportContentButton";
+import HideForOwner from "@/components/HideForOwner";
+import CarRentalBox from "@/components/CarRentalBox";
+import { CarSpecSheet } from "@/components/CarSpecSheet";
+import SimilarMarketplaceListings from "@/components/SimilarMarketplaceListings";
+import SellerTrustCard from "@/components/SellerTrustCard";
 
 const CATEGORIES: MarketplaceCategory[] = ["warehouses", "stores", "businesses", "cars", "goods"];
 const SHARE_TITLES: Record<MarketplaceCategory, string> = { warehouses: "warehouse", stores: "store", businesses: "business", cars: "car", goods: "item" };
@@ -52,15 +57,18 @@ export default async function MarketplaceDetailPage({
   params, searchParams,
 }: {
   params: Promise<{ locale: string; category: string; id: string }>;
-  searchParams: Promise<{ mediaFailed?: string }>;
+  searchParams: Promise<{ mediaFailed?: string; conditionsFailed?: string }>;
 }) {
   const { category, id } = await params;
-  const mediaFailed = Number((await searchParams).mediaFailed) || 0;
+  const query = await searchParams;
+  const mediaFailed = Number(query.mediaFailed) || 0;
+  const conditionsFailed = query.conditionsFailed === "1";
   if (!CATEGORIES.includes(category as MarketplaceCategory)) notFound();
   const cat = category as MarketplaceCategory;
 
   const t = await getTranslations("AssetDetail");
   const tg = await getTranslations("MarketplaceGoods");
+  const tc = await getTranslations("MarketplaceConditions");
   const listing = await getListing(cat, id).catch(() => null);
   if (!listing) notFound();
   const conditionItems = await getListingConditions(MARKETPLACE_CONDITION_TARGETS[cat], id).catch(() => []);
@@ -84,11 +92,17 @@ export default async function MarketplaceDetailPage({
   if (listing.size_sqm) facts.push({ label: "m²", value: String(listing.size_sqm) });
   if (listing.frontage_meters) facts.push({ label: t("frontage"), value: `${listing.frontage_meters} m` });
   if (listing.seating_capacity) facts.push({ label: t("seats"), value: String(listing.seating_capacity) });
-  if (listing.vehicle_spec) {
-    const v = listing.vehicle_spec;
+  const tcar = await getTranslations("CarListing");
+  const car = cat === "cars" && listing.vehicle_spec ? (listing as unknown as CarListing) : null;
+  const isDailyCar = car !== null && listing.price_basis === "RENT_NIGHTLY";
+  if (car) {
+    const v = car.vehicle_spec;
+    // Headline facts, like the strip under a car title on AutoTrader; the full spec sheet follows below.
     facts.push({ label: `${v.make} ${v.model}`, value: String(v.year) });
-    if (v.mileage_km) facts.push({ label: "km", value: v.mileage_km.toLocaleString() });
-    if (v.engine_size_cc) facts.push({ label: "cc", value: String(v.engine_size_cc) });
+    if (v.mileage_km != null) facts.push({ label: "km", value: v.mileage_km.toLocaleString() });
+    if (v.fuel_type) facts.push({ label: tcar("fuelType"), value: tcar(`fuel_${v.fuel_type}`) });
+    if (v.transmission) facts.push({ label: tcar("transmission"), value: tcar(`trans_${v.transmission}`) });
+    if (v.vehicle_condition) facts.push({ label: tcar("condition"), value: tcar(`cond_${v.vehicle_condition}`) });
   }
 
   const extras: string[] = [];
@@ -102,7 +116,11 @@ export default async function MarketplaceDetailPage({
   const payTotal = (Number(listing.price_xaf) + depositValue).toLocaleString();
   if (depositValue > 0) conditionRows.unshift({ primary: t("condSecurityDeposit", { amount: depositValue.toLocaleString() }), secondary: t("condSecurityDepositNote") });
   const basisKey = PRICE_BASIS_KEYS[listing.price_basis];
-  const statusNote = listing.availability_status === "UNDER_OFFER" ? t("listingUnderOffer") : listing.availability_status === "UNAVAILABLE" ? t("listingUnavailable") : "";
+  const priceSuffix = isDailyCar ? tcar("perDay") : basisKey ? t(basisKey) : "";
+  const negotiable = car !== null && listing.price_basis === "SALE" && car.price_negotiable;
+  // An expired listing can still be opened from a link or a chat, but can't be bought or booked until it's renewed.
+  const availability = listing.is_expired ? "UNAVAILABLE" : listing.availability_status;
+  const statusNote = listing.is_expired ? t("listingExpired") : listing.availability_status === "UNDER_OFFER" ? t("listingUnderOffer") : listing.availability_status === "UNAVAILABLE" ? t("listingUnavailable") : "";
   const media = listing.media.map((m) => ({ id: m.id, url: m.file_url, media_type: m.media_type, is_primary: m.order === 0 }));
   const structuredData = {
     "@context": "https://schema.org",
@@ -127,6 +145,11 @@ export default async function MarketplaceDetailPage({
           {t("mediaFailed", { count: mediaFailed })}
         </p>
       )}
+      {conditionsFailed && (
+        <p role="alert" className="mx-auto mt-4 max-w-6xl rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {tc("savedWithoutConditions")}
+        </p>
+      )}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
@@ -147,7 +170,10 @@ export default async function MarketplaceDetailPage({
         facts={facts}
         sectionTitle={t("conditions")}
         rows={conditionRows}
-        priceText={`${price} XAF${basisKey ? ` · ${t(basisKey)}` : ""}${statusNote ? ` · ${statusNote}` : ""}`}
+        priceText={`${price} XAF${priceSuffix ? ` · ${priceSuffix}` : ""}${negotiable ? ` · ${tcar("negotiable")}` : ""}${statusNote ? ` · ${statusNote}` : ""}`}
+        detailsSlot={car ? <CarSpecSheet car={car} /> : undefined}
+        listingChat={{ category: cat, id: listing.id, isSale: listing.price_basis === "SALE" }}
+        sellerSlot={<SellerTrustCard sellerId={listing.lister_user} listerRole={listing.lister_role} isSale={listing.price_basis === "SALE"} />}
         latitude={listing.latitude}
         longitude={listing.longitude}
         sharePath={`/marketplace/${cat}/${listing.id}`}
@@ -156,19 +182,29 @@ export default async function MarketplaceDetailPage({
         assetId={listing.id}
         actionSlot={
           <div className="flex flex-col gap-3">
+            {isDailyCar && car ? (
+              <CarRentalBox car={{
+                id: car.id, ownerId: car.lister_user, availability, driverOption: car.driver_option ?? "SELF_DRIVE",
+                deliveryAvailable: Boolean(car.delivery_available), minDriverAge: car.min_driver_age ?? null, minLicenceYears: car.min_licence_years ?? null, instantBook: car.instant_book ?? true,
+              }} />
+            ) : (
             <MarketplaceBuyBox
               category={cat}
               listingId={listing.id}
               ownerId={listing.lister_user}
-              availability={listing.availability_status}
+              availability={availability}
               isSale={listing.price_basis === "SALE"}
               amount={payTotal}
             />
-            <FavoriteButton listingId={listing.id} variant="detail" />
-            <ReportListingButton listingId={listing.id} />
+            )}
+            <HideForOwner ownerId={listing.lister_user}>
+              <FavoriteButton listingId={listing.id} variant="detail" />
+              <ReportContentButton kind="listing" id={listing.id} />
+            </HideForOwner>
           </div>
         }
       />
+      <SimilarMarketplaceListings category={cat} id={listing.id} />
     </>
   );
 }

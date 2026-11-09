@@ -43,6 +43,8 @@ export default async function VenueDetailPage({ params }: { params: Promise<{ id
       latitude={venue.latitude}
       longitude={venue.longitude}
       sharePath={`/events/${venue.id}`}
+      report={{ kind: "venue", id: String(venue.id) }}
+      reviews={{ kind: "venue", id: String(venue.id) }}
       mediaEndpoint="venues"
       assetId={venue.id}
       sharePrice={cheapest !== null ? cheapest.toLocaleString() : undefined}

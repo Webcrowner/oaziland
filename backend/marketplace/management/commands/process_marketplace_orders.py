@@ -5,6 +5,7 @@ docker-compose.yml runs it from the `scheduler` service.
 """
 from django.core.management.base import BaseCommand
 from marketplace.services import process_marketplace_orders
+from marketplace.engagement import remind_expiring_listings
 
 
 class Command(BaseCommand):
@@ -12,8 +13,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         result = process_marketplace_orders()
+        reminded = remind_expiring_listings()
         self.stdout.write(self.style.SUCCESS(
             f"Expired {len(result['expired'])} pending payment(s); Refunded {len(result['refunded'])} "
             f"unfulfilled order(s); released {len(result['released'])} unconfirmed order(s); "
-            f"relisted {len(result['relisted'])} ended rental(s); returned {len(result['deposits_returned'])} unclaimed deposit(s)."
+            f"relisted {len(result['relisted'])} ended rental(s); returned {len(result['deposits_returned'])} unclaimed deposit(s); "
+            f"reminded {len(reminded)} lister(s) of expiring listings."
         ))

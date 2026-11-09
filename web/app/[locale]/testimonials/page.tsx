@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { listTestimonials } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
+import ReportContentButton from "@/components/ReportContentButton";
 import type { Metadata } from "next";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -32,11 +33,14 @@ export default async function TestimonialsPage() {
         <EmptyState icon="💬" title={t("noTestimonialsYet")} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {data.results.map((testimonial, i) => (
-            <div key={i} className="border rounded-lg p-5 bg-white">
+          {data.results.map((testimonial) => (
+            <div key={testimonial.id} className="border rounded-lg p-5 bg-white">
               <p className="text-[var(--gold)] mb-2">{"★".repeat(testimonial.score)}</p>
               <p className="text-gray-700 italic mb-3">&ldquo;{testimonial.text}&rdquo;</p>
-              <p className="text-sm font-semibold text-[var(--navy)]">{testimonial.author_name}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-[var(--navy)]">{testimonial.author_name}</p>
+                <ReportContentButton kind="review" id={String(testimonial.id)} ownerId={testimonial.author_id} variant="inline" />
+              </div>
             </div>
           ))}
         </div>

@@ -247,14 +247,22 @@ export default function UserPublicIndexPage() {
                 <p className="text-xs text-slate-500 font-mono mt-0.5">@{profile.username}</p>
 
                 <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                  {profile.roles.map((r) => (
-                    <span
-                      key={r}
-                      className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-700"
-                    >
-                      {roleLabels[r] || r}
-                    </span>
-                  ))}
+                  {profile.roles.map((r) => {
+                    const verifiedRole = profile.verified_roles?.includes(r);
+                    return (
+                      <span
+                        key={r}
+                        className={
+                          verifiedRole
+                            ? "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : "px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-700"
+                        }
+                      >
+                        {verifiedRole && <IconShieldCheck size={11} className="text-emerald-600" />}
+                        {roleLabels[r] || r}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             </div>

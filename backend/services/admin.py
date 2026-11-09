@@ -1,19 +1,9 @@
-from django.contrib import admin
+from oaziland.admin_base import register
 
 from .models import ServiceRequest, ServiceReview
 
-
-@admin.register(ServiceReview)
-class ServiceReviewAdmin(admin.ModelAdmin):
-    list_display = ("service_request", "author", "subject", "subject_is_requester", "score", "created_at")
-    list_filter = ("subject_is_requester",)
-    search_fields = ("author__username", "subject__username", "comment")
-
-
-@admin.register(ServiceRequest)
-class ServiceRequestAdmin(admin.ModelAdmin):
-    # Disputed jobs are reviewed here: filter by status, read dispute_reason.
-    list_display = ("id", "category", "status", "requester", "technician", "quoted_amount_xaf", "requested_at")
-    list_filter = ("status", "category")
-    search_fields = ("id", "requester__username", "technician__username")
-    readonly_fields = ("requested_at", "accepted_at", "en_route_at", "started_at", "completed_at")
+register(ServiceReview, list_display=("service_request_id", "author", "subject", "subject_is_requester", "score", "created_at"),
+         list_filter=("subject_is_requester",), search_fields=("author__username", "subject__username", "comment"))
+# Jobs hold money: view-only here (disputed jobs can be found by status and their dispute reason read).
+register(ServiceRequest, read_only=True, list_display=("id", "category", "status", "requester", "technician", "quoted_amount_xaf", "requested_at"),
+         list_filter=("status", "category"), search_fields=("id", "requester__username", "technician__username"), ordering=("-requested_at",))

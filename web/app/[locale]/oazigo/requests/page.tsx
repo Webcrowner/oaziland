@@ -8,6 +8,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import { IconMapPin, IconChevronRight, IconAlertCircle } from "@/components/Icons";
 import { useOaziGo } from "@/components/oazigo/OaziGoProvider";
 import { cardCls, inputCls, solidBtnCls } from "@/components/oazigo/styles";
+import LuggageDetails from "@/components/oazigo/LuggageDetails";
 
 const RADII = [5, 10, 20, 50];
 const REFRESH_MS = 10_000;
@@ -153,9 +154,9 @@ export default function OaziGoRequestsPage() {
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Badge variant="neutral">{t(`category_${ride.ride_category}`)}</Badge>
                 {ride.transport_type === "CARGO" && <Badge variant="gold">{t("transportCargo")}</Badge>}
-                {ride.has_luggage && <Badge variant="neutral">🧳 {t("hasLuggageLabel")}</Badge>}
                 <span className="text-xs text-slate-500">{t("requestedBy", { name: ride.rider_name })}</span>
               </div>
+              <LuggageDetails ride={ride} />
               {ride.cargo_description && <p className="mt-2 text-xs text-slate-500">{ride.cargo_description}</p>}
               <div className="mt-3 flex flex-col sm:flex-row gap-2">
                 <select

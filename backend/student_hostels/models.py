@@ -248,13 +248,22 @@ class RoomAllocation(models.Model):
     semester = models.ForeignKey(Semester, on_delete=models.CASCADE, related_name="allocations")
     status = models.CharField(max_length=10, choices=RoomAllocationStatus.choices, default=RoomAllocationStatus.ACTIVE)
     allocated_at = models.DateTimeField(auto_now_add=True)
+    allocated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )  # empty when the waitlist engine allocated it
+    ended_at = models.DateTimeField(null=True, blank=True)
+    ended_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    end_reason = models.CharField(max_length=300, blank=True)
 
     class Meta:
         db_table = "room_allocations"
-        # A given bed, in a given semester, can only be allocated to one
-        # student at a time — the actual mechanical prevention of a
-        # double-booked bed.
-        unique_together = [("bed_slot", "semester")]
+        constraints = [
+            # A given bed, in a given semester, can only be held by one student at a time. Only ACTIVE allocations
+            # count: an ended one must not stop the freed bed being given to the next student.
+            models.UniqueConstraint(
+                fields=["bed_slot", "semester"], condition=models.Q(status="ACTIVE"), name="uq_active_bed_per_semester",
+            ),
+        ]
 
 
 class Waitlist(models.Model):

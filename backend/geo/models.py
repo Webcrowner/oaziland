@@ -101,6 +101,11 @@ class AreaSuggestion(models.Model):
     status = models.CharField(max_length=10, choices=AreaSuggestionStatus.choices, default=AreaSuggestionStatus.PENDING)
     created_quarter = models.ForeignKey(Quarter, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=300, blank=True)
 
     class Meta:
         db_table = "area_suggestions"

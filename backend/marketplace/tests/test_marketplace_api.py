@@ -540,6 +540,26 @@ def test_luggage_and_ride_category_are_real_and_reflected_on_the_ride():
 
 
 @pytest.mark.django_db
+def test_riders_can_describe_and_photograph_their_luggage_and_drivers_see_it(settings):
+    rider = _verify(User.objects.create(username="ride_bags_rider", phone="+237699888815"))
+    photo = f"{settings.BACKEND_BASE_URL.rstrip('/')}/media/luggage/bag.jpg"
+    body = {
+        "pickup_description": "Airport", "dropoff_description": "Hotel", "distance_km": "12", "has_luggage": True,
+        "luggage_count": 2, "luggage_size": "LARGE", "luggage_photo_urls": [photo],
+    }
+    response = _auth_client(rider).post("/api/rides/", body, format="json")
+    assert response.status_code == 201, response.data
+    assert (response.data["luggage_count"], response.data["luggage_size"], response.data["luggage_photo_urls"]) == (2, "LARGE", [photo])
+
+    # Pictures must come from Oaziland's own uploads, at most three, and details are dropped without luggage.
+    assert _auth_client(rider).post("/api/rides/", {**body, "luggage_photo_urls": ["https://evil.example/x.jpg"]}, format="json").status_code == 400
+    assert _auth_client(rider).post("/api/rides/", {**body, "luggage_photo_urls": [photo] * 4}, format="json").status_code == 400
+    assert _auth_client(rider).post("/api/rides/", {**body, "luggage_size": "HUGE"}, format="json").status_code == 400
+    no_bags = _auth_client(rider).post("/api/rides/", {**body, "has_luggage": False}, format="json")
+    assert no_bags.status_code == 201 and no_bags.data["luggage_photo_urls"] == [] and no_bags.data["luggage_count"] is None
+
+
+@pytest.mark.django_db
 def test_moto_and_comfort_fares_are_genuinely_different_not_one_formula_for_everyone():
     rider = _verify(User.objects.create(username="ride_fare_rider", phone="+237699888814"))
     moto_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "10", "ride_category": "MOTO"})

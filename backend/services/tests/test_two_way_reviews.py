@@ -11,6 +11,11 @@ from services.models import ServiceCategory, ServiceRequest, ServiceRequestStatu
 SITE = {"latitude": "3.8481234", "longitude": "11.5021234"}
 
 
+def _no_id(review):
+    # Each review payload carries its id (so it can be reported); the tests compare the rest.
+    return {key: value for key, value in review.items() if key != "id"}
+
+
 def _client(user):
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(user).access_token}")
@@ -49,7 +54,7 @@ def test_technician_can_review_the_client_and_comments_are_stored(parties):
     assert response.status_code == 200, response.data
     review = ServiceReview.objects.get(service_request=job, author=technician)
     assert review.subject == requester and review.subject_is_requester and review.comment.startswith("Paid on time")
-    assert response.data["my_review"] == {"score": 4.0, "comment": "Paid on time, clear instructions"}
+    assert _no_id(response.data["my_review"]) == {"score": 4.0, "comment": "Paid on time, clear instructions"}
     assert Notification.objects.filter(recipient=requester, notification_type="SERVICE_REQUEST_REVIEWED").exists()
 
 
@@ -78,8 +83,8 @@ def test_reviews_are_hidden_until_the_other_party_has_reviewed(parties):
     assert _detail(requester, job)["their_review"] is None  # requester has not reviewed yet
 
     _rate(requester, job, "rate", "5.0", "Great work")
-    assert _detail(requester, job)["their_review"] == {"score": 2.0, "comment": "Kept changing the job"}
-    assert _detail(technician, job)["their_review"] == {"score": 5.0, "comment": "Great work"}
+    assert _no_id(_detail(requester, job)["their_review"]) == {"score": 2.0, "comment": "Kept changing the job"}
+    assert _no_id(_detail(technician, job)["their_review"]) == {"score": 5.0, "comment": "Great work"}
 
 
 @pytest.mark.django_db

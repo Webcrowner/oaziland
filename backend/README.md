@@ -47,6 +47,36 @@ subscription tiers.
 structure (the actual AI call is still a placeholder — see below), and a
 warning/strike system with auto-incrementing strike numbers.
 
+## Running the API locally (listings, bookings, marketplace orders)
+
+```bash
+pip install -r requirements.txt     # includes the `redis` client package
+python manage.py migrate
+python manage.py runserver 8000
+```
+
+Anything that takes a payment — marketplace orders, bookings — needs two things
+that browsing and posting do not:
+
+- **A Redis server** on `REDIS_URL` (default `redis://localhost:6379/0`), used for
+  the booking/order reservation lock. The quickest way is `docker compose up redis`
+  from the project root. Without it, placing an order answers
+  `503 Payments are temporarily unavailable` (and the listing is left available).
+- **A payment gateway that accepts your calls.** Set `PAYMENT_GATEWAY_PROVIDER=SANDBOX`
+  in `.env` for a built-in stand-in that always succeeds, or use real Fapshi
+  credentials with direct-pay activated on the account (otherwise Fapshi answers 403
+  and the order fails with "The payment could not be completed").
+
+With the sandbox gateway an order starts as `PAYMENT_PENDING`; confirm the payment by
+posting the provider callback to `/api/webhooks/payment/`:
+
+```json
+{"externalId": "<the booking's idempotency_key>", "transId": "TEST-1", "status": "SUCCESSFUL"}
+```
+
+Run the marketplace tests with `python -m pytest marketplace`. They use an in-memory
+lock and the sandbox gateway, so they need neither Redis nor gateway credentials.
+
 ## What's still a placeholder, not real
 
 - **AI moderation**: the data structure exists and is tested, but no real

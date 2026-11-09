@@ -167,10 +167,13 @@ def process_waitlist_for_freed_unit(unit, semester):
     """When a unit frees up, auto-allocates it to the top-priority
     waitlisted student (if any) and marks their waitlist entry
     fulfilled — the 'auto-reallocation engine' from the spec."""
-    from .models import Waitlist
+    from .models import RoomAllocation, RoomAllocationStatus, Waitlist
     from django.utils import timezone
 
     ranked = rank_waitlist_for_unit_type(hostel=unit.building.studenthostel, desired_unit_type=unit.unit_type, semester=semester)
+    # A student who already holds a room this semester (given one by hand meanwhile) is skipped, not double-housed.
+    housed = set(RoomAllocation.objects.filter(semester=semester, status=RoomAllocationStatus.ACTIVE).values_list("student_id", flat=True))
+    ranked = [entry for entry in ranked if entry.student_id not in housed]
     if not ranked:
         return None
 
@@ -178,7 +181,20 @@ def process_waitlist_for_freed_unit(unit, semester):
     allocation = allocate_room(student=top_entry.student, unit=unit, semester=semester)
     top_entry.fulfilled_at = timezone.now()
     top_entry.save(update_fields=["fulfilled_at"])
+    _notify_student(
+        top_entry.student, "You have a room",
+        f"A place in {unit.room_code} is now yours for {semester.name}.", allocation,
+    )
     return allocation
+
+
+def _notify_student(student, title: str, message: str, allocation) -> None:
+    import logging
+    from notifications.services import notify
+    try:
+        notify(recipient=student, notification_type="ROOM_ALLOCATION", channel="IN_APP", title=title, message=message, related_reference=str(allocation.id))
+    except Exception:
+        logging.getLogger(__name__).exception("Could not tell %s about allocation %s", student.pk, allocation.pk)
 
 
 def join_hostel_waitlist(*, student, hostel, desired_unit_type, semester):
@@ -194,17 +210,26 @@ def join_hostel_waitlist(*, student, hostel, desired_unit_type, semester):
     return entry
 
 
-def end_room_allocation(allocation):
+def end_room_allocation(allocation, *, by=None, reason: str = ""):
     """Frees a unit at semester-end/early-checkout and immediately runs
     the auto-reallocation engine against anyone waiting for that exact
     unit type — closing the loop between 'a unit becomes free' and
     'the top-priority waitlisted student gets it automatically', per
     the spec. Warden/admin-initiated, mirroring the rest of room
-    allocation being deliberately not self-service."""
+    allocation being deliberately not self-service. Returns the ended
+    allocation; `allocation.reallocated_to` is the waitlist allocation it
+    triggered, if any."""
+    from django.utils import timezone
     from .models import RoomAllocationStatus
     allocation.status = RoomAllocationStatus.ENDED
-    allocation.save(update_fields=["status"])
-    process_waitlist_for_freed_unit(allocation.unit, allocation.semester)
+    allocation.ended_at = timezone.now()
+    allocation.ended_by = by
+    allocation.end_reason = (reason or "").strip()[:300]
+    allocation.save(update_fields=["status", "ended_at", "ended_by", "end_reason"])
+    try:
+        allocation.reallocated_to = process_waitlist_for_freed_unit(allocation.unit, allocation.semester)
+    except NoAvailableUnitError:
+        allocation.reallocated_to = None
     return allocation
 
 

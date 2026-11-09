@@ -52,6 +52,11 @@ function fetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Respon
 // the chat widget so an expired token mid-conversation doesn't dead-end
 // with a raw "Given token not valid for any token type" error.
 export async function refreshAccessToken(): Promise<string> {
+  // A staff session can't be refreshed: when it runs out, go back to the staff member's own account.
+  if (localStorage.getItem(STAFF_SESSION_KEY)) {
+    endStaffSession();
+    throw new Error("Your staff session has ended.");
+  }
   const refreshToken = localStorage.getItem("refresh_token");
   if (!refreshToken) throw new Error("Your session has expired — please sign in again.");
 
@@ -65,6 +70,100 @@ export async function refreshAccessToken(): Promise<string> {
   const data = await res.json();
   localStorage.setItem("access_token", data.access);
   return data.access;
+}
+
+// ---------------------------------------------------------------------------
+// Staff access: an owner lets someone help on their account; the helper switches into a staff session.
+// While it lasts, the site's normal "access_token" is the staff-session token (so every page works as the owner,
+// within the limits) and the helper's own tokens wait under STAFF_SAVED_KEY.
+// ---------------------------------------------------------------------------
+export const STAFF_SESSION_KEY = "staff_session";
+const STAFF_SAVED_KEY = "staff_saved_tokens";
+export const STAFF_SESSION_EVENT = "oaziland-staff-session";
+
+export type StaffPermission = "listings" | "messages" | "bookings" | "posts" | "reviews" | "earnings_view";
+export const STAFF_PERMISSIONS: StaffPermission[] = ["listings", "messages", "bookings", "posts", "reviews", "earnings_view"];
+
+export interface StaffPerson { id: string; username: string; name: string; profile_image_url: string }
+export interface StaffGrant {
+  id: string;
+  owner: StaffPerson;
+  staff: StaffPerson;
+  title: string;
+  permissions: StaffPermission[];
+  status: "PENDING" | "ACTIVE" | "DECLINED" | "REVOKED";
+  expires_on: string | null;
+  invited_at: string;
+  accepted_at: string | null;
+  ended_at: string | null;
+  usable: boolean;
+  i_am_owner: boolean;
+}
+export interface StaffSessionInfo { grantId: string; ownerName: string; ownerUsername: string; title: string; permissions: StaffPermission[]; expiresAt: number }
+
+export function currentStaffSession(): StaffSessionInfo | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const info = JSON.parse(localStorage.getItem(STAFF_SESSION_KEY) || "null") as StaffSessionInfo | null;
+    return info && info.expiresAt > Date.now() ? info : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Leaves a staff session and puts the helper's own sign-in back. */
+export function endStaffSession() {
+  const saved = localStorage.getItem(STAFF_SAVED_KEY);
+  if (saved) {
+    try {
+      const { access, refresh } = JSON.parse(saved) as { access: string; refresh: string };
+      localStorage.setItem("access_token", access);
+      if (refresh) localStorage.setItem("refresh_token", refresh);
+    } catch {
+      localStorage.removeItem("access_token");
+    }
+  }
+  localStorage.removeItem(STAFF_SAVED_KEY);
+  localStorage.removeItem(STAFF_SESSION_KEY);
+  window.dispatchEvent(new Event(STAFF_SESSION_EVENT));
+}
+
+async function staffCall<T>(path: string, accessToken: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/staff-access/${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}`, ...(init.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiStatusError(data.detail || "Something went wrong. Please try again.", res.status);
+  return data as T;
+}
+
+export const getStaffOverview = (accessToken: string) =>
+  staffCall<{ can_have_staff: boolean; my_staff: StaffGrant[]; i_help: StaffGrant[] }>("", accessToken);
+
+export const inviteStaff = (body: { identifier: string; permissions: StaffPermission[]; title?: string; expires_on?: string | null }, accessToken: string) =>
+  staffCall<StaffGrant>("", accessToken, { method: "POST", body: JSON.stringify(body) });
+
+export const staffAction = (
+  grantId: string, action: "update" | "remove" | "accept" | "decline" | "leave", accessToken: string,
+  body?: { permissions?: StaffPermission[]; title?: string; expires_on?: string | null },
+) => staffCall<StaffGrant>(`${grantId}/${action}/`, accessToken, { method: "POST", body: JSON.stringify(body ?? {}) });
+
+export const getStaffActivity = (grantId: string, accessToken: string) =>
+  staffCall<{ results: { method: string; path: string; status_code: number; at: string }[] }>(`${grantId}/activity/`, accessToken);
+
+/** Switches this browser into "Managing: <owner>". */
+export async function startStaffSession(grantId: string, accessToken: string): Promise<StaffSessionInfo> {
+  const data = await staffCall<StaffGrant & { access: string; expires_in: number }>(`${grantId}/switch/`, accessToken, { method: "POST" });
+  const info: StaffSessionInfo = {
+    grantId, ownerName: data.owner.name, ownerUsername: data.owner.username, title: data.title, permissions: data.permissions,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
+  localStorage.setItem(STAFF_SAVED_KEY, JSON.stringify({ access: accessToken, refresh: localStorage.getItem("refresh_token") || "" }));
+  localStorage.setItem("access_token", data.access);
+  localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(info));
+  window.dispatchEvent(new Event(STAFF_SESSION_EVENT));
+  return info;
 }
 
 async function fetchWithAutoRefresh(url: string, init: RequestInit, accessToken: string): Promise<Response> {
@@ -94,6 +193,104 @@ export interface UserProfile {
   is_student: boolean;
   is_technician: boolean;
   is_driver: boolean;
+}
+
+export interface MyVerificationRequest {
+  id: string;
+  request_type: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  submitted_at: string;
+  reviewed_at: string | null;
+  rejection_reason: string;
+  supporting_document_url: string;
+  subject: { kind: string; title: string; found: boolean };
+}
+
+export interface MyVerificationOption {
+  request_type: string;
+  subject_id: string;
+  title: string;
+  /** Latest request's status for this, or "" if never asked. */
+  status: "" | "PENDING" | "APPROVED" | "REJECTED";
+}
+
+export async function getMyVerificationRequests(
+  accessToken: string
+): Promise<{ count: number; results: MyVerificationRequest[]; options: MyVerificationOption[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/verification-requests/`, {
+    headers: { Authorization: "Bearer " + accessToken },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Verification requests fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function submitMyVerificationRequest(
+  body: { request_type: string; subject_id: string; supporting_document_url: string },
+  accessToken: string
+) {
+  return fetch(`${API_BASE_URL}/api/verification-requests/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + accessToken },
+    body: JSON.stringify(body),
+  });
+}
+
+export interface MyDataExport {
+  id: string;
+  status: "PENDING" | "READY" | "FAILED" | "EXPIRED";
+  requested_at: string;
+  completed_at: string | null;
+  expires_at: string | null;
+  downloaded_at: string | null;
+  downloadable: boolean;
+}
+
+export interface MyAccountDeletion {
+  status: "NONE" | "REQUESTED" | "CANCELLED" | "COMPLETED" | "RETENTION_PERIOD";
+  requested_at: string | null;
+  scheduled_for: string | null;
+  cancelled_at: string | null;
+  cancelled_by_team: boolean;
+  cancellation_reason: string;
+  retention_days: number;
+  /** What the user must type to confirm a deletion (their username). */
+  confirmation_text: string;
+  /** wallet_balance, pending_withdrawal, held_payment, open_dispute, open_sale */
+  blockers: string[];
+}
+
+export async function listMyDataExports(accessToken: string): Promise<{ count: number; results: MyDataExport[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/data-exports/`, { headers: bearer(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Data exports fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function requestMyDataExport(accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/data-exports/`, { method: "POST", headers: bearer(accessToken) });
+}
+
+/** Downloads one of the caller's exports through the authenticated endpoint (there is no public file URL). */
+export async function downloadMyDataExport(id: string, accessToken: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE_URL}/api/data-exports/${id}/download/`, { headers: bearer(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  return res.blob();
+}
+
+export async function getMyAccountDeletion(accessToken: string): Promise<MyAccountDeletion> {
+  const res = await fetch(`${API_BASE_URL}/api/account/deletion/`, { headers: bearer(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Deletion status fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function requestMyAccountDeletion(password: string, reason: string, confirmation: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/account/deletion/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...bearer(accessToken) }, body: JSON.stringify({ password, reason, confirmation }),
+  });
+}
+
+export async function cancelMyAccountDeletion(accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/account/deletion/`, { method: "DELETE", headers: bearer(accessToken) });
 }
 
 export async function getMyProfile(accessToken: string): Promise<UserProfile> {
@@ -1276,13 +1473,15 @@ export async function respondToWantedListing(
   return json;
 }
 
-export interface AgentPublicProfile {
+export interface AgentPublicProfile extends Partial<AgentProfileDetails> {
   full_name: string;
   is_kyc_verified: boolean;
   average_rating: number | null;
   rating_count: number;
   active_listing_count: number;
   agency_name: string | null;
+  profile_image_url?: string;
+  listings?: { count: number; results: AgentListingCard[]; next_offset: number | null };
 }
 
 export async function getAgentPublicProfile(userId: string): Promise<AgentPublicProfile> {
@@ -1396,6 +1595,8 @@ export interface UserRoleIndexProfile {
   profile_image_url?: string;
   phone: string;
   roles: string[];
+  /** Professional roles (agent, agency, landlord) an admin has verified. */
+  verified_roles?: string[];
   is_kyc_verified: boolean;
   average_rating: number | null;
   rating_count: number;
@@ -1594,6 +1795,69 @@ export async function fileReportAgainstListing(listingId: string, reason: string
   return data;
 }
 
+/** Everything a report can be about. "listing" is a property or marketplace listing. */
+export type ReportKind =
+  | "listing" | "hotel" | "guest_house" | "venue" | "student_hostel" | "job_posting" | "comment"
+  | "review" | "service_review" | "hostel_review" | "venue_review" | "caterer_review" | "agent_video";
+
+export async function fileContentReport(kind: ReportKind, id: string, reason: string, notes: string, accessToken: string) {
+  const target = kind === "listing" ? { target_listing_id: id } : { target_kind: kind, target_id: id };
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ ...target, reason, notes }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not submit report");
+  return data;
+}
+
+export type PlaceReviewKind = "hostel" | "venue";
+
+export interface PlaceReview {
+  id: string;
+  author_id: string;
+  author_name: string;
+  score: number;
+  text: string;
+  created_at: string;
+  /** Hostel: the room type the student had. Venue: the date of the event. */
+  detail: string;
+  is_mine: boolean;
+}
+
+export interface PlaceReviews {
+  count: number;
+  average: number | null;
+  results: PlaceReview[];
+  can_review: boolean;
+  /** Why the viewer can't write one: sign_in, own_place, already_reviewed, no_stay or no_event. */
+  cannot_review_reason: string;
+}
+
+const placeReviewsUrl = (kind: PlaceReviewKind, id: string) =>
+  `${API_BASE_URL}/api/${kind === "hostel" ? "student-hostels" : "venues"}/${id}/reviews/`;
+
+export async function getPlaceReviews(kind: PlaceReviewKind, id: string, accessToken?: string | null): Promise<PlaceReviews> {
+  const res = await fetch(placeReviewsUrl(kind, id), {
+    cache: "no-store",
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!res.ok) throw new Error(`Reviews fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function addPlaceReview(kind: PlaceReviewKind, id: string, score: number, text: string, accessToken: string): Promise<PlaceReviews> {
+  const res = await fetch(placeReviewsUrl(kind, id), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ score, text }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not save your review");
+  return data;
+}
+
 export async function setupMfa(mfaType: "SMS_OTP" | "EMAIL_OTP", destination: string, accessToken: string) {
   const res = await fetch(`${API_BASE_URL}/api/auth/mfa/setup/`, {
     method: "POST",
@@ -1670,20 +1934,96 @@ export async function getMyPartnerServiceRequests(accessToken: string): Promise<
   return res.json();
 }
 
+export type AgentSpecialty = "RENTALS" | "SALES" | "LAND" | "COMMERCIAL" | "STUDENT_HOUSING" | "SHORT_STAY" | "PROPERTY_MANAGEMENT";
+export type AgentLanguage = "EN" | "FR" | "PIDGIN" | "FULFULDE" | "EWONDO" | "DUALA" | "OTHER";
+export const AGENT_SPECIALTIES: AgentSpecialty[] = ["RENTALS", "SALES", "LAND", "COMMERCIAL", "STUDENT_HOUSING", "SHORT_STAY", "PROPERTY_MANAGEMENT"];
+export const AGENT_LANGUAGES: AgentLanguage[] = ["EN", "FR", "PIDGIN", "FULFULDE", "EWONDO", "DUALA", "OTHER"];
+
+export interface AgentListingCard {
+  id: string;
+  listing_type: string;
+  price_xaf: string;
+  property_type: string;
+  quarter_name: string;
+  photo_url: string;
+  path: string;
+}
+
+export interface AgentProfileDetails {
+  bio: string;
+  years_experience: number | null;
+  specialties: AgentSpecialty[];
+  languages: AgentLanguage[];
+  areas_served: { id: string; name: string }[];
+  intro_video_url: string;
+  intro_video_seconds: number | null;
+}
+
 export interface AgentDirectoryEntry {
   user_id: string;
   full_name: string;
+  profile_image_url: string;
   is_kyc_verified: boolean;
   average_rating: number | null;
   rating_count: number;
   active_listing_count: number;
   agency_name: string | null;
+  listing_preview: AgentListingCard[];
+  has_intro_video: boolean;
+  bio: string;
+  years_experience: number | null;
+  specialties: AgentSpecialty[];
+  languages: AgentLanguage[];
+  areas_served: { id: string; name: string }[];
 }
 
-export async function listAgents(): Promise<{ count: number; results: AgentDirectoryEntry[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/agents/`, { cache: "no-store" });
+export interface AgentDirectoryFilters {
+  q?: string;
+  quarter?: string;
+  specialty?: string;
+  language?: string;
+  verified?: boolean;
+  page?: number;
+}
+
+export async function listAgents(filters: AgentDirectoryFilters = {}): Promise<{ count: number; page: number; has_more: boolean; results: AgentDirectoryEntry[] }> {
+  const params = new URLSearchParams();
+  if (filters.q) params.set("q", filters.q);
+  if (filters.quarter) params.set("quarter", filters.quarter);
+  if (filters.specialty) params.set("specialty", filters.specialty);
+  if (filters.language) params.set("language", filters.language);
+  if (filters.verified) params.set("verified", "1");
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/agents/${params.size ? `?${params}` : ""}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Agent directory fetch failed: ${res.status}`);
   return res.json();
+}
+
+export async function listAgentListings(userId: string, offset = 0, limit = 12): Promise<{ count: number; results: AgentListingCard[]; next_offset: number | null }> {
+  const res = await fetch(`${API_BASE_URL}/api/agents/${userId}/listings/?offset=${offset}&limit=${limit}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Agent listings fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getMyAgentProfile(accessToken: string): Promise<AgentProfileDetails> {
+  const res = await fetch(`${API_BASE_URL}/api/my-agent-profile/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiStatusError(data.detail || "Could not load your agent profile", res.status);
+  return data;
+}
+
+export async function updateMyAgentProfile(
+  changes: Partial<Omit<AgentProfileDetails, "areas_served">> & { areas_served?: string[] },
+  accessToken: string,
+): Promise<AgentProfileDetails> {
+  const res = await fetch(`${API_BASE_URL}/api/my-agent-profile/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(changes),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not save your profile");
+  return data;
 }
 
 export interface AgencyDirectoryEntry {
@@ -1737,6 +2077,8 @@ export async function getHomeStats(): Promise<HomeStats> {
 }
 
 export interface Testimonial {
+  id: number;
+  author_id: string;
   author_name: string;
   score: number;
   text: string;
@@ -2252,6 +2594,19 @@ export interface ConversationMessage {
   sent_at: string | null;
   created_at: string;
   tick_status: TickStatus;
+  /** The marketplace listing this message is about, shown as a card; null when none (or it was removed). */
+  listing?: ChatListingCard | null;
+}
+
+export interface ChatListingCard {
+  id: string;
+  category: MarketplaceCategory;
+  title: string;
+  price_xaf: string;
+  price_basis: string;
+  availability_status: string;
+  quarter_name: string | null;
+  photo_url: string | null;
 }
 
 export interface ConversationSummary {
@@ -2279,13 +2634,16 @@ export async function getConversationMessages(conversationId: string, accessToke
   return res.json();
 }
 
-export async function sendConversationMessage(conversationId: string, text: string, accessToken: string): Promise<ConversationMessage> {
+export async function sendConversationMessage(conversationId: string, text: string, accessToken: string, listingId?: string): Promise<ConversationMessage> {
   const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/send/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ text, client_message_id: `web-${Date.now()}-${Math.random().toString(36).slice(2)}` }),
+    body: JSON.stringify({ text, client_message_id: `web-${Date.now()}-${Math.random().toString(36).slice(2)}`, ...(listingId ? { listing_id: listingId } : {}) }),
   });
-  if (!res.ok) throw new Error("Could not send message");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || data.listing_id || "Could not send message");
+  }
   return res.json();
 }
 
@@ -2394,30 +2752,116 @@ export interface AdminConsoleSummary {
   pending_venues?: number;
   pending_drivers?: number;
   open_welfare_alerts?: number;
+  pending_withdrawals?: number;
+  /** Chats handed to a person that no admin has answered yet. */
+  support_tickets_awaiting?: number;
+  /** Contact-form messages nobody has marked as handled. */
+  open_contact_messages?: number;
+  ai_flags_pending?: number;
+  pending_area_suggestions?: number;
+  stuck_payments?: number;
+  scheduled_account_deletions?: number;
+  /** False for limited admins, who cannot grant the admin role or read the audit log. */
+  is_super_admin?: boolean;
   flagged_users_count?: number;
   reports_trend: { current_period_value: number; previous_period_value: number; percent_change: number | null };
   platform_analytics?: AdminPlatformAnalytics;
 }
 
+export type AdminVerificationState = "pending" | "approved" | "rejected" | "all";
+
+export type AdminVerificationFlag =
+  | "subject_missing"
+  | "not_owner"
+  | "no_document"
+  | "insecure_document"
+  | "id_not_verified"
+  | "has_strikes"
+  | "account_restricted"
+  | "previously_rejected"
+  | "role_missing"
+  | "waiting_long";
+
 export interface AdminVerificationRequest {
   id: string;
-  requester: string;
-  requester_name: string;
   request_type: string;
-  subject_content_type: string;
-  subject_id: string;
-  status: string;
-  supporting_document_url: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
   submitted_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string;
+  rejection_reason: string;
+  document: { url: string; host: string } | null;
+  requester: {
+    id: string;
+    name: string;
+    username: string;
+    phone: string;
+    email: string;
+    kyc_status: string;
+    strikes: number;
+    account_status: string;
+    joined_at: string;
+    requests_total: number;
+    requests_approved: number;
+    requests_rejected: number;
+  };
+  /** What is being verified; `found` is false when it no longer exists. */
+  subject: {
+    kind: string;
+    title: string;
+    excerpt: string;
+    owner: { id: string; name: string; username: string } | null;
+    path: string;
+    found: boolean;
+    /** Role details: an agency's registration number and agent count, an agent's agency, a landlord's properties. */
+    facts: Record<string, string | number>;
+  };
+  flags: AdminVerificationFlag[];
+}
+
+export interface AdminCaterer {
+  id: string;
+  name: string;
+  cuisine_type: string;
+  verified: boolean;
+  price_per_head_min_xaf: string;
+  price_per_head_max_xaf: string;
+  rating: number | null;
+  review_count: number;
+}
+
+export async function listAdminCaterers(
+  filters: { state: "pending" | "verified" | "all"; q?: string; page?: number },
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminCaterer[] }> {
+  const params = new URLSearchParams({ state: filters.state });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/caterers/?${params.toString()}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Caterers fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function setAdminCatererVerified(id: string, verified: boolean, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/caterers/${id}/${verified ? "verify" : "unverify"}/`, { method: "POST", headers: adminHeaders(accessToken) });
 }
 
 export interface AdminKycReviewItem {
   id: number;
   username: string;
+  /** The account's own name (may be blank); compare with legal_full_name. */
   full_name: string;
+  phone: string;
+  email: string;
+  date_joined: string;
   legal_full_name: string;
   date_of_birth: string;
+  age: number | null;
   national_id_number: string;
+  /** How many other submissions use the same ID number. */
+  duplicate_id_count: number;
+  /** null when the account has no name to compare against. */
+  name_matches_account: boolean | null;
   id_document_front_image_url: string;
   id_document_back_image_url: string;
   selfie_image_url: string;
@@ -2425,6 +2869,23 @@ export interface AdminKycReviewItem {
   kyc_status: string;
   submitted_at: string;
   reviewed_at: string | null;
+}
+
+export type AdminReportTargetType =
+  | "post" | "video" | "comment" | "user" | "marketplace_listing" | "property_listing" | "listing_deleted" | "unknown"
+  | Exclude<ReportKind, "listing" | "comment"> | "deleted";
+
+/** What a report is about, in plain terms, as described by the admin API. */
+export interface AdminReportTarget {
+  type: AdminReportTargetType;
+  title: string;
+  excerpt: string;
+  author_id: string | null;
+  author_name: string;
+  /** A site path (e.g. /videos/<id>) to open the reported item, or "" when it has no page of its own. */
+  path: string;
+  /** False when the item is already hidden or removed. */
+  available: boolean;
 }
 
 export interface AdminContentReport {
@@ -2436,8 +2897,25 @@ export interface AdminContentReport {
   target_post: string | null;
   target_listing_id: string | null;
   target_comment: string | null;
+  target_user: string | null;
+  target: AdminReportTarget;
   notes: string;
   created_at: string;
+}
+
+export interface AdminDisputePayment {
+  booking_type: string;
+  title: string;
+  /** "deposit" or "balance" when the payment is only part of a larger purchase. */
+  note: string;
+  payer: { id: string; name: string; username: string } | null;
+  payee: { id: string; name: string; username: string } | null;
+  gross_xaf: string;
+  fee_xaf: string;
+  payee_xaf: string;
+  /** What a dispute decision gave back to the payer (all of it for a refund, part of it for a split). */
+  refunded_xaf: string;
+  escrow_status: string;
 }
 
 export interface AdminDisputeCase {
@@ -2450,20 +2928,67 @@ export interface AdminDisputeCase {
   created_at: string;
   response_due_at: string;
   resolution_due_at: string;
+  payment?: AdminDisputePayment;
 }
 
 function adminHeaders(accessToken: string) {
   return { Authorization: `Bearer ${accessToken}` };
 }
 
+/** A failed request that keeps its HTTP status (0 = no response), so callers can tell
+ * "not allowed" (403) apart from "slow down" (429) or "server/network trouble". */
+export class ApiStatusError extends Error {
+  constructor(message: string, public status: number, public retryAfterSeconds: number | null = null) {
+    super(message);
+    this.name = "ApiStatusError";
+  }
+}
+
+/** A one-time link (valid 60 seconds) that signs a full-access admin in to the data admin (/admin/). */
+export async function getDataAdminLink(accessToken: string, next?: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/admin/data-admin-ticket/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(next ? { next } : {}),
+    });
+  } catch {
+    throw new ApiStatusError("Data admin link failed: no response", 0);
+  }
+  if (!res.ok) throw new ApiStatusError(`Data admin link failed: ${res.status}`, res.status);
+  return (await res.json()).url;
+}
+
 export async function getAdminConsoleSummary(accessToken: string): Promise<AdminConsoleSummary> {
-  const res = await fetch(`${API_BASE_URL}/api/admin/console-summary/`, { headers: adminHeaders(accessToken) });
-  if (!res.ok) throw new Error(`Admin summary fetch failed: ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/admin/console-summary/`, { headers: adminHeaders(accessToken) });
+  } catch {
+    throw new ApiStatusError("Admin summary fetch failed: no response", 0);
+  }
+  if (!res.ok) {
+    const retryAfter = Number(res.headers.get("Retry-After"));
+    throw new ApiStatusError(
+      `Admin summary fetch failed: ${res.status}`,
+      res.status,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : null,
+    );
+  }
   return res.json();
 }
 
-export async function listAdminVerificationRequests(accessToken: string): Promise<{ count: number; results: AdminVerificationRequest[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/admin/verification-requests/`, { headers: adminHeaders(accessToken) });
+export async function listAdminVerificationRequests(
+  filters: { state?: AdminVerificationState; type?: string; q?: string; page?: number },
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminVerificationRequest[] }> {
+  const params = new URLSearchParams();
+  if (filters.state && filters.state !== "pending") params.set("state", filters.state);
+  if (filters.type) params.set("type", filters.type);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/admin/verification-requests/${query}`, { headers: adminHeaders(accessToken), cache: "no-store" });
   if (!res.ok) throw new Error(`Verification requests fetch failed: ${res.status}`);
   return res.json();
 }
@@ -2517,10 +3042,48 @@ export async function respondToDispute(id: string, accessToken: string) {
   return fetch(`${API_BASE_URL}/api/admin/dispute-cases/${id}/respond/`, { method: "POST", headers: adminHeaders(accessToken) });
 }
 
-export async function resolveDispute(id: string, outcome: "RELEASE" | "REFUND", notes: string, accessToken: string) {
+export type DisputeOutcome = "RELEASE" | "REFUND" | "SPLIT";
+
+/** SPLIT needs payerAmountXaf: the whole francs that go back to the payer; the payee gets the rest. */
+export async function resolveDispute(id: string, outcome: DisputeOutcome, notes: string, accessToken: string, payerAmountXaf?: number) {
   return fetch(`${API_BASE_URL}/api/admin/dispute-cases/${id}/resolve/`, {
     method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) },
-    body: JSON.stringify({ outcome, notes }),
+    body: JSON.stringify({ outcome, notes, ...(outcome === "SPLIT" ? { payer_amount_xaf: payerAmountXaf } : {}) }),
+  });
+}
+
+export interface AdminWithdrawal {
+  id: string;
+  user: { id: string; username: string; name: string; phone: string; account_status: string };
+  amount_xaf: string;
+  fee_xaf: string;
+  net_amount_xaf: string;
+  status: "PENDING" | "APPROVED" | "PAID_OUT" | "REJECTED";
+  requested_at: string;
+  resolved_at: string | null;
+  phone_number: string;
+  provider: string;
+  wallet_balance_xaf: string;
+  kyc_status: string;
+  paid_out_total_xaf: string;
+  reviewed_by_name: string;
+  rejection_reason: string;
+  payout_reference: string;
+}
+
+export async function listAdminWithdrawals(status: string, accessToken: string): Promise<{ count: number; results: AdminWithdrawal[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/withdrawals/?status=${status}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Withdrawals fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function approveWithdrawal(id: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/withdrawals/${id}/approve/`, { method: "POST", headers: adminHeaders(accessToken) });
+}
+
+export async function rejectWithdrawal(id: string, reason: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/withdrawals/${id}/reject/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ reason }),
   });
 }
 
@@ -2557,6 +3120,568 @@ export interface AdminUser {
   is_technician: boolean;
   is_driver: boolean;
   kyc_status: string | null;
+  /** True for the admin's own row — used to hide actions an admin may not take on themselves. */
+  is_self: boolean;
+}
+
+export interface AdminPricing {
+  fees: { category: string; label: string; fee_percent: string | null }[];
+  boosts: { placement: string; placement_label: string; duration_unit: string; unit_label: string; price_xaf: string | null }[];
+  max_fee_percent: string;
+  max_boost_price_xaf: string;
+}
+
+export async function getAdminPricing(accessToken: string): Promise<AdminPricing> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/pricing/`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Pricing fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function setAdminFeePercent(category: string, feePercent: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/pricing/fees/${category}/`, {
+    method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ fee_percent: feePercent }),
+  });
+}
+
+/** price null stops offering the option. */
+export async function setAdminBoostPrice(placement: string, durationUnit: string, price: string | null, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/pricing/boosts/`, {
+    method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) },
+    body: JSON.stringify({ placement, duration_unit: durationUnit, price_xaf: price }),
+  });
+}
+
+export interface AdminSupportMessage {
+  id: number;
+  sender_type: "USER" | "AI_AGENT" | "HUMAN_AGENT";
+  sender_name: string;
+  text: string;
+  sent_at: string;
+}
+
+export interface AdminSupportTicket {
+  id: string;
+  subject: string;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  ai_handled: boolean;
+  created_at: string;
+  resolved_at: string | null;
+  user: { id: string; username: string; name: string; phone: string; email: string };
+  message_count: number;
+  last_message_at: string | null;
+  last_sender: "USER" | "AI_AGENT" | "HUMAN_AGENT" | null;
+  last_message_preview: string;
+  awaiting_admin: boolean;
+  assigned_to_name: string;
+  /** Only present on the single-ticket view. */
+  messages: AdminSupportMessage[] | null;
+}
+
+export type AdminSupportView = "awaiting" | "open" | "resolved";
+
+export async function listAdminSupportTickets(view: AdminSupportView, accessToken: string): Promise<{ count: number; results: AdminSupportTicket[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/support-tickets/?view=${view}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Support tickets fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getAdminSupportTicket(id: string, accessToken: string): Promise<AdminSupportTicket> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/support-tickets/${id}/`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Support ticket fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function replyToAdminSupportTicket(id: string, message: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/support-tickets/${id}/reply/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ message }),
+  });
+}
+
+export async function setAdminSupportTicketResolved(id: string, resolved: boolean, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/support-tickets/${id}/${resolved ? "resolve" : "reopen"}/`, { method: "POST", headers: adminHeaders(accessToken) });
+}
+
+export interface AdminContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export async function listAdminContactMessages(resolved: boolean, accessToken: string): Promise<{ count: number; results: AdminContactMessage[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/contact-messages/?resolved=${resolved ? 1 : 0}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Contact messages fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function setAdminContactMessageResolved(id: string, resolved: boolean, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/contact-messages/${id}/${resolved ? "resolve" : "reopen"}/`, { method: "POST", headers: adminHeaders(accessToken) });
+}
+
+export interface VisitorBreakdownRow {
+  key: string;
+  page_views: number;
+  visitors: number;
+}
+
+export interface AdminVisitorSummary {
+  range_days: number;
+  totals: {
+    page_views: number;
+    visitors: number;
+    pages_per_visitor: number;
+    countries: number;
+    mobile_share: number;
+    signed_in_share: number;
+    location_known_share: number;
+  };
+  today: { page_views: number; visitors: number };
+  online_now: number;
+  daily: { date: string; page_views: number; visitors: number }[];
+  countries: VisitorBreakdownRow[];
+  cities: { city: string; region: string; country_code: string; page_views: number; visitors: number }[];
+  devices: VisitorBreakdownRow[];
+  browsers: VisitorBreakdownRow[];
+  operating_systems: VisitorBreakdownRow[];
+  languages: VisitorBreakdownRow[];
+  timezones: VisitorBreakdownRow[];
+  pages: { path: string; page_views: number; visitors: number }[];
+  referrers: VisitorBreakdownRow[];
+  recent: {
+    created_at: string;
+    country_code: string;
+    region: string;
+    city: string;
+    device_type: string;
+    os: string;
+    browser: string;
+    path: string;
+    locale: string;
+    is_signed_in: boolean;
+  }[];
+  has_city_data: boolean;
+  retention_days: number;
+}
+
+export async function getAdminVisitorSummary(days: number, accessToken: string): Promise<AdminVisitorSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/visitors/?days=${days}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Visitor statistics fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AdminAuditEntry {
+  id: string;
+  actor_username: string;
+  /** "<resource>/<verb>", e.g. "admin-user/toggle_suspend". */
+  action: string;
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  details: Record<string, string | number | boolean | null>;
+  status_code: number;
+  succeeded: boolean;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface AdminAuditFilters {
+  q?: string;
+  outcome?: "failed" | "success" | "";
+  since?: string;
+  until?: string;
+  page?: number;
+}
+
+export async function listAdminAuditLog(
+  filters: AdminAuditFilters,
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminAuditEntry[] }> {
+  const params = new URLSearchParams();
+  if (filters.q) params.set("q", filters.q);
+  if (filters.outcome) params.set("outcome", filters.outcome);
+  if (filters.since) params.set("since", filters.since);
+  if (filters.until) params.set("until", filters.until);
+  if (filters.page) params.set("page", String(filters.page));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/admin/audit-log/${query}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Audit log fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export type AdminContentType = "property" | "marketplace" | "post";
+export type AdminContentState = "live" | "removed" | "all";
+
+export interface AdminContentItem {
+  type: AdminContentType;
+  id: string;
+  title: string;
+  excerpt: string;
+  /** Property: RENT/SALE. Marketplace: the category. Post: video, standard, reel... */
+  kind: string;
+  status: string;
+  price_xaf: string | null;
+  owner_id: string;
+  owner_name: string;
+  owner_username: string;
+  created_at: string;
+  /** Public page to open the item on, empty when it has none. */
+  path: string;
+  removed: boolean;
+  takedown: { reason: string; removed_at: string; removed_by: string } | null;
+}
+
+export async function listAdminContent(
+  filters: { type: AdminContentType; state: AdminContentState; q?: string; page?: number },
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminContentItem[] }> {
+  const params = new URLSearchParams({ type: filters.type, state: filters.state });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/content/?${params.toString()}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Content fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function removeAdminContent(type: AdminContentType, id: string, reason: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/content/remove/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ type, id, reason }),
+  });
+}
+
+export async function restoreAdminContent(type: AdminContentType, id: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/content/restore/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ type, id }),
+  });
+}
+
+export type AdminAiFlagState = "pending" | "reviewed";
+
+export interface AdminAiFlag extends AdminContentItem {
+  flags: { category: string; confidence: string; action: "FLAG_FOR_REVIEW" | "ESCALATE_ADMIN"; scored_at: string }[];
+  escalated: boolean;
+  flagged_at: string;
+  review: { outcome: "KEPT" | "REMOVED"; reviewed_at: string; reviewed_by: string } | null;
+}
+
+export async function listAdminAiFlags(
+  state: AdminAiFlagState,
+  page: number,
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminAiFlag[] }> {
+  const params = new URLSearchParams({ state });
+  if (page > 1) params.set("page", String(page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/ai-flags/?${params.toString()}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`AI flags fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function keepAdminAiFlaggedContent(type: AdminContentType, id: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/ai-flags/keep/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ type, id }),
+  });
+}
+
+export async function removeAdminAiFlaggedContent(type: AdminContentType, id: string, reason: string, issueStrike: boolean, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/ai-flags/remove/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) },
+    body: JSON.stringify({ type, id, reason, issue_strike: issueStrike }),
+  });
+}
+
+export type AdminAreaRequestStatus = "pending" | "approved" | "rejected" | "all";
+
+export interface AdminAnalyticsMetric {
+  current: number | string;
+  previous: number | string;
+  /** Percent change against the previous period; null when there was nothing before. */
+  change: number | null;
+}
+
+export interface AdminAnalytics {
+  days: number;
+  start: string;
+  end: string;
+  headline: Record<
+    | "new_users"
+    | "kyc_submitted"
+    | "kyc_verified"
+    | "property_listings_published"
+    | "marketplace_listings_created"
+    | "paid_bookings"
+    | "payment_volume_xaf"
+    | "fees_earned_xaf"
+    | "refunded_xaf"
+    | "disputes_opened"
+    | "reports_filed"
+    | "support_chats"
+    | "payouts_xaf",
+    AdminAnalyticsMetric
+  >;
+  series: { interval: "day" | "week"; points: { date: string; new_users: number; paid_bookings: number; payment_volume_xaf: string }[] };
+  funnel: { step: "joined" | "kyc_submitted" | "kyc_verified" | "paid_booking" | "listed_something"; count: number; percent: number | null }[];
+  speed: Record<"kyc_review" | "dispute_resolution" | "withdrawal_review", { median_hours: number | null; count: number }>;
+  breakdowns: {
+    by_service: { booking_type: string; label: string; count: number; volume_xaf: string }[];
+    top_neighbourhoods: { name: string; count: number }[];
+    new_providers: Record<"agents" | "agencies" | "landlords" | "technicians" | "drivers", number>;
+  };
+}
+
+export interface HostelPerson {
+  id: string;
+  name: string;
+  username: string;
+  phone: string;
+}
+
+export interface HostelSummary {
+  id: string;
+  label: string;
+  quarter: string;
+  owner: HostelPerson | null;
+  rooms: number;
+  places: number;
+  housed_now: number;
+  waiting: number;
+}
+
+export interface HostelPlaceHolder {
+  id: string;
+  student: HostelPerson | null;
+  allocated_at: string;
+  allocated_by: string;
+}
+
+export interface HostelBoard {
+  hostel: HostelSummary;
+  institutions: { id: number; name: string }[];
+  semesters: { id: number; name: string; institution: string; start_date: string; end_date: string; billing_due_date: string }[];
+  semester_id: number | null;
+  rooms: {
+    id: string;
+    room_code: string;
+    unit_type: string;
+    occupancy_model: "PER_BED" | "PER_UNIT";
+    places: { bed: number | null; allocation: HostelPlaceHolder | null }[];
+    has_history: boolean;
+  }[];
+  waitlist: { id: string; position: number; desired_unit_type: string; joined_at: string; student: HostelPerson | null; already_housed: boolean }[];
+}
+
+/** Hostels the caller runs rooms for (all of them for an admin). */
+export async function listManagedHostels(q: string, accessToken: string): Promise<{ count: number; results: HostelSummary[] }> {
+  const params = q ? `?q=${encodeURIComponent(q)}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/hostel-rooms/${params}`, { headers: bearer(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Hostels fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getHostelBoard(hostelId: string, semesterId: number | null, accessToken: string): Promise<HostelBoard> {
+  const params = semesterId ? `?semester=${semesterId}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/hostel-rooms/${hostelId}/${params}`, { headers: bearer(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Hostel fetch failed: ${res.status}`);
+  return res.json();
+}
+
+/** One room-management action; on success the server answers with the refreshed board. */
+export async function hostelRoomsAction(hostelId: string, action: string, body: Record<string, unknown>, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/hostel-rooms/${hostelId}/${action}/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...bearer(accessToken) }, body: JSON.stringify(body),
+  });
+}
+
+export async function getAdminAnalytics(days: number, accessToken: string): Promise<AdminAnalytics> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/analytics/?days=${days}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Analytics fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AdminAccountDeletion {
+  id: string;
+  status: "REQUESTED" | "CANCELLED" | "COMPLETED" | "RETENTION_PERIOD";
+  requested_at: string;
+  scheduled_for: string;
+  completed_at: string | null;
+  reason: string;
+  /** Past its scheduled date but still waiting (usually because of a blocker). */
+  overdue: boolean;
+  cancelled_at: string | null;
+  cancelled_by: string;
+  cancellation_reason: string;
+  blockers: string[];
+  user: { id: string; username: string; name: string; phone: string; email: string };
+}
+
+export interface AdminDataExport {
+  id: string;
+  status: "PENDING" | "READY" | "FAILED" | "EXPIRED";
+  requested_at: string;
+  completed_at: string | null;
+  expires_at: string | null;
+  downloaded_at: string | null;
+  user: { id: string; username: string; name: string };
+}
+
+export async function listAdminAccountDeletions(
+  filters: { state: "scheduled" | "blocked" | "completed" | "cancelled" | "all"; q?: string; page?: number },
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminAccountDeletion[] }> {
+  const params = new URLSearchParams({ state: filters.state });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/account-deletions/?${params.toString()}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Account deletions fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function completeAdminAccountDeletion(id: string, confirmation: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/account-deletions/${id}/complete/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ confirmation }),
+  });
+}
+
+export async function cancelAdminAccountDeletion(id: string, reason: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/account-deletions/${id}/cancel/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ reason }),
+  });
+}
+
+export async function listAdminDataExports(
+  filters: { state: "all" | "ready" | "expired" | "failed"; q?: string; page?: number },
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminDataExport[] }> {
+  const params = new URLSearchParams({ state: filters.state });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/data-exports/?${params.toString()}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Data exports fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export type AdminPaymentState = "all" | "held" | "released" | "refunded" | "disputed" | "failed" | "processing";
+
+export interface AdminPaymentPerson {
+  id: string;
+  name: string;
+  username: string;
+}
+
+export interface AdminPayment {
+  id: string;
+  booking_type: string;
+  status: string;
+  amount_xaf: string;
+  currency: string;
+  created_at: string;
+  updated_at: string;
+  requester: AdminPaymentPerson | null;
+  title: string;
+  payee: AdminPaymentPerson | null;
+  note: string;
+  /** Payment still processing long after it started. */
+  stuck: boolean;
+  escrow: {
+    status: string;
+    gross_xaf: string;
+    fee_xaf: string;
+    payee_xaf: string;
+    refunded_xaf: string;
+    provider: string;
+    provider_reference: string;
+    held_at: string;
+    released_at: string | null;
+  } | null;
+  dispute: { id: string; status: string } | null;
+}
+
+export interface AdminPaymentsSummary {
+  days: number;
+  totals: { held_xaf: string; released_xaf: string; refunded_xaf: string; disputed_xaf: string; fees_xaf: string };
+  by_type: {
+    booking_type: string;
+    label: string;
+    count: number;
+    gross_xaf: string;
+    fees_xaf: string;
+    held_xaf: string;
+    disputed_xaf: string;
+    refunded_xaf: string;
+  }[];
+  attention: { stuck: number; failed_24h: number };
+}
+
+export interface AdminPaymentFilters {
+  type?: string;
+  state?: AdminPaymentState;
+  q?: string;
+  since?: string;
+  until?: string;
+  page?: number;
+}
+
+export async function listAdminPayments(
+  filters: AdminPaymentFilters,
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminPayment[] }> {
+  const params = new URLSearchParams();
+  if (filters.type) params.set("type", filters.type);
+  if (filters.state && filters.state !== "all") params.set("state", filters.state);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.since) params.set("since", filters.since);
+  if (filters.until) params.set("until", filters.until);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/admin/payments/${query}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Payments fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getAdminPaymentsSummary(days: number, accessToken: string): Promise<AdminPaymentsSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/payments/summary/?days=${days}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Payments summary fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AdminAreaRequest {
+  id: string;
+  region_name: string;
+  city_name: string;
+  area_name: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  created_at: string;
+  requested_by: { id: string; name: string; username: string } | null;
+  reviewed_by: string;
+  reviewed_at: string | null;
+  rejection_reason: string;
+  quarter_name: string;
+  /** Existing neighbourhoods in the region that resemble the request. */
+  similar: { id: string; name: string; city: string }[];
+}
+
+export async function listAdminAreaRequests(
+  filters: { status: AdminAreaRequestStatus; q?: string; page?: number },
+  accessToken: string
+): Promise<{ count: number; next: string | null; results: AdminAreaRequest[] }> {
+  const params = new URLSearchParams({ status: filters.status });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/area-suggestions/?${params.toString()}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Area requests fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function approveAdminAreaRequest(id: string, names: { area_name: string; city_name: string }, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/area-suggestions/${id}/approve/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify(names),
+  });
+}
+
+export async function rejectAdminAreaRequest(id: string, reason: string, accessToken: string) {
+  return fetch(`${API_BASE_URL}/api/admin/area-suggestions/${id}/reject/`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) }, body: JSON.stringify({ reason }),
+  });
 }
 
 export async function listAdminPendingPropertyListings(accessToken: string): Promise<{ count: number; results: Listing[] }> {
@@ -2620,15 +3745,42 @@ export async function listAdminUsers(
   accessToken: string,
   accountStatus?: string,
   role?: string,
-  page?: number
+  page?: number,
+  search?: string
 ): Promise<{ count: number; next: string | null; previous: string | null; results: AdminUser[] }> {
   const params = new URLSearchParams();
   if (accountStatus) params.set("account_status", accountStatus);
   if (role) params.set("role", role);
   if (page) params.set("page", String(page));
+  if (search) params.set("q", search);
   const query = params.toString() ? `?${params.toString()}` : "";
   const res = await fetch(`${API_BASE_URL}/api/admin/users/${query}`, { headers: adminHeaders(accessToken) });
   if (!res.ok) throw new Error(`Admin users fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface AdminUserOverview {
+  user: AdminUser;
+  last_seen_at: string | null;
+  language: string;
+  kyc: { status: string; legal_name: string; submitted_at: string | null; reviewed_at: string | null };
+  wallet: { balance_xaf: string; pending_withdrawals: number; paid_out_xaf: string };
+  activity: {
+    property_listings: number;
+    marketplace_listings: number;
+    marketplace_purchases: number;
+    marketplace_sales: number;
+    bookings: number;
+    posts: number;
+    support_chats: number;
+  };
+  reports: { filed: number; against_open: number; against_total: number };
+  strikes: { number: number; reason: string; issued_at: string; issued_by: string }[];
+}
+
+export async function getAdminUserOverview(userId: string, accessToken: string): Promise<AdminUserOverview> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/overview/`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`User overview fetch failed: ${res.status}`);
   return res.json();
 }
 
@@ -2706,6 +3858,8 @@ export interface SavedSearch {
   id: string;
   name: string;
   filters: Record<string, string>;
+  /** PROPERTY searches watch property listings; MARKETPLACE searches hold the marketplace browse query (+ category). */
+  scope?: "PROPERTY" | "MARKETPLACE";
   last_notified_at: string | null;
 }
 
@@ -2715,13 +3869,16 @@ export async function listSavedSearches(accessToken: string): Promise<{ count: n
   return res.json();
 }
 
-export async function createSavedSearch(name: string, filters: Record<string, string>, accessToken: string) {
+export async function createSavedSearch(name: string, filters: Record<string, string>, accessToken: string, scope: "PROPERTY" | "MARKETPLACE" = "PROPERTY") {
   const res = await fetch(`${API_BASE_URL}/api/saved-searches/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ name, filters }),
+    body: JSON.stringify({ name, filters, scope }),
   });
-  if (!res.ok) throw new Error("Could not create saved search");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "Could not create saved search");
+  }
   return res.json();
 }
 
@@ -3352,6 +4509,39 @@ interface BaseMarketplaceListing {
   availability_status: string;
   created_at: string;
   media: MarketplaceMediaItem[];
+  /** Present (kilometres) only when the list was searched near a point. */
+  distance_km?: number | null;
+  /** Listings leave the marketplace this long after their last renewal unless the lister renews them. */
+  expires_at?: string;
+  is_expired?: boolean;
+}
+
+/** Views, saves and chats on one of the caller's own listings (from the /mine/ lists). */
+export interface ListingStats {
+  views: number;
+  saves: number;
+  chats: number;
+}
+
+export interface MarketplaceSellerSummary {
+  id: string;
+  name: string;
+  member_since: string;
+  id_verified: boolean;
+  rating_avg: number | null;
+  rating_count: number;
+  items_sold: number;
+  active_listings: number;
+  /** null until the seller has enough conversations for it to mean something. */
+  reply_rate_pct: number | null;
+  reply_time_hours: number | null;
+  last_seen_at: string | null;
+}
+
+export async function getMarketplaceSeller(userId: string): Promise<MarketplaceSellerSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-sellers/${userId}/`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load the seller");
+  return res.json();
 }
 
 export interface WarehouseListing extends BaseMarketplaceListing {
@@ -3368,15 +4558,162 @@ export interface BusinessListing extends BaseMarketplaceListing {
   includes_inventory: boolean;
   annual_revenue_xaf: string | null;
 }
+export const CAR_BODY_TYPES = ["SEDAN", "HATCHBACK", "SUV", "PICKUP", "WAGON", "COUPE", "CONVERTIBLE", "VAN", "MINIBUS", "BUS", "TRUCK", "OTHER"] as const;
+export const CAR_FUEL_TYPES = ["PETROL", "DIESEL", "HYBRID", "ELECTRIC", "GAS"] as const;
+export const CAR_TRANSMISSIONS = ["AUTOMATIC", "MANUAL"] as const;
+export const CAR_DRIVETRAINS = ["FWD", "RWD", "AWD", "4WD"] as const;
+export const CAR_CONDITIONS = ["NEW", "FOREIGN_USED", "LOCALLY_USED"] as const;
+export const CAR_DRIVER_OPTIONS = ["SELF_DRIVE", "WITH_DRIVER", "EITHER"] as const;
+export const CAR_FUEL_POLICIES = ["SAME_LEVEL", "FULL_TO_FULL", "INCLUDED"] as const;
+export const CAR_FEATURES = [
+  "AIR_CONDITIONING", "BLUETOOTH", "REVERSE_CAMERA", "PARKING_SENSORS", "NAVIGATION", "LEATHER_SEATS",
+  "SUNROOF", "CRUISE_CONTROL", "KEYLESS_ENTRY", "ALLOY_WHEELS", "POWER_WINDOWS", "THIRD_ROW_SEATS",
+  "TOW_HITCH", "ROOF_RACK", "CHILD_SEAT", "USB_CHARGER",
+] as const;
+/** Cars are either sold or rented by the day (the backend's RENT_NIGHTLY basis). */
+export const CAR_DAILY_BASIS = "RENT_NIGHTLY";
+
 export interface VehicleSpec {
   make: string;
   model: string;
   year: number;
   mileage_km: number | null;
   engine_size_cc: number | null;
+  trim?: string;
+  body_type?: string;
+  fuel_type?: string;
+  transmission?: string;
+  drivetrain?: string;
+  exterior_color?: string;
+  interior_color?: string;
+  doors?: number | null;
+  seats?: number | null;
+  vehicle_condition?: string;
+  customs_cleared?: boolean | null;
+  registration_in_seller_name?: boolean | null;
+  previous_owners?: number | null;
+  accident_free?: boolean | null;
+  service_history?: boolean | null;
+  features?: string[];
+  /** The full chassis number, only for the lister; everyone else gets "". */
+  vin?: string;
+  /** "…123456": the last 6 characters, shown to everyone. */
+  vin_last6?: string;
 }
 export interface CarListing extends BaseMarketplaceListing {
   vehicle_spec: VehicleSpec;
+  price_negotiable?: boolean;
+  driver_option?: string;
+  driver_fee_per_day_xaf?: string;
+  weekly_discount_pct?: number;
+  monthly_discount_pct?: number;
+  min_rental_days?: number;
+  max_rental_days?: number | null;
+  daily_km_limit?: number | null;
+  extra_km_fee_xaf?: string | null;
+  fuel_policy?: string;
+  min_driver_age?: number | null;
+  min_licence_years?: number | null;
+  insurance_included?: boolean;
+  delivery_available?: boolean;
+  delivery_fee_xaf?: string;
+  out_of_town_allowed?: boolean;
+  /** false: each booking is a request the owner accepts or declines. */
+  instant_book?: boolean;
+}
+
+export interface CarBusyPeriod {
+  start: string;
+  /** The return day: the period runs up to but not including it. */
+  end: string;
+  /** Owner only. */
+  kind?: "booked" | "blocked";
+  id?: string | null;
+  note?: string;
+}
+
+export interface CarRentalQuote {
+  start_date: string;
+  end_date: string;
+  days: number;
+  with_driver: boolean;
+  delivery: boolean;
+  daily_rate_xaf: string;
+  base_xaf: string;
+  discount_pct: number;
+  discount_xaf: string;
+  driver_fee_xaf: string;
+  delivery_fee_xaf: string;
+  rent_total_xaf: string;
+  deposit_xaf: string;
+  total_xaf: string;
+}
+
+function bearerHeaders(accessToken?: string | null): HeadersInit {
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+}
+
+export async function getCarAvailability(carId: string, accessToken?: string | null): Promise<{ busy: CarBusyPeriod[]; min_rental_days: number; max_rental_days: number | null }> {
+  const res = await fetch(`${API_BASE_URL}/api/cars/${carId}/availability/`, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load the car's calendar");
+  return res.json();
+}
+
+export async function getCarQuote(carId: string, params: { start: string; end: string; withDriver: boolean; delivery: boolean }): Promise<CarRentalQuote> {
+  const query = new URLSearchParams({
+    start_date: params.start, end_date: params.end, with_driver: String(params.withDriver), delivery: String(params.delivery),
+  });
+  const res = await fetch(`${API_BASE_URL}/api/cars/${carId}/quote/?${query}`, { cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Those dates can't be booked");
+  return data;
+}
+
+export async function getSimilarCars(carId: string): Promise<CarListing[]> {
+  const res = await fetch(`${API_BASE_URL}/api/cars/${carId}/similar/`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load similar cars");
+  return res.json();
+}
+
+export async function getSimilarListings(category: MarketplaceCategory, id: string): Promise<AnyMarketplaceListing[]> {
+  const res = await fetch(`${API_BASE_URL}/api/${category}/${id}/similar/`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load similar items");
+  return res.json();
+}
+
+export async function renewMarketplaceListing(category: MarketplaceCategory, id: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${category}/${id}/renew/`, { method: "POST", headers: bearerHeaders(accessToken) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not renew the listing");
+  return data as { id: string; expires_at: string; is_expired: boolean };
+}
+
+export async function blockCarDates(carId: string, payload: { starts_on: string; ends_on: string; note?: string }, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/cars/${carId}/blocked-dates/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...bearerHeaders(accessToken) },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not block those days"));
+  }
+  return data;
+}
+
+export async function unblockCarDates(carId: string, periodId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/cars/${carId}/blocked-dates/${periodId}/`, { method: "DELETE", headers: bearerHeaders(accessToken) });
+  if (!res.ok) throw new Error("Could not unblock those days");
+}
+
+export async function removeMarketplaceMedia(category: MarketplaceCategory, listingId: string, mediaId: number, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${category}/${listingId}/remove-media/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...bearerHeaders(accessToken) },
+    body: JSON.stringify({ media_id: mediaId }),
+  });
+  if (!res.ok) throw new Error("Could not remove the photo");
 }
 
 export const GOODS_CATEGORIES = [
@@ -3404,6 +4741,13 @@ export async function listMarketplaceListings<T>(category: MarketplaceCategory, 
   const query = filters ? `?${new URLSearchParams(filters).toString()}` : "";
   const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${query}`);
   if (!res.ok) throw new Error(`${category} fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function listMarketplaceFeed<T>(filters?: Record<string, string>): Promise<{ count: number; results: T[] }> {
+  const query = filters ? `?${new URLSearchParams(filters).toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-feed/${query}`);
+  if (!res.ok) throw new Error(`marketplace feed fetch failed: ${res.status}`);
   return res.json();
 }
 
@@ -3496,6 +4840,18 @@ export interface MarketplaceOrderItem {
   total_xaf: string;
   rental_starts_on: string | null;
   rental_ends_on: string | null;
+  booked_dates?: boolean;
+  rental_days?: number | null;
+  with_driver?: boolean;
+  delivery_requested?: boolean;
+  price_breakdown?: Partial<CarRentalQuote>;
+  /** A car booked for dates is free to cancel until this moment; later, one day's rent goes to the owner. */
+  free_cancellation_until?: string | null;
+  /** A booking request on a car without instant booking. */
+  needs_approval?: boolean;
+  owner_approved_at?: string | null;
+  /** Set while the request is unanswered: it expires (and is refunded) at this moment. */
+  approval_deadline?: string | null;
 }
 
 async function marketplaceOrderResponse(res: Response, fallback: string): Promise<MarketplaceOrderItem> {
@@ -3507,11 +4863,14 @@ async function marketplaceOrderResponse(res: Response, fallback: string): Promis
   return data;
 }
 
-export async function placeMarketplaceOrder(category: MarketplaceCategory, listingId: string, phoneNumber: string, accessToken: string) {
+export async function placeMarketplaceOrder(
+  category: MarketplaceCategory, listingId: string, phoneNumber: string, accessToken: string,
+  rental?: { start_date: string; end_date: string; with_driver: boolean; delivery: boolean },
+) {
   const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ category, listing_id: listingId, phone_number: phoneNumber }),
+    body: JSON.stringify({ category, listing_id: listingId, phone_number: phoneNumber, ...rental }),
   });
   return marketplaceOrderResponse(res, "Could not place the order");
 }
@@ -3522,7 +4881,7 @@ export async function listMyMarketplaceOrders(role: "buying" | "selling", access
   return res.json();
 }
 
-export type MarketplaceOrderActionName = "hand-over" | "confirm" | "cancel" | "decline" | "dispute" | "return-deposit" | "claim-deposit";
+export type MarketplaceOrderActionName = "approve" | "hand-over" | "confirm" | "cancel" | "decline" | "dispute" | "return-deposit" | "claim-deposit";
 
 export async function marketplaceOrderAction(orderId: string, action: MarketplaceOrderActionName, accessToken: string, reason?: string) {
   const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/${action}/`, {
@@ -3533,11 +4892,13 @@ export async function marketplaceOrderAction(orderId: string, action: Marketplac
   return marketplaceOrderResponse(res, "That action could not be completed");
 }
 
-export async function getMarketplaceListing<T>(category: MarketplaceCategory, id: string): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, { cache: "no-store" });
+export async function getMarketplaceListing<T>(category: MarketplaceCategory, id: string, accessToken?: string | null): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, { cache: "no-store", headers: bearerHeaders(accessToken) });
   if (!res.ok) throw new Error(`Not found: ${res.status}`);
   return res.json();
 }
+
+export type LuggageSize = "SMALL" | "MEDIUM" | "LARGE" | "BULKY";
 
 export interface RideBookingItem {
   id: string;
@@ -3559,6 +4920,9 @@ export interface RideBookingItem {
   ride_category: string;
   transport_type: string;
   has_luggage: boolean;
+  luggage_count: number | null;
+  luggage_size: LuggageSize | "";
+  luggage_photo_urls: string[];
   cargo_description: string;
   requested_at: string;
   completed_at: string | null;
@@ -3679,13 +5043,19 @@ export interface WalletTransactionItem {
 export interface WithdrawalRequestItem {
   id: string;
   amount_xaf: string;
+  fee_xaf: string;
   status: string;
   requested_at: string;
   resolved_at: string | null;
+  phone_number: string;
+  provider: string;
+  rejection_reason: string;
 }
 
 export interface WalletDetail {
   balance_xaf: string;
+  /** NONE | UNVERIFIED | PENDING | VERIFIED | REJECTED — only VERIFIED users can withdraw. */
+  kyc_status: string;
   transactions: WalletTransactionItem[];
   withdrawals: WithdrawalRequestItem[];
 }
@@ -3962,6 +5332,9 @@ export async function requestRide(
     ride_category?: string;
     transport_type?: string;
     has_luggage?: boolean;
+    luggage_count?: number | null;
+    luggage_size?: LuggageSize | "";
+    luggage_photo_urls?: string[];
     cargo_description?: string;
   },
   accessToken: string
@@ -4225,6 +5598,7 @@ export interface ServiceRequestPhoto {
 }
 
 export interface ServiceJobReview {
+  id: number;
   score: number;
   comment: string;
 }

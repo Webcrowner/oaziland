@@ -12,13 +12,19 @@ export default function MarketplaceListingCard({ listing }: { listing: FeedItem 
   const t = useTranslations("MarketplacePage");
   const tf = useTranslations("MarketplaceFilters");
   const tg = useTranslations("MarketplaceGoods");
+  const tc = useTranslations("CarListing");
   const photo = listing.media.find((m) => m.media_type === "PHOTO");
   const video = listing.media.find((m) => m.media_type === "VIDEO");
   const isSale = listing.price_basis === "SALE";
   const spec = listing.vehicle_spec;
 
   let summary = "";
-  if (spec) summary = [`${spec.make} ${spec.model}`, spec.year, spec.mileage_km ? `${spec.mileage_km.toLocaleString()} km` : ""].filter(Boolean).join(" · ");
+  if (spec) {
+    summary = [
+      spec.year, spec.mileage_km != null ? `${spec.mileage_km.toLocaleString()} km` : "",
+      spec.fuel_type ? tc(`fuel_${spec.fuel_type}`) : "", spec.transmission ? tc(`trans_${spec.transmission}`) : "",
+    ].filter(Boolean).join(" · ");
+  }
   else if (listing.category === "goods" && listing.item_category) summary = tg(`cat_${listing.item_category}`);
   else if (listing.size_sqm) summary = `${Number(listing.size_sqm).toLocaleString()} m²`;
 
@@ -40,6 +46,9 @@ export default function MarketplaceListingCard({ listing }: { listing: FeedItem 
         <span className="absolute bottom-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur-sm">
           {t(listing.category)}
         </span>
+        {spec?.vehicle_condition && spec.vehicle_condition !== "LOCALLY_USED" && (
+          <span className="absolute bottom-2 right-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{tc(`cond_${spec.vehicle_condition}`)}</span>
+        )}
         {listing.category === "goods" && listing.condition && (
           <span className="absolute bottom-2 right-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{tg(`cond_${listing.condition}`)}</span>
         )}
@@ -48,17 +57,20 @@ export default function MarketplaceListingCard({ listing }: { listing: FeedItem 
       <div className="flex flex-1 flex-col gap-1 p-3 sm:p-4">
         <p className="text-base font-bold text-[var(--navy)] sm:text-lg">
           {Number(listing.price_xaf).toLocaleString()} <span className="text-xs font-semibold text-slate-500">XAF</span>
-          {!isSale && <span className="ml-1 text-xs font-medium text-slate-500">{tf(`basis_${listing.price_basis}`)}</span>}
+          {!isSale && <span className="ml-1 text-xs font-medium text-slate-500">{spec ? tc("perDay") : tf(`basis_${listing.price_basis}`)}</span>}
+          {isSale && listing.price_negotiable && <span className="ml-1 text-xs font-medium text-green-700">{tc("negotiable")}</span>}
         </p>
         <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-slate-800">
           {/* The stretched link makes the whole card tappable while the favourite button stays on top. */}
           <Link href={`/marketplace/${listing.category}/${listing.id}`} className="after:absolute after:inset-0 after:content-['']">{listing.title}</Link>
         </h3>
         {summary && <p className="truncate text-xs text-slate-500">{summary}</p>}
-        {listing.quarter_name && (
+        {(listing.quarter_name || listing.distance_km != null) && (
           <p className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-slate-500">
             <IconMapPin size={13} className="shrink-0 text-amber-500" />
-            <span className="truncate">{listing.quarter_name}</span>
+            <span className="truncate">
+              {[listing.quarter_name, listing.distance_km != null ? t("kmAway", { km: listing.distance_km }) : ""].filter(Boolean).join(" · ")}
+            </span>
           </p>
         )}
       </div>

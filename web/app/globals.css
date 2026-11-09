@@ -179,6 +179,84 @@ body {
   animation: video-heart-burst 0.9s ease-out forwards;
 }
 
+/* ---------------------------------------------------------------------
+   Homepage motion: scroll reveals, hero life, and the ticker.
+   Reveals use an animation with a backwards fill (not a transition), so
+   once an element has entered it falls back to its own styles and its
+   hover effects keep their original timing.
+   --------------------------------------------------------------------- */
+@keyframes reveal-up {
+  from { opacity: 0; transform: translate3d(0, var(--reveal-distance, 28px), 0); }
+  to { opacity: 1; transform: none; }
+}
+.reveal, .reveal-group > * { --reveal-distance: 28px; }
+.reveal-soft { --reveal-distance: 14px; }
+.reveal:not(.is-visible),
+.reveal-group:not(.is-visible) > * { opacity: 0; }
+.reveal.is-visible,
+.reveal-group.is-visible > * {
+  animation: reveal-up 0.75s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+.reveal-group > :nth-child(n + 12) { --reveal-delay: 880ms; }
+.reveal-group > :nth-child(2) { --reveal-delay: 80ms; }
+.reveal-group > :nth-child(3) { --reveal-delay: 160ms; }
+.reveal-group > :nth-child(4) { --reveal-delay: 240ms; }
+.reveal-group > :nth-child(5) { --reveal-delay: 320ms; }
+.reveal-group > :nth-child(6) { --reveal-delay: 400ms; }
+.reveal-group > :nth-child(7) { --reveal-delay: 480ms; }
+.reveal-group > :nth-child(8) { --reveal-delay: 560ms; }
+.reveal-group > :nth-child(9) { --reveal-delay: 640ms; }
+.reveal-group > :nth-child(10) { --reveal-delay: 720ms; }
+.reveal-group > :nth-child(11) { --reveal-delay: 800ms; }
+
+/* Hero photo: a slow zoom and pan that never settles. */
+@keyframes ken-burns {
+  from { transform: scale(1.04) translate3d(0, 0, 0); }
+  to { transform: scale(1.14) translate3d(-1.5%, -1%, 0); }
+}
+.ken-burns { animation: ken-burns 26s ease-in-out infinite alternate; }
+
+@keyframes float-orb {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(36px, -28px, 0) scale(1.12); }
+}
+.animate-float-orb { animation: float-orb 15s ease-in-out infinite; }
+
+/* A soft light sweep across a pill. */
+@keyframes sheen {
+  0% { transform: translateX(-130%); }
+  55%, 100% { transform: translateX(230%); }
+}
+.pill-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+  transform: translateX(-130%);
+  animation: sheen 5s ease-in-out 1.5s infinite;
+}
+
+@keyframes ticker-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.animate-ticker-in { animation: ticker-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise-in, .animate-drift, .ken-burns, .animate-float-orb, .pill-sheen, .animate-ticker-in {
+    animation: none;
+  }
+}
+
+/* No motion wanted (or no JavaScript to trigger it): everything is simply visible. */
+@media (prefers-reduced-motion: reduce), (scripting: none) {
+  .reveal:not(.is-visible),
+  .reveal-group:not(.is-visible) > * { opacity: 1; }
+  .reveal.is-visible,
+  .reveal-group.is-visible > * { animation: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-rise-in, .animate-drift {
     animation: none;

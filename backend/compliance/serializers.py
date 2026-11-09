@@ -10,10 +10,16 @@ class ConsentRecordSerializer(serializers.ModelSerializer):
 
 
 class DataExportRequestSerializer(serializers.ModelSerializer):
+    """The file itself is never exposed by URL: it is fetched from the owner-only download action."""
+    downloadable = serializers.SerializerMethodField()
+
     class Meta:
         model = DataExportRequest
-        fields = ["id", "status", "export_file", "requested_at", "completed_at"]
-        read_only_fields = ["status", "export_file", "requested_at", "completed_at"]
+        fields = ["id", "status", "requested_at", "completed_at", "expires_at", "downloaded_at", "downloadable"]
+        read_only_fields = fields
+
+    def get_downloadable(self, obj) -> bool:
+        return obj.status == "READY" and bool(obj.export_file)
 
 
 class PolicyDocumentSerializer(serializers.ModelSerializer):

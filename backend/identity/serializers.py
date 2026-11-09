@@ -104,6 +104,11 @@ class KYCProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["kyc_status", "submitted_at", "reviewed_at"]
 
 
+def _normalise_id(number: str) -> str:
+    """An ID number reduced to its letters and digits, lower-cased, so spacing and punctuation can't hide a reuse."""
+    return "".join(c for c in (number or "").lower() if c.isalnum())
+
+
 class AdminKYCProfileSerializer(serializers.ModelSerializer):
     """The other real half of the same gap: a real user could submit
     KYC (see KYCProfileSerializer above), but nothing ever let an admin
@@ -111,17 +116,66 @@ class AdminKYCProfileSerializer(serializers.ModelSerializer):
     be flipped away from PENDING directly in the database. Read-only;
     approval/rejection goes through AdminKYCReviewViewSet's own actions,
     not a generic PATCH, so every decision is captured with a real
-    reviewed_at timestamp."""
+    reviewed_at timestamp.
+
+    Besides the submitted fields it carries what a reviewer checks them against: the account's contact details and
+    name, the applicant's age, and whether the ID number was already used on another submission."""
     username = serializers.CharField(source="user.username", read_only=True)
-    full_name = serializers.CharField(source="user.full_name", read_only=True)
+    full_name = serializers.SerializerMethodField()
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    date_joined = serializers.DateTimeField(source="user.date_joined", read_only=True)
+    age = serializers.SerializerMethodField()
+    name_matches_account = serializers.SerializerMethodField()
+    duplicate_id_count = serializers.SerializerMethodField()
 
     class Meta:
         model = KYCProfile
         fields = [
-            "id", "username", "full_name", "legal_full_name", "date_of_birth", "national_id_number",
+            "id", "username", "full_name", "phone", "email", "date_joined",
+            "legal_full_name", "date_of_birth", "age", "national_id_number", "duplicate_id_count", "name_matches_account",
             "id_document_front_image_url", "id_document_back_image_url", "selfie_image_url", "residential_address",
             "kyc_status", "submitted_at", "reviewed_at",
         ]
+
+    def get_full_name(self, profile) -> str:
+        return profile.user.full_name
+
+    def get_age(self, profile) -> int | None:
+        from django.utils import timezone
+        today = timezone.localdate()
+        born = profile.date_of_birth
+        if born is None or born > today:
+            return None
+        return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+    def get_name_matches_account(self, profile) -> bool | None:
+        """None when the account has no name to compare against; otherwise whether the two names use the same
+        words, ignoring case, accents and order."""
+        import unicodedata
+
+        def words(text: str) -> set:
+            stripped = "".join(c for c in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(c))
+            return {w for w in stripped.lower().replace("-", " ").split() if w}
+
+        account = words(profile.user.full_name)
+        if not account:
+            return None
+        legal = words(profile.legal_full_name)
+        return account <= legal or legal <= account
+
+    def get_duplicate_id_count(self, profile) -> int:
+        """How many other submissions use the same ID number, ignoring case, spacing and hyphens. The counts for
+        every ID are built once per request and shared by all rows."""
+        counts = self.context.get("_id_counts")
+        if counts is None:
+            counts = {}
+            for number in KYCProfile.objects.values_list("national_id_number", flat=True):
+                key = _normalise_id(number)
+                counts[key] = counts.get(key, 0) + 1
+            self.context["_id_counts"] = counts
+        key = _normalise_id(profile.national_id_number)
+        return max(counts.get(key, 1) - 1, 0) if key else 0
 
 
 class ChangePasswordSerializer(serializers.Serializer):

@@ -106,19 +106,52 @@ def fund_ad_campaign_from_wallet(*, user, campaign, amount_xaf: Decimal):
     return wallet
 
 
-def request_withdrawal(*, user, amount_xaf: Decimal) -> WithdrawalRequest:
+def _withdrawal_fee(amount_xaf: Decimal) -> Decimal:
+    """The WALLET_WITHDRAWAL platform fee for this amount, or 0 when no
+    policy row has been configured yet."""
+    try:
+        fee = PlatformFeePolicy.fee_for(TransactionCategory.WALLET_WITHDRAWAL, amount_xaf)
+    except PlatformFeePolicy.DoesNotExist:
+        return Decimal("0")
+    return fee.quantize(Decimal("0.01"))
+
+
+class KycRequiredForWithdrawal(Exception):
+    """Raised when someone whose identity is not approved tries to cash out."""
+
+    MESSAGES = {
+        "NONE": "Verify your identity (KYC) before withdrawing money.",
+        "PENDING": "Your identity verification is still under review. You can withdraw once it is approved.",
+        "REJECTED": "Your identity verification was rejected. Please resubmit your details before withdrawing.",
+    }
+
+    def __init__(self, kyc_status: str):
+        self.kyc_status = kyc_status
+        super().__init__(self.MESSAGES.get(kyc_status, "Your identity must be verified before you can withdraw money."))
+
+
+def request_withdrawal(*, user, amount_xaf: Decimal, phone_number: str = "", provider: str = "MTN_MOMO") -> WithdrawalRequest:
     """Starts a cash-out request. Deliberately NOT auto-approved — see
-    WithdrawalRequest's docstring. The wallet balance is reserved
+    WithdrawalRequest's docstring. Only users whose identity (KYC) has
+    been approved may withdraw. The wallet balance is reserved
     (deducted) immediately so the same funds can't be withdrawn twice
-    while a request is pending."""
-    wallet = get_or_create_wallet(user)
-    if wallet.balance_xaf < amount_xaf:
-        raise ValueError("Insufficient wallet balance for this withdrawal.")
+    while a request is pending. The wallet row is locked so two
+    simultaneous requests can't both pass the balance check."""
+    from identity.services import get_user_kyc_status
+    kyc_status = get_user_kyc_status(user)
+    if kyc_status != "VERIFIED":
+        raise KycRequiredForWithdrawal(kyc_status)
 
     with db_transaction.atomic():
+        wallet = Wallet.objects.select_for_update().get(pk=get_or_create_wallet(user).pk)
+        if wallet.balance_xaf < amount_xaf:
+            raise ValueError("Insufficient wallet balance for this withdrawal.")
+
         wallet.balance_xaf -= amount_xaf
         wallet.save(update_fields=["balance_xaf"])
-        request = WithdrawalRequest.objects.create(wallet=wallet, amount_xaf=amount_xaf)
+        request = WithdrawalRequest.objects.create(
+            wallet=wallet, amount_xaf=amount_xaf, phone_number=phone_number, provider=provider,
+        )
         WalletTransaction.objects.create(
             wallet=wallet, transaction_type=WalletTransactionType.WITHDRAWAL,
             amount_xaf=amount_xaf, related_reference=str(request.id),
@@ -126,45 +159,127 @@ def request_withdrawal(*, user, amount_xaf: Decimal) -> WithdrawalRequest:
     return request
 
 
-def approve_withdrawal(*, withdrawal_request: WithdrawalRequest):
-    """An admin action (not automatic) — marks a withdrawal ready for
-    real payout. Applies the WALLET_WITHDRAWAL platform fee at the point
-    of payout, not at request time, since a rejected request shouldn't
-    have ever charged a fee."""
+def approve_withdrawal(*, withdrawal_request: WithdrawalRequest, reviewer=None):
+    """An admin action (not automatic) — marks a pending withdrawal ready
+    for payout and fixes the platform fee. The fee is applied at the
+    point of payout, not at request time, since a rejected request
+    shouldn't have ever charged a fee. Returns the fee."""
     from django.utils import timezone
-    fee = PlatformFeePolicy.fee_for(TransactionCategory.WALLET_WITHDRAWAL, withdrawal_request.amount_xaf)
+    if withdrawal_request.status != WithdrawalStatus.PENDING:
+        raise ValueError("Only a pending withdrawal can be approved.")
+    fee = _withdrawal_fee(withdrawal_request.amount_xaf)
     withdrawal_request.status = WithdrawalStatus.APPROVED
+    withdrawal_request.fee_xaf = fee
+    withdrawal_request.reviewed_by = reviewer
     withdrawal_request.resolved_at = timezone.now()
-    withdrawal_request.save(update_fields=["status", "resolved_at"])
+    withdrawal_request.save(update_fields=["status", "fee_xaf", "reviewed_by", "resolved_at"])
+    WalletTransaction.objects.filter(
+        wallet=withdrawal_request.wallet, transaction_type=WalletTransactionType.WITHDRAWAL,
+        related_reference=str(withdrawal_request.id),
+    ).update(platform_fee_xaf=fee)
     return fee
 
 
-def process_withdrawal_payout(*, withdrawal_request: WithdrawalRequest, phone_number: str = "", payment_gateway=None):
-    """Transfers funds to the payee's Mobile Money (MTN MoMo / Orange Money)
-    account using the payment gateway's disbursement rails, and marks the
-    withdrawal PAID_OUT."""
+def reject_withdrawal(*, withdrawal_request: WithdrawalRequest, reviewer, reason: str) -> WithdrawalRequest:
+    """Declines a pending withdrawal and returns the reserved amount to
+    the wallet as a REFUND entry, so the ledger shows both sides."""
+    from django.utils import timezone
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("A reason is required to reject a withdrawal.")
+    with db_transaction.atomic():
+        locked = WithdrawalRequest.objects.select_for_update().get(pk=withdrawal_request.pk)
+        if locked.status != WithdrawalStatus.PENDING:
+            raise ValueError("Only a pending withdrawal can be rejected.")
+        wallet = Wallet.objects.select_for_update().get(pk=locked.wallet_id)
+        wallet.balance_xaf += locked.amount_xaf
+        wallet.save(update_fields=["balance_xaf"])
+        WalletTransaction.objects.create(
+            wallet=wallet, transaction_type=WalletTransactionType.REFUND,
+            amount_xaf=locked.amount_xaf, related_reference=str(locked.id),
+        )
+        locked.status = WithdrawalStatus.REJECTED
+        locked.rejection_reason = reason
+        locked.reviewed_by = reviewer
+        locked.resolved_at = timezone.now()
+        locked.save(update_fields=["status", "rejection_reason", "reviewed_by", "resolved_at"])
+    return locked
+
+
+def process_withdrawal_payout(*, withdrawal_request: WithdrawalRequest, phone_number: str = "", payment_gateway=None, reviewer=None):
+    """Transfers the net amount (request minus the withdrawal fee) to the
+    payee's Mobile Money (MTN MoMo / Orange Money) account using the
+    payment gateway's disbursement rails, and marks the withdrawal
+    PAID_OUT. If the gateway fails, everything rolls back and the request
+    stays pending so the admin can retry; the request id is the gateway
+    idempotency key, so a retry can never pay twice."""
     from payments.gateways import get_active_gateway
     from django.utils import timezone
 
     if payment_gateway is None:
         payment_gateway = get_active_gateway()
 
-    if withdrawal_request.status == WithdrawalStatus.PENDING:
-        approve_withdrawal(withdrawal_request=withdrawal_request)
+    with db_transaction.atomic():
+        locked = WithdrawalRequest.objects.select_for_update().select_related("wallet__owner").get(pk=withdrawal_request.pk)
+        if locked.status in (WithdrawalStatus.PAID_OUT, WithdrawalStatus.REJECTED):
+            raise ValueError("This withdrawal has already been resolved.")
+        if locked.status == WithdrawalStatus.PENDING:
+            approve_withdrawal(withdrawal_request=locked, reviewer=reviewer)
 
-    dest_phone = phone_number or getattr(withdrawal_request.wallet.owner, "phone", "")
-    disburse_result = payment_gateway.initiate_disbursement(
-        phone_number=dest_phone,
-        amount_xaf=withdrawal_request.amount_xaf,
-        idempotency_key=str(withdrawal_request.id),
+        dest_phone = phone_number or locked.phone_number or getattr(locked.wallet.owner, "phone", "")
+        if not dest_phone:
+            raise ValueError("No payout phone number is on file for this withdrawal.")
+        try:
+            disburse_result = payment_gateway.initiate_disbursement(
+                phone_number=dest_phone,
+                amount_xaf=locked.net_amount_xaf,
+                idempotency_key=str(locked.id),
+            )
+        except NotImplementedError as exc:
+            raise ValueError(str(exc) or "Payouts are not available on the active payment gateway.") from exc
+        if not disburse_result.success:
+            raise ValueError("Disbursement failed via payment gateway.")
+
+        locked.status = WithdrawalStatus.PAID_OUT
+        locked.payout_reference = disburse_result.provider_reference or ""
+        locked.resolved_at = timezone.now()
+        locked.save(update_fields=["status", "payout_reference", "resolved_at"])
+    return locked
+
+
+def notify_admins_of_withdrawal(withdrawal_request: WithdrawalRequest) -> None:
+    """Tells every admin a cash-out is waiting for review."""
+    from identity.models import AdminProfile
+    from notifications.services import notify
+    owner = withdrawal_request.wallet.owner
+    for admin_profile in AdminProfile.objects.select_related("user"):
+        notify(
+            recipient=admin_profile.user, notification_type="WITHDRAWAL_REQUESTED", channel="IN_APP",
+            title="New withdrawal request",
+            message=f"{owner.full_name or owner.username} asked to withdraw {withdrawal_request.amount_xaf} XAF.",
+            related_reference=str(withdrawal_request.id),
+        )
+
+
+def notify_user_of_withdrawal_outcome(withdrawal_request: WithdrawalRequest) -> None:
+    """Tells the requester whether their cash-out was paid or declined."""
+    from notifications.services import notify
+    owner = withdrawal_request.wallet.owner
+    if withdrawal_request.status == WithdrawalStatus.PAID_OUT:
+        title = "Withdrawal sent"
+        message = f"{withdrawal_request.net_amount_xaf} XAF was sent to {withdrawal_request.phone_number or owner.phone}."
+    elif withdrawal_request.status == WithdrawalStatus.REJECTED:
+        title = "Withdrawal declined"
+        message = (
+            f"Your withdrawal of {withdrawal_request.amount_xaf} XAF was declined and returned to your wallet. "
+            f"Reason: {withdrawal_request.rejection_reason}"
+        )
+    else:
+        return
+    notify(
+        recipient=owner, notification_type=f"WITHDRAWAL_{withdrawal_request.status}", channel="IN_APP",
+        title=title, message=message, related_reference=str(withdrawal_request.id),
     )
-    if not disburse_result.success:
-        raise ValueError("Disbursement failed via payment gateway.")
-
-    withdrawal_request.status = WithdrawalStatus.PAID_OUT
-    withdrawal_request.resolved_at = timezone.now()
-    withdrawal_request.save(update_fields=["status", "resolved_at"])
-    return withdrawal_request
 
 
 def get_boost_price(*, placement: str, duration_unit: str, duration_quantity: int) -> Decimal:
@@ -172,7 +287,10 @@ def get_boost_price(*, placement: str, duration_unit: str, duration_quantity: in
     and multiplies by how many units were purchased — e.g. DAILY at
     2,000 XAF/day × 3 days = 6,000 XAF."""
     from .models import BoostPricingTier
-    tier = BoostPricingTier.objects.get(placement=placement, duration_unit=duration_unit)
+    try:
+        tier = BoostPricingTier.objects.get(placement=placement, duration_unit=duration_unit)
+    except BoostPricingTier.DoesNotExist:
+        raise ValueError("This boost option is not available right now.") from None
     return tier.price_xaf * duration_quantity
 
 

@@ -29,6 +29,7 @@ export default async function GuestHouseDetailPage({ params }: { params: Promise
       latitude={guestHouse.latitude}
       longitude={guestHouse.longitude}
       sharePath={`/guest-houses/${guestHouse.id}`}
+      report={{ kind: "guest_house", id: String(guestHouse.id) }}
       mediaEndpoint="guest-houses"
       assetId={guestHouse.id}
     />

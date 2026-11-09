@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/navigation";
-import { getMyProfile, placeMarketplaceOrder, type MarketplaceCategory } from "@/lib/api";
+import { getMyProfile, getMyKycStatus, placeMarketplaceOrder, type MarketplaceCategory } from "@/lib/api";
 
 /** Pay for a marketplace listing into escrow; the seller is only paid once the buyer confirms receipt. */
 export default function MarketplaceBuyBox({
@@ -17,7 +17,7 @@ export default function MarketplaceBuyBox({
 }) {
   const t = useTranslations("MarketplaceBuyBox");
   const router = useRouter();
-  const [state, setState] = useState<"loading" | "signedOut" | "owner" | "buyer">("loading");
+  const [state, setState] = useState<"loading" | "signedOut" | "owner" | "needsKyc" | "buyer">("loading");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -25,8 +25,15 @@ export default function MarketplaceBuyBox({
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
-    const lookup: Promise<"owner" | "buyer" | "signedOut"> = token
-      ? getMyProfile(token).then((profile) => (profile.id === ownerId ? "owner" : "buyer")).catch(() => "signedOut" as const)
+    // Paying needs submitted identity (KYC) details, so we check up front instead of failing at the pay button.
+    const lookup: Promise<"owner" | "needsKyc" | "buyer" | "signedOut"> = token
+      ? getMyProfile(token)
+        .then(async (profile) => {
+          if (profile.id === ownerId) return "owner" as const;
+          const kyc = await getMyKycStatus(token).catch(() => "unknown" as const);
+          return kyc === null ? ("needsKyc" as const) : ("buyer" as const);
+        })
+        .catch(() => "signedOut" as const)
       : Promise.resolve("signedOut" as const);
     lookup.then(setState);
   }, [ownerId]);
@@ -37,6 +44,14 @@ export default function MarketplaceBuyBox({
       <div className="rounded-lg p-4 bg-gray-50 border border-gray-200 text-sm text-gray-700">
         <p className="mb-2">{t("yourListing")}</p>
         <Link href="/marketplace/my-listings" className="font-semibold text-[var(--navy)] underline">{t("manageListing")}</Link>
+      </div>
+    );
+  }
+  if (state === "needsKyc" && availability === "AVAILABLE") {
+    return (
+      <div className="rounded-lg p-4 bg-amber-50 border border-amber-200 text-sm text-amber-900">
+        <p className="mb-2">{t("kycNeeded")}</p>
+        <Link href="/kyc" className="font-bold underline">{t("kycLink")}</Link>
       </div>
     );
   }

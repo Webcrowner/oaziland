@@ -7,14 +7,18 @@ import { routing } from "@/i18n/routing";
  * exact same page (a user reading a listing in English who switches
  * to French should land on the SAME listing in French, not the
  * homepage). */
-export default function LanguageSwitcher() {
+export default function LanguageSwitcher({ variant = "dark" }: { variant?: "dark" | "light" }) {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
 
   function switchTo(nextLocale: string) {
-    router.replace(pathname, { locale: nextLocale });
+    // Keep the query string too (a filtered search, an admin tab...), not only the path.
+    const query = Object.fromEntries(new URLSearchParams(window.location.search));
+    router.replace({ pathname, query }, { locale: nextLocale });
   }
+
+  const inactive = variant === "light" ? "text-slate-500 hover:text-slate-900" : "text-gray-300 hover:text-white";
 
   return (
     <div className="flex items-center gap-1 text-sm">
@@ -23,7 +27,7 @@ export default function LanguageSwitcher() {
           key={loc}
           onClick={() => switchTo(loc)}
           className={`px-2 py-1 rounded transition-colors ${
-            locale === loc ? "bg-[var(--gold)] text-[var(--navy)] font-semibold" : "text-gray-300 hover:text-white"
+            locale === loc ? "bg-[var(--gold)] text-[var(--navy)] font-semibold" : inactive
           }`}
           aria-current={locale === loc}
         >

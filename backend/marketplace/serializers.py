@@ -3,8 +3,10 @@ from decimal import Decimal
 from typing import Optional
 from .models import (
     WarehouseListing, StoreListing, BusinessListing, CarListing, GoodsListing, VehicleSpec, MarketplaceMedia, RideBooking, RideMessage, ListingCondition,
-    RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder, RideEmergencyContact,
+    RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder, RideEmergencyContact, LuggageSize, CarBlockedPeriod,
 )
+
+MAX_LUGGAGE_PHOTOS = 3
 
 
 class MarketplaceMediaSerializer(serializers.ModelSerializer):
@@ -20,12 +22,28 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
     lister_name = serializers.CharField(source="lister_user.full_name", read_only=True)
     quarter_name = serializers.CharField(source="quarter.name", read_only=True, default=None)
     media = MarketplaceMediaSerializer(many=True, read_only=True)
+    # Only present when the list was searched "near" a point; otherwise null.
+    distance_km = serializers.SerializerMethodField()
+    expires_at = serializers.SerializerMethodField()
+    is_expired = serializers.SerializerMethodField()
+
+    def get_expires_at(self, obj) -> str:
+        from .engagement import expires_at
+        return expires_at(obj).isoformat()
+
+    def get_is_expired(self, obj) -> bool:
+        from .engagement import is_expired
+        return is_expired(obj)
+
+    def get_distance_km(self, obj) -> Optional[float]:
+        distance = getattr(obj, "distance_km", None)
+        return None if distance is None else round(float(distance), 1)
 
     class Meta:
         fields = [
             "id", "lister_user", "lister_name", "lister_role", "title", "description",
             "price_basis", "price_xaf", "security_deposit_xaf", "quarter", "quarter_name", "latitude", "longitude",
-            "availability_status", "removed_by_moderation", "created_at", "media",
+            "availability_status", "removed_by_moderation", "created_at", "media", "distance_km", "expires_at", "is_expired",
         ]
         read_only_fields = ["lister_user", "lister_role", "availability_status", "removed_by_moderation", "created_at"]
         extra_kwargs = {
@@ -81,19 +99,110 @@ class BusinessListingSerializer(BaseMarketplaceListingSerializer):
 class VehicleSpecSerializer(serializers.ModelSerializer):
     class Meta:
         model = VehicleSpec
-        fields = ["make", "model", "year", "mileage_km", "engine_size_cc"]
+        fields = [
+            "make", "model", "year", "mileage_km", "engine_size_cc", "trim", "body_type", "fuel_type", "transmission",
+            "drivetrain", "exterior_color", "interior_color", "doors", "seats", "vehicle_condition", "customs_cleared",
+            "registration_in_seller_name", "previous_owners", "accident_free", "service_history", "features", "vin",
+        ]
         extra_kwargs = {
             "year": {"min_value": 1886},
-            "engine_size_cc": {"min_value": 1},
+            "engine_size_cc": {"min_value": 1, "max_value": 20000},
+            "mileage_km": {"max_value": 3_000_000},
+            "doors": {"min_value": 1, "max_value": 6},
+            "seats": {"min_value": 1, "max_value": 80},
+            "previous_owners": {"min_value": 0, "max_value": 30},
         }
+
+    def validate_year(self, value):
+        from django.utils import timezone
+        if value > timezone.localdate().year + 1:
+            raise serializers.ValidationError("Enter a real model year.")
+        return value
+
+    def validate_features(self, value):
+        from .models import CAR_FEATURES
+        if not isinstance(value, list) or any(item not in CAR_FEATURES for item in value):
+            raise serializers.ValidationError(f"Choose features from: {', '.join(CAR_FEATURES)}.")
+        return list(dict.fromkeys(value))
+
+    def validate_vin(self, value):
+        import re
+        value = value.strip().upper()
+        # Imported Japanese cars carry short chassis numbers (e.g. GRX130-6012345) rather than 17-character VINs.
+        if value and not re.fullmatch(r"[A-Z0-9-]{6,17}", value):
+            raise serializers.ValidationError("Enter the chassis number: 6 to 17 letters, digits or dashes.")
+        return value
+
+    def to_representation(self, instance):
+        from .car_rentals import mask_vin
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        is_lister = bool(user and user.is_authenticated and instance.car_listing.lister_user_id == user.id)
+        data["vin_last6"] = mask_vin(instance.vin)
+        if not is_lister:
+            data["vin"] = ""
+        return data
 
 
 class CarListingSerializer(BaseMarketplaceListingSerializer):
     vehicle_spec = VehicleSpecSerializer()
 
+    RENTAL_FIELDS = [
+        "driver_option", "driver_fee_per_day_xaf", "weekly_discount_pct", "monthly_discount_pct", "min_rental_days",
+        "max_rental_days", "daily_km_limit", "extra_km_fee_xaf", "fuel_policy", "min_driver_age", "min_licence_years",
+        "insurance_included", "delivery_available", "delivery_fee_xaf", "out_of_town_allowed", "instant_book",
+    ]
+
     class Meta(BaseMarketplaceListingSerializer.Meta):
         model = CarListing
-        fields = BaseMarketplaceListingSerializer.Meta.fields + ["vehicle_spec"]
+        fields = BaseMarketplaceListingSerializer.Meta.fields + [
+            "vehicle_spec", "price_negotiable", "driver_option", "driver_fee_per_day_xaf", "weekly_discount_pct",
+            "monthly_discount_pct", "min_rental_days", "max_rental_days", "daily_km_limit", "extra_km_fee_xaf",
+            "fuel_policy", "min_driver_age", "min_licence_years", "insurance_included", "delivery_available",
+            "delivery_fee_xaf", "out_of_town_allowed", "instant_book",
+        ]
+        extra_kwargs = {
+            **BaseMarketplaceListingSerializer.Meta.extra_kwargs,
+            "driver_fee_per_day_xaf": {"min_value": Decimal("0")},
+            "weekly_discount_pct": {"min_value": 0, "max_value": 60},
+            "monthly_discount_pct": {"min_value": 0, "max_value": 75},
+            "min_rental_days": {"min_value": 1, "max_value": 365},
+            "max_rental_days": {"min_value": 1, "max_value": 365},
+            "daily_km_limit": {"min_value": 10, "max_value": 5000},
+            "extra_km_fee_xaf": {"min_value": Decimal("0")},
+            "min_driver_age": {"min_value": 18, "max_value": 75},
+            "min_licence_years": {"min_value": 0, "max_value": 40},
+            "delivery_fee_xaf": {"min_value": Decimal("0")},
+        }
+
+    def validate(self, attrs):
+        from .car_rentals import DAILY_BASIS
+        from .models import DriverOption
+        attrs = super().validate(attrs)
+
+        def current(field, default=None):
+            return attrs.get(field, getattr(self.instance, field, default))
+
+        basis = current("price_basis")
+        if basis not in ("SALE", DAILY_BASIS):
+            raise serializers.ValidationError({"price_basis": "A car is either for sale or for rent by the day."})
+        if basis == "SALE":
+            # Rental terms mean nothing on a sale, so a car switched to a sale drops them.
+            for field in self.RENTAL_FIELDS:
+                attrs.pop(field, None)
+            return attrs
+        attrs["price_negotiable"] = False
+        low, high = current("min_rental_days", 1), current("max_rental_days")
+        if high is not None and high < low:
+            raise serializers.ValidationError({"max_rental_days": "The longest rental can't be shorter than the shortest."})
+        if current("driver_option", DriverOption.SELF_DRIVE) == DriverOption.SELF_DRIVE and current("driver_fee_per_day_xaf", 0):
+            attrs["driver_fee_per_day_xaf"] = Decimal("0")
+        if not current("delivery_available", False) and current("delivery_fee_xaf", 0):
+            attrs["delivery_fee_xaf"] = Decimal("0")
+        if current("daily_km_limit") is None and current("extra_km_fee_xaf") is not None:
+            attrs["extra_km_fee_xaf"] = None
+        return attrs
 
     def create(self, validated_data):
         vehicle_spec_data = validated_data.pop("vehicle_spec")
@@ -110,6 +219,31 @@ class CarListingSerializer(BaseMarketplaceListingSerializer):
                 setattr(instance.vehicle_spec, field, value)
             instance.vehicle_spec.save()
         return instance
+
+
+class CarBlockedPeriodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CarBlockedPeriod
+        fields = ["id", "starts_on", "ends_on", "note", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def validate(self, attrs):
+        from datetime import timedelta
+        from django.utils import timezone
+        if attrs["ends_on"] <= attrs["starts_on"]:
+            raise serializers.ValidationError({"ends_on": "The last day must come after the first day."})
+        if attrs["ends_on"] <= timezone.localdate():
+            raise serializers.ValidationError({"ends_on": "That period is already over."})
+        if attrs["ends_on"] - attrs["starts_on"] > timedelta(days=366):
+            raise serializers.ValidationError({"ends_on": "Block at most a year at a time."})
+        return attrs
+
+
+class CarRentalQuoteSerializer(serializers.Serializer):
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    with_driver = serializers.BooleanField(required=False, default=False)
+    delivery = serializers.BooleanField(required=False, default=False)
 
 
 class GoodsListingSerializer(BaseMarketplaceListingSerializer):
@@ -157,7 +291,8 @@ class RideBookingSerializer(serializers.ModelSerializer):
             "id", "rider", "rider_name", "driver", "driver_name", "vehicle", "vehicle_details",
             "pickup_description", "pickup_latitude", "pickup_longitude",
             "dropoff_description", "dropoff_latitude", "dropoff_longitude",
-            "fare_estimate_xaf", "distance_km", "status", "ride_category", "transport_type", "has_luggage", "cargo_description",
+            "fare_estimate_xaf", "distance_km", "status", "ride_category", "transport_type", "has_luggage",
+            "luggage_count", "luggage_size", "luggage_photo_urls", "cargo_description",
             "requested_at", "completed_at", "sos_raised_at",
         ]
         read_only_fields = ["rider", "driver", "vehicle", "fare_estimate_xaf", "distance_km", "status", "requested_at", "completed_at", "sos_raised_at"]
@@ -190,11 +325,23 @@ class RideRequestSerializer(serializers.Serializer):
     ride_category = serializers.ChoiceField(choices=RideCategory.choices, default=RideCategory.STANDARD)
     transport_type = serializers.ChoiceField(choices=TransportType.choices, default=TransportType.PASSENGER)
     has_luggage = serializers.BooleanField(default=False)
+    luggage_count = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=20)
+    luggage_size = serializers.ChoiceField(choices=LuggageSize.choices, required=False, allow_blank=True, default="")
+    luggage_photo_urls = serializers.ListField(
+        child=serializers.URLField(max_length=500), required=False, default=list, max_length=MAX_LUGGAGE_PHOTOS,
+    )
     cargo_description = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, data):
         if data["transport_type"] == TransportType.CARGO and not data.get("cargo_description"):
             raise serializers.ValidationError({"cargo_description": "Please describe what's being moved for a cargo request."})
+        if not data["has_luggage"]:
+            # Luggage details only mean something when there is luggage.
+            data["luggage_count"], data["luggage_size"], data["luggage_photo_urls"] = None, "", []
+        else:
+            from uploads.services import is_platform_media_url
+            if any(not is_platform_media_url(url) for url in data.get("luggage_photo_urls", [])):
+                raise serializers.ValidationError({"luggage_photo_urls": "Upload the luggage photos through Oaziland."})
         return data
 
 
@@ -378,6 +525,11 @@ class PlaceOrderSerializer(serializers.Serializer):
     category = serializers.ChoiceField(choices=["warehouses", "stores", "businesses", "cars", "goods"])
     listing_id = serializers.UUIDField()
     phone_number = serializers.CharField()
+    # A car rented by the day: the days chosen and the extras.
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False)
+    with_driver = serializers.BooleanField(required=False, default=False)
+    delivery = serializers.BooleanField(required=False, default=False)
 
 
 class OrderDisputeSerializer(serializers.Serializer):
@@ -388,13 +540,15 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
     listing_id = serializers.UUIDField(source="listing.id", read_only=True)
     listing_title = serializers.CharField(source="listing.title", read_only=True)
     category = serializers.SerializerMethodField()
-    buyer_name = serializers.CharField(source="buyer.full_name", read_only=True)
+    buyer_name = serializers.SerializerMethodField()
     seller = serializers.UUIDField(source="listing.lister_user_id", read_only=True)
-    seller_name = serializers.CharField(source="listing.lister_user.full_name", read_only=True)
+    seller_name = serializers.SerializerMethodField()
     auto_release_at = serializers.SerializerMethodField()
     seller_deadline = serializers.SerializerMethodField()
     total_xaf = serializers.SerializerMethodField()
     deposit_return_by = serializers.SerializerMethodField()
+    free_cancellation_until = serializers.SerializerMethodField()
+    approval_deadline = serializers.SerializerMethodField()
 
     class Meta:
         model = MarketplaceOrder
@@ -402,9 +556,18 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
             "id", "listing_id", "listing_title", "category", "buyer", "buyer_name", "seller", "seller_name", "amount_xaf",
             "status", "handed_over_at", "completed_at", "created_at", "auto_release_at", "seller_deadline",
             "deposit_xaf", "deposit_status", "deposit_settled_at", "deposit_return_by", "total_xaf",
-            "rental_starts_on", "rental_ends_on",
+            "rental_starts_on", "rental_ends_on", "booked_dates", "rental_days", "with_driver", "delivery_requested",
+            "price_breakdown", "free_cancellation_until", "needs_approval", "owner_approved_at", "approval_deadline",
         ]
         read_only_fields = fields
+
+    # People who never filled in a name are shown by username instead of as a blank.
+    def get_buyer_name(self, obj) -> str:
+        return obj.buyer.full_name or obj.buyer.username
+
+    def get_seller_name(self, obj) -> str:
+        seller = obj.listing.lister_user
+        return seller.full_name or seller.username
 
     def get_total_xaf(self, obj) -> str:
         # What the buyer is charged: the price plus any rental deposit.
@@ -438,10 +601,26 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
             return None
         return (obj.handed_over_at + timedelta(hours=ORDER_AUTO_RELEASE_HOURS)).isoformat()
 
+    def get_approval_deadline(self, obj) -> str:
+        # When an unanswered booking request expires and the renter is refunded.
+        from .car_rentals import approval_deadline, awaiting_approval
+        if obj.status != "PAID" or not awaiting_approval(obj):
+            return None
+        return approval_deadline(obj).isoformat()
+
+    def get_free_cancellation_until(self, obj) -> str:
+        # A car booked for dates can be cancelled for free until this moment.
+        from .car_rentals import free_cancellation_until
+        moment = free_cancellation_until(obj) if obj.status == "PAID" else None
+        return moment.isoformat() if moment else None
+
     def get_seller_deadline(self, obj) -> str:
         # When the buyer is refunded automatically if the seller never hands over.
         from datetime import timedelta
         from .services import ORDER_SELLER_RESPONSE_DAYS
         if obj.status != "PAID":
             return None
+        if obj.booked_dates:
+            from .car_rentals import handover_deadline
+            return handover_deadline(obj).isoformat()
         return (obj.created_at + timedelta(days=ORDER_SELLER_RESPONSE_DAYS)).isoformat()

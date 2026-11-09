@@ -13,6 +13,8 @@ export interface MobileTabItem {
   expanded?: boolean;
   /** Raised centre call-to-action, like a native app's main action button. */
   primary?: boolean;
+  /** Pending-count bubble on the icon; hidden when 0 or undefined. */
+  badge?: number;
 }
 
 /**
@@ -44,7 +46,14 @@ export default function MobileTabBar({ items, label }: { items: MobileTabItem[];
           ) : (
             <>
               <span className={`absolute top-0 h-0.5 w-8 rounded-full transition-colors ${item.active ? "bg-amber-400" : "bg-transparent"}`} />
-              <span className={`transition-transform active:scale-90 ${item.active ? "text-amber-300" : "text-slate-400"}`}>{item.icon}</span>
+              <span className={`relative transition-transform active:scale-90 ${item.active ? "text-amber-300" : "text-slate-400"}`}>
+                {item.icon}
+                {item.badge ? (
+                  <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-amber-400 px-1 text-center text-[9px] font-black leading-4 text-slate-950">
+                    {item.badge > 99 ? "99+" : item.badge}
+                  </span>
+                ) : null}
+              </span>
               <span className={`mt-1 text-[10px] font-bold ${item.active ? "text-amber-300" : "text-slate-400"}`}>{item.label}</span>
             </>
           );

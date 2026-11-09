@@ -27,6 +27,7 @@ from .serializers import (
 )
 from .services import issue_mfa_challenge, user_has_verified_mfa, approve_kyc, reject_kyc
 from oaziland.permissions import IsAdminRole
+from trust_safety.audit import audit_note
 
 
 class LoginThrottle(AnonRateThrottle):
@@ -253,12 +254,14 @@ class AdminKYCReviewViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         kyc_profile = self.get_object()
+        audit_note(request, target_type="kyc", target_label=f"{kyc_profile.user.username} · {kyc_profile.legal_full_name}")
         approve_kyc(kyc_profile)
         return Response(AdminKYCProfileSerializer(kyc_profile).data)
 
     @action(detail=True, methods=["post"])
     def reject(self, request, pk=None):
         kyc_profile = self.get_object()
+        audit_note(request, target_type="kyc", target_label=f"{kyc_profile.user.username} · {kyc_profile.legal_full_name}")
         reject_kyc(kyc_profile, reason=request.data.get("reason", ""))
         return Response(AdminKYCProfileSerializer(kyc_profile).data)
 

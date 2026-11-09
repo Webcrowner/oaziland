@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "@/i18n/navigation";
 import { getMyWallet, withdrawWallet, type WalletDetail } from "@/lib/api";
 import {
   IconCreditCard,
@@ -34,6 +35,13 @@ function humanize(value: string) {
   return value.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 }
 
+const KYC_NOTICE: Record<string, string> = {
+  NONE: "Verify your identity to withdraw money.",
+  UNVERIFIED: "Verify your identity to withdraw money.",
+  PENDING: "Your identity verification is under review. You can withdraw once it is approved.",
+  REJECTED: "Your identity verification was rejected. Please resubmit it to withdraw money.",
+};
+
 interface WalletPayoutCardProps {
   title?: string;
   subtitle?: string;
@@ -42,7 +50,7 @@ interface WalletPayoutCardProps {
 
 export default function WalletPayoutCard({
   title = "Earnings Wallet & MoMo Payouts",
-  subtitle = "Instant cash-out to your MTN Mobile Money or Orange Money account.",
+  subtitle = "Cash out to your MTN Mobile Money or Orange Money account. Each request is reviewed before it is paid.",
   onBalanceUpdated,
 }: WalletPayoutCardProps) {
   const [wallet, setWallet] = useState<WalletDetail | null>(null);
@@ -119,6 +127,8 @@ export default function WalletPayoutCard({
   }
 
   const balance = Number(wallet?.balance_xaf || 0);
+  const kycStatus = wallet?.kyc_status ?? "VERIFIED";
+  const canWithdraw = kycStatus === "VERIFIED";
   const transactions = wallet?.transactions ?? [];
   const withdrawals = wallet?.withdrawals ?? [];
   const isCreditType = (type: string) => type !== "WITHDRAWAL" && type !== "AD_SPEND";
@@ -159,7 +169,7 @@ export default function WalletPayoutCard({
                 setShowWithdrawForm(!showWithdrawForm);
                 setPayoutStatus("idle");
               }}
-              disabled={balance <= 0}
+              disabled={balance <= 0 || !canWithdraw}
               className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 shadow-md shadow-amber-400/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
               {showWithdrawForm ? <IconX size={16} /> : <IconUpload size={16} />}
@@ -167,10 +177,24 @@ export default function WalletPayoutCard({
             </button>
             <span className="text-[11px] text-slate-400 flex items-center gap-1">
               <IconShieldCheck size={12} className="text-emerald-400" />
-              <span>Instant MTN MoMo &amp; Orange Money</span>
+              <span>MTN MoMo &amp; Orange Money</span>
             </span>
           </div>
         </div>
+
+        {!canWithdraw && (
+          <div className="relative z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-3">
+            <p className="flex items-center gap-2 text-xs font-semibold text-amber-200">
+              <IconAlertCircle size={14} className="shrink-0" />
+              <span>{KYC_NOTICE[kycStatus] ?? KYC_NOTICE.NONE}</span>
+            </p>
+            {kycStatus !== "PENDING" && (
+              <Link href="/kyc" className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-black text-slate-950 hover:bg-amber-300">
+                {kycStatus === "REJECTED" ? "Resubmit ID" : "Verify identity"}
+              </Link>
+            )}
+          </div>
+        )}
 
         <dl className="relative z-10 mt-6 grid grid-cols-3 gap-2 sm:gap-3">
           {miniStats.map((s) => (
@@ -183,7 +207,7 @@ export default function WalletPayoutCard({
       </div>
 
       {/* Cash-Out / Withdrawal Form */}
-      {showWithdrawForm && (
+      {showWithdrawForm && canWithdraw && (
         <form onSubmit={handleWithdraw} className="p-5 sm:p-6 rounded-2xl bg-slate-50 border border-slate-200/90 space-y-5 animate-rise-in">
           <div className="flex items-center justify-between gap-3">
             <h4 className="text-sm font-black text-slate-900">
@@ -303,7 +327,7 @@ export default function WalletPayoutCard({
               disabled={payoutStatus === "processing"}
               className="px-6 py-3 rounded-xl font-bold text-sm bg-slate-900 text-white hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
             >
-              {payoutStatus === "processing" ? "Processing MoMo Payout..." : "Confirm & Send to Phone"}
+              {payoutStatus === "processing" ? "Sending request..." : "Request withdrawal"}
             </button>
           </div>
         </form>
@@ -383,6 +407,9 @@ export default function WalletPayoutCard({
                   <p className="truncate text-xs text-slate-400">
                     Requested {new Date(w.requested_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
                   </p>
+                  {w.status === "REJECTED" && w.rejection_reason && (
+                    <p className="text-xs text-red-600">Declined: {w.rejection_reason}</p>
+                  )}
                 </div>
                 <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${WITHDRAWAL_PILL[w.status] ?? "bg-slate-100 text-slate-700"}`}>
                   {humanize(w.status)}

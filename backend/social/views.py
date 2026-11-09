@@ -6,6 +6,7 @@ than erroring on a duplicate — matches link_social_account()'s own
 update_or_create behavior exactly.
 """
 from rest_framework import viewsets, permissions, status
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -56,6 +57,8 @@ class TestimonialsView(APIView):
         reviews = Review.objects.filter(score__gte=4).exclude(text="").select_related("author").order_by("-created_at")[:20]
         results = [
             {
+                "id": r.id,
+                "author_id": str(r.author_id),
                 "author_name": r.author.full_name or r.author.username,
                 "score": r.score,
                 "text": r.text,
@@ -123,14 +126,22 @@ class ConversationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def messages(self, request, pk=None):
         conversation = self.get_object()
-        messages = conversation.messages.filter(folder="SENT").order_by("sent_at")
-        return Response(MessageSerializer(messages, many=True, context={"request": request}).data)
+        messages = list(conversation.messages.filter(folder="SENT").order_by("sent_at"))
+        # Every listing card in the thread is loaded in one pass instead of once per message.
+        from marketplace.services import marketplace_summaries_for_ids
+        listing_ids = {m.marketplace_listing_id for m in messages if m.marketplace_listing_id}
+        summaries = {s["id"]: s for s in marketplace_summaries_for_ids(listing_ids)} if listing_ids else {}
+        for listing_id in listing_ids:
+            summaries.setdefault(str(listing_id), None)
+        context = {"request": request, "listing_summaries": summaries}
+        return Response(MessageSerializer(messages, many=True, context=context).data)
 
     @action(detail=True, methods=["post"])
     def send(self, request, pk=None):
         """Reuses the EXISTING send_message_now() exactly, including
         its client_message_id-based offline-safe retry handling — the
-        API layer never duplicates that logic."""
+        API layer never duplicates that logic. An optional listing_id ties the message to a marketplace listing
+        that one of the participants posted (e.g. "Is this car still available?")."""
         from .services import send_message_now
         from engagement.services import is_blocked_either_way
         conversation = self.get_object()
@@ -139,7 +150,18 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 return Response({"detail": BLOCKED_MESSAGE_DETAIL}, status=status.HTTP_403_FORBIDDEN)
         text = request.data.get("text", "")
         client_message_id = request.data.get("client_message_id")
-        message = send_message_now(conversation=conversation, sender=request.user, text=text, client_message_id=client_message_id)
+        listing = None
+        if request.data.get("listing_id"):
+            from marketplace.models import MarketplaceListingBase
+            try:
+                listing = MarketplaceListingBase.objects.filter(pk=request.data["listing_id"], removed_by_moderation=False).first()
+            except (ValueError, DjangoValidationError):
+                listing = None
+            if listing is None or not conversation.participants.filter(id=listing.lister_user_id).exists():
+                return Response({"listing_id": "That listing can't be attached to this conversation."}, status=status.HTTP_400_BAD_REQUEST)
+        message = send_message_now(
+            conversation=conversation, sender=request.user, text=text, client_message_id=client_message_id, marketplace_listing=listing,
+        )
         return Response(MessageSerializer(message, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])

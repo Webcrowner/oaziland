@@ -33,10 +33,11 @@ export default function LiveMarketTicker({ items, label }: { items: TickerItem[]
           <span className="font-extrabold uppercase tracking-widest text-[10px] text-amber-400">{label}</span>
         </div>
 
-        <div className="flex-1 overflow-hidden text-center sm:text-left transition-opacity duration-300">
+        <div className="flex-1 overflow-hidden text-center sm:text-left">
           <Link
+            key={currentIndex}
             href={currentItem.link}
-            className="text-slate-200 hover:text-amber-300 transition-colors font-medium truncate block"
+            className="animate-ticker-in text-slate-200 hover:text-amber-300 transition-colors font-medium truncate block"
           >
             {currentItem.text}
           </Link>

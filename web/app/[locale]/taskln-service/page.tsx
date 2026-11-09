@@ -18,6 +18,7 @@ import Button from "@/components/ui/Button";
 import MediaUploader from "@/components/MediaUploader";
 import TechnicianDocuments from "@/components/TechnicianDocuments";
 import ServiceRequestChat from "@/components/ServiceRequestChat";
+import ReportContentButton from "@/components/ReportContentButton";
 import GpsCaptureButton from "@/components/GpsCaptureButton";
 import { IconMapPin, IconWrench, IconCheckCircle, IconAlertCircle, IconChevronRight } from "@/components/Icons";
 import { useTasklnLabels, TASKLN_CATEGORY_CODES } from "@/lib/useTasklnLabels";
@@ -864,9 +865,12 @@ export default function TasklnServicePage() {
                           </>
                         )}
                         {request.their_review ? (
-                          <p className="rounded-lg border border-sky-100 bg-sky-50 p-2 text-sky-900">
-                            <span className="font-semibold">{t("theirReview")}:</span> {request.their_review.score}★{request.their_review.comment ? ` — ${request.their_review.comment}` : ""}
-                          </p>
+                          <div className="rounded-lg border border-sky-100 bg-sky-50 p-2 text-sky-900 flex flex-wrap items-start justify-between gap-2">
+                            <p>
+                              <span className="font-semibold">{t("theirReview")}:</span> {request.their_review.score}★{request.their_review.comment ? ` — ${request.their_review.comment}` : ""}
+                            </p>
+                            <ReportContentButton kind="service_review" id={String(request.their_review.id)} variant="inline" />
+                          </div>
                         ) : (
                           <p className="text-slate-500">{request.my_review ? t("theirReviewPending") : t("reviewsHiddenHint")}</p>
                         )}

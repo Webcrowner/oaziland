@@ -7,7 +7,10 @@ already existed and is reused here exactly as written, not
 reimplemented at the API layer.
 """
 from rest_framework import viewsets, permissions, status
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.pagination import PageNumberPagination
 from django.db import transaction as db_transaction
+from django.db.models import QuerySet
 from django.http import Http404
 from rest_framework.exceptions import ValidationError
 from decimal import Decimal, InvalidOperation
@@ -18,19 +21,21 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 from .models import WarehouseListing, StoreListing, BusinessListing, CarListing, GoodsListing, GoodsCategory, GoodsCondition, RideBooking, RideStatus, ListingCondition, Vehicle, DriverProfile, MarketplaceMedia, MarketplaceOrder, MarketplaceOrderStatus, PriceBasis, RideEmergencyContact
+from .models import CarBodyType, FuelType, Transmission, Drivetrain, VehicleCondition, CarBlockedPeriod
 from .serializers import (
     PlaceOrderSerializer, OrderDisputeSerializer, MarketplaceOrderSerializer, EmergencyContactSerializer, EmergencyContactStatusSerializer, AdminSosRideSerializer,
     AddMediaSerializer, SetAvailabilitySerializer,
     WarehouseListingSerializer, StoreListingSerializer, BusinessListingSerializer, CarListingSerializer, GoodsListingSerializer,
+    CarBlockedPeriodSerializer, CarRentalQuoteSerializer,
     RideBookingSerializer, RideRequestSerializer, CompleteRideSerializer, RideMessageSerializer, RideSosSerializer,
     ListingConditionSerializer, AttachConditionSerializer,
     DriverProfileSerializer, DriverRegistrationSerializer, DriverLocationSerializer, VehicleSerializer,
 )
 from .services import (
-    search_marketplace_listings, LISTING_ORDERINGS, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition,
+    search_marketplace_listings, marketplace_listing_queryset, with_listing_related, MarketplaceFeed, LISTING_ORDERINGS, CAR_ORDERINGS, DEFAULT_NEAR_RADIUS_KM, MAX_NEAR_RADIUS_KM, estimate_ride_fare, request_ride, accept_ride, start_ride, complete_ride_with_payment, attach_condition,
     trusted_ride_distance_km, cancel_ride, release_ride, raise_sos, RideStateError,
     moderate_listing_text, moderate_listing_photo,
-    category_models, place_order, mark_handed_over, confirm_receipt, cancel_order, decline_order, dispute_order, return_deposit, claim_deposit,
+    category_models, place_order, mark_handed_over, approve_rental_request, confirm_receipt, cancel_order, decline_order, dispute_order, return_deposit, claim_deposit,
     OrderError, ListingNotAvailableError, NotPartyToOrderError,
     register_as_driver, register_vehicle, NotARegisteredDriverError, DriverNotVerifiedError, VehicleCategoryMismatchError,
     post_ride_message, NotPartyToRideError,
@@ -76,6 +81,97 @@ def _get_or_create_owner_profile(user):
     return profile
 
 
+def parse_listing_filters(params) -> dict:
+    """Validates the browse query string (shared by each category list and the combined feed) into search filters."""
+    filters = {}
+    for key in ("min_price", "max_price", "min_size_sqm"):
+        if key in params:
+            try:
+                filters[key] = Decimal(params[key])
+            except InvalidOperation:
+                raise ValidationError({key: "Enter a number."})
+    if "quarter_id" in params:
+        try:
+            filters["quarter_id"] = uuid.UUID(params["quarter_id"])
+        except ValueError:
+            raise ValidationError({"quarter_id": "Enter a valid id."})
+    ordering = params.get("ordering", "newest")
+    if ordering not in LISTING_ORDERINGS and ordering not in CAR_ORDERINGS:
+        raise ValidationError({"ordering": f"Choose one of: {', '.join([*LISTING_ORDERINGS, *CAR_ORDERINGS])}."})
+    filters["ordering"] = ordering
+    if params.get("near_lat") or params.get("near_lng"):
+        try:
+            latitude, longitude = float(params["near_lat"]), float(params["near_lng"])
+            radius_km = float(params.get("radius_km") or DEFAULT_NEAR_RADIUS_KM)
+        except (KeyError, ValueError):
+            raise ValidationError({"near_lat": "Give near_lat and near_lng as numbers (and radius_km as a number)."})
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180 and 0 < radius_km <= MAX_NEAR_RADIUS_KM):
+            raise ValidationError({"near_lat": f"Latitude -90 to 90, longitude -180 to 180 and radius_km above 0 up to {MAX_NEAR_RADIUS_KM}."})
+        filters.update(near_lat=latitude, near_lng=longitude, radius_km=radius_km)
+    elif ordering == "distance":
+        raise ValidationError({"ordering": "Sorting by distance needs near_lat and near_lng."})
+    for key in ("min_year", "max_year", "max_mileage_km"):
+        if params.get(key):
+            try:
+                filters[key] = int(params[key])
+            except ValueError:
+                raise ValidationError({key: "Enter a whole number."})
+    if params.get("make", "").strip():
+        filters["make"] = params["make"].strip()
+    if params.get("model", "").strip():
+        filters["model"] = params["model"].strip()
+    if params.get("price_basis"):
+        if params["price_basis"] not in PriceBasis.values:
+            raise ValidationError({"price_basis": "Enter a valid price basis."})
+        filters["price_basis"] = params["price_basis"]
+    if params.get("item_category"):
+        if params["item_category"] not in GoodsCategory.values:
+            raise ValidationError({"item_category": "Enter a valid item category."})
+        filters["item_category"] = params["item_category"]
+    if params.get("condition"):
+        if params["condition"] not in GoodsCondition.values:
+            raise ValidationError({"condition": "Enter a valid condition."})
+        filters["condition"] = params["condition"]
+    if params.get("q", "").strip():
+        filters["q"] = params["q"].strip()
+    _parse_car_filters(params, filters)
+    return filters
+
+
+CAR_CHOICE_FILTERS = {
+    "body_type": CarBodyType, "fuel_type": FuelType, "transmission": Transmission,
+    "drivetrain": Drivetrain, "vehicle_condition": VehicleCondition,
+}
+
+
+def _parse_car_filters(params, filters: dict):
+    """The car-only browse filters (body, fuel, gearbox, papers, driver, seats and free dates)."""
+    from datetime import date, timedelta
+    for key, choices in CAR_CHOICE_FILTERS.items():
+        if params.get(key):
+            values = [v for v in params[key].split(",") if v]
+            if any(v not in choices.values for v in values):
+                raise ValidationError({key: f"Choose from: {', '.join(choices.values)}."})
+            filters[key] = values
+    if params.get("min_seats"):
+        try:
+            filters["min_seats"] = int(params["min_seats"])
+        except ValueError:
+            raise ValidationError({"min_seats": "Enter a whole number."})
+    for key in ("customs_cleared", "with_driver", "delivery", "negotiable", "instant_book"):
+        if params.get(key) in ("1", "true"):
+            filters[key] = True
+    if params.get("available_from") or params.get("available_to"):
+        try:
+            start = date.fromisoformat(params.get("available_from", ""))
+            end = date.fromisoformat(params.get("available_to", ""))
+        except ValueError:
+            raise ValidationError({"available_from": "Give available_from and available_to as YYYY-MM-DD dates."})
+        if end <= start or end - start > timedelta(days=365):
+            raise ValidationError({"available_to": "The return day must be after the start day, at most a year later."})
+        filters.update(available_from=start, available_to=end)
+
+
 class IsListerOrAdmin(permissions.BasePermission):
     """Edit, delete and status changes belong to the user who posted the listing (or an admin moderating it)."""
     def has_object_permission(self, request, view, obj):
@@ -92,11 +188,19 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
     search_marketplace_listings() for filtering rather than
     reimplementing it."""
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    # Browsing is the marketplace's most common action and the "All" tab fires one list request per
+    # category (5 per load), so reads get their own larger bucket instead of the 60/hour anonymous one.
+    throttle_scope = "marketplace_browse"
+
+    def get_throttles(self):
+        if self.action in ("list", "retrieve"):
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_permissions(self):
         if self.action == "create":
             return [IsKycVerified()]
-        if self.action in ("update", "partial_update", "destroy", "set_status"):
+        if self.action in ("update", "partial_update", "destroy", "set_status", "renew"):
             return [permissions.IsAuthenticated(), IsListerOrAdmin()]
         if self.action == "mine":
             return [permissions.IsAuthenticated()]
@@ -106,38 +210,8 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return self.model_class.objects.none()
         if self.action == "list":
-            filters = {}
-            for key in ("min_price", "max_price", "min_size_sqm"):
-                if key in self.request.query_params:
-                    try:
-                        filters[key] = Decimal(self.request.query_params[key])
-                    except InvalidOperation:
-                        raise ValidationError({key: "Enter a number."})
-            if "quarter_id" in self.request.query_params:
-                try:
-                    filters["quarter_id"] = uuid.UUID(self.request.query_params["quarter_id"])
-                except ValueError:
-                    raise ValidationError({"quarter_id": "Enter a valid id."})
-            params = self.request.query_params
-            ordering = params.get("ordering", "newest")
-            if ordering not in LISTING_ORDERINGS:
-                raise ValidationError({"ordering": f"Choose one of: {', '.join(LISTING_ORDERINGS)}."})
-            filters["ordering"] = ordering
-            if params.get("price_basis"):
-                if params["price_basis"] not in PriceBasis.values:
-                    raise ValidationError({"price_basis": "Enter a valid price basis."})
-                filters["price_basis"] = params["price_basis"]
-            if params.get("item_category"):
-                if params["item_category"] not in GoodsCategory.values:
-                    raise ValidationError({"item_category": "Enter a valid item category."})
-                filters["item_category"] = params["item_category"]
-            if params.get("condition"):
-                if params["condition"] not in GoodsCondition.values:
-                    raise ValidationError({"condition": "Enter a valid condition."})
-                filters["condition"] = params["condition"]
-            if params.get("q", "").strip():
-                filters["q"] = params["q"].strip()
-            return search_marketplace_listings(listing_class=self.model_class, filters=filters)
+            result = search_marketplace_listings(listing_class=self.model_class, filters=parse_listing_filters(self.request.query_params))
+            return with_listing_related(result) if isinstance(result, QuerySet) else result
         return self.model_class.objects.all()
 
     def retrieve(self, request, *args, **kwargs):
@@ -145,7 +219,12 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         user = request.user
         if listing.removed_by_moderation and not (user.is_authenticated and (listing.lister_user_id == user.id or hasattr(user, "admin_profile"))):
             raise Http404
+        from .engagement import record_view
+        record_view(listing, request)
         return Response(self.get_serializer(listing).data)
+
+    def _category(self) -> str:
+        return next(name for name, model in category_models().items() if model is self.model_class)
 
     def perform_create(self, serializer):
         owner_profile = _get_or_create_owner_profile(self.request.user)
@@ -158,17 +237,30 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         data = serializer.validated_data
         _moderate_text(listing_id, data.get("title", ""), data.get("description", ""))
         serializer.save(id=listing_id, owner=owner_profile, lister_user=self.request.user, lister_role=lister_role)
+        from .engagement import notify_saved_searches
+        try:
+            notify_saved_searches(serializer.instance, self._category())
+        except Exception:  # An alert failing must never lose the seller's new listing.
+            logger.exception("Saved-search alerts failed for listing %s", listing_id)
 
     def perform_update(self, serializer):
         data = serializer.validated_data
         instance = serializer.instance
-        has_live_order = MarketplaceOrder.objects.filter(listing_id=instance.id, status__in=LIVE_ORDER_STATUSES).exists()
+        old_price = instance.price_xaf
+        # A car booked for dates keeps the price it was booked at, so only whole-listing orders lock the price.
+        has_live_order = MarketplaceOrder.objects.filter(listing_id=instance.id, status__in=LIVE_ORDER_STATUSES, booked_dates=False).exists()
         if has_live_order:
             for field in ("price_xaf", "price_basis", "security_deposit_xaf"):
                 if field in data and data[field] != getattr(instance, field):
                     raise ValidationError({field: "The price and deposit cannot be changed while an order is active."})
         _moderate_text(instance.id, data.get("title", instance.title), data.get("description", instance.description))
         serializer.save()
+        if serializer.instance.price_xaf < old_price:
+            from .engagement import notify_price_drop
+            try:
+                notify_price_drop(serializer.instance, self._category(), old_price)
+            except Exception:
+                logger.exception("Price-drop alerts failed for listing %s", instance.id)
 
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
@@ -181,11 +273,47 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def mine(self, request):
-        """Everything the caller has posted, including sold, paused and unavailable listings the public list hides."""
+        """Everything the caller has posted, including sold, paused, expired and unavailable listings the public list
+        hides, each with its views, saves and chats."""
+        from .engagement import listing_stats
         queryset = self.model_class.objects.filter(lister_user=request.user).order_by("-created_at")
         page = self.paginate_queryset(queryset)
-        serializer = self.get_serializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        data = self.get_serializer(page, many=True).data
+        stats = listing_stats([row["id"] for row in data])
+        for row in data:
+            row["stats"] = stats.get(str(row["id"]), {"views": 0, "saves": 0, "chats": 0})
+        return self.get_paginated_response(data)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: dict, 403: dict})
+    def renew(self, request, pk=None):
+        """Puts the listing back on the marketplace for another LISTING_LIFETIME_DAYS ("Still available")."""
+        from .engagement import renew_listing, expires_at
+        listing = self.get_object()
+        if listing.lister_user_id != request.user.id:
+            return Response({"detail": "Only the lister can renew this listing."}, status=status.HTTP_403_FORBIDDEN)
+        if listing.removed_by_moderation:
+            return Response({"detail": "This listing was removed by moderation. Contact support to appeal."}, status=status.HTTP_403_FORBIDDEN)
+        renew_listing(listing)
+        return Response({"id": str(listing.id), "expires_at": expires_at(listing).isoformat(), "is_expired": False})
+
+    @action(detail=True, methods=["get"])
+    def similar(self, request, pk=None):
+        """Up to 4 other available listings of the same category offered the same way (and, for goods, of the same
+        kind), newest first, preferring the same area."""
+        from django.db.models import Case, When, IntegerField
+        listing = self.get_object()
+        if listing.removed_by_moderation:
+            raise Http404
+        rows = marketplace_listing_queryset(listing_class=self.model_class, filters={}).filter(
+            price_basis=listing.price_basis, removed_by_moderation=False,
+        ).exclude(pk=listing.pk)
+        if getattr(listing, "item_category", None):
+            rows = rows.filter(item_category=listing.item_category)
+        rows = rows.annotate(
+            same_area=Case(When(quarter_id=listing.quarter_id, then=0), default=1, output_field=IntegerField()),
+        ).order_by("same_area", "-created_at")
+        return Response(self.get_serializer(with_listing_related(rows)[:4], many=True).data)
 
     @action(detail=True, methods=["post"], url_path="set-status")
     @extend_schema(request=SetAvailabilitySerializer, responses={200: dict})
@@ -200,7 +328,7 @@ class BaseMarketplaceViewSet(viewsets.ModelViewSet):
         requested_status = input_serializer.validated_data["status"]
         if (
             requested_status != listing.availability_status
-            and MarketplaceOrder.objects.filter(listing_id=listing.id, status__in=LIVE_ORDER_STATUSES).exists()
+            and MarketplaceOrder.objects.filter(listing_id=listing.id, status__in=LIVE_ORDER_STATUSES, booked_dates=False).exists()
         ):
             return Response(
                 {"detail": "The listing status is managed by its active order."},
@@ -269,13 +397,153 @@ class BusinessListingViewSet(BaseMarketplaceViewSet):
 
 
 class CarListingViewSet(BaseMarketplaceViewSet):
+    """Cars for sale or rent. A car rented by the day also has a public availability calendar, a price quote for
+    chosen days, owner-managed blocked days and a "similar cars" strip, like Turo or AutoTrader."""
     serializer_class = CarListingSerializer
     model_class = CarListing
+
+    def _public_car(self):
+        car = self.get_object()
+        if car.removed_by_moderation:
+            raise Http404
+        return car
+
+    @extend_schema(responses={200: dict})
+    @action(detail=True, methods=["get"])
+    def availability(self, request, pk=None):
+        """The days the car can't be booked (from today, at most a year ahead). Renters only see that a day is
+        taken, never by whom or why; the owner also sees their blocked periods' ids and notes."""
+        from .car_rentals import busy_periods
+        car = self._public_car()
+        is_owner = request.user.is_authenticated and car.lister_user_id == request.user.id
+        periods = []
+        for period in busy_periods(car):
+            row = {"start": period["start"].isoformat(), "end": period["end"].isoformat()}
+            if is_owner:
+                row.update(kind=period["kind"], id=period.get("id"), note=period.get("note", ""))
+            periods.append(row)
+        return Response({"busy": periods, "min_rental_days": car.min_rental_days, "max_rental_days": car.max_rental_days})
+
+    @extend_schema(parameters=[CarRentalQuoteSerializer], responses={200: dict, 400: dict})
+    @action(detail=True, methods=["get"])
+    def quote(self, request, pk=None):
+        """Prices the chosen days (with the owner's discounts, driver and delivery) and checks they are free."""
+        from .car_rentals import quote_car_rental, breakdown_for_storage, CarRentalError
+        car = self._public_car()
+        params = CarRentalQuoteSerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        try:
+            quote = quote_car_rental(
+                car, start=params.validated_data["start_date"], end=params.validated_data["end_date"],
+                with_driver=params.validated_data["with_driver"], delivery=params.validated_data["delivery"],
+            )
+        except CarRentalError as e:
+            return Response({e.field: str(e), "detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(breakdown_for_storage(quote))
+
+    @extend_schema(responses={200: CarListingSerializer(many=True)})
+    @action(detail=True, methods=["get"])
+    def similar(self, request, pk=None):
+        """Up to 4 other available cars offered the same way (sale or rent) of the same make or body type."""
+        from django.db.models import Q
+        from .engagement import expiry_cutoff
+        car = self._public_car()
+        spec = getattr(car, "vehicle_spec", None)
+        match = Q(vehicle_spec__make__iexact=spec.make) if spec else Q()
+        if spec and spec.body_type:
+            match |= Q(vehicle_spec__body_type=spec.body_type)
+        rows = with_listing_related(
+            CarListing.objects.filter(
+                match, availability_status="AVAILABLE", removed_by_moderation=False, price_basis=car.price_basis,
+                renewed_at__gte=expiry_cutoff(),
+            )
+            .exclude(pk=car.pk).order_by("-created_at")
+        )[:4]
+        return Response(self.get_serializer(rows, many=True).data)
+
+    @extend_schema(request=CarBlockedPeriodSerializer, responses={200: CarBlockedPeriodSerializer(many=True), 201: CarBlockedPeriodSerializer})
+    @action(detail=True, methods=["get", "post"], url_path="blocked-dates")
+    def blocked_dates(self, request, pk=None):
+        """The owner keeps days off the calendar (servicing, personal use). Days already booked can't be blocked."""
+        from .car_rentals import busy_periods, overlaps
+        car = self.get_object()
+        if not (request.user.is_authenticated and car.lister_user_id == request.user.id):
+            return Response({"detail": "Only the car's lister can manage its calendar."}, status=status.HTTP_403_FORBIDDEN)
+        if request.method == "GET":
+            from django.utils import timezone
+            rows = car.blocked_periods.filter(ends_on__gt=timezone.localdate())
+            return Response(CarBlockedPeriodSerializer(rows, many=True).data)
+        serializer = CarBlockedPeriodSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        booked = [p for p in busy_periods(car) if p["kind"] == "booked"]
+        if overlaps(booked, serializer.validated_data["starts_on"], serializer.validated_data["ends_on"]):
+            return Response({"detail": "Some of those days are already booked by a renter."}, status=status.HTTP_409_CONFLICT)
+        serializer.save(car=car)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(request=None, responses={204: None, 403: dict, 404: dict})
+    @action(detail=True, methods=["delete"], url_path=r"blocked-dates/(?P<period_id>[0-9a-f-]{36})")
+    def unblock_dates(self, request, pk=None, period_id=None):
+        car = self.get_object()
+        if not (request.user.is_authenticated and car.lister_user_id == request.user.id):
+            return Response({"detail": "Only the car's lister can manage its calendar."}, status=status.HTTP_403_FORBIDDEN)
+        deleted, _ = CarBlockedPeriod.objects.filter(car=car, pk=period_id).delete()
+        if not deleted:
+            return Response({"detail": "That blocked period was not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class GoodsListingViewSet(BaseMarketplaceViewSet):
     serializer_class = GoodsListingSerializer
     model_class = GoodsListing
+
+
+MARKETPLACE_FEED_SERIALIZERS = {
+    "goods": (GoodsListing, GoodsListingSerializer),
+    "cars": (CarListing, CarListingSerializer),
+    "stores": (StoreListing, StoreListingSerializer),
+    "warehouses": (WarehouseListing, WarehouseListingSerializer),
+    "businesses": (BusinessListing, BusinessListingSerializer),
+}
+
+
+class MarketplaceSellerView(APIView):
+    """The seller trust card (member since, ID verified, rating, items sold, reply rate and time) shown on every
+    marketplace listing, like Jiji's or Facebook Marketplace's seller box."""
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "marketplace_browse"
+    throttle_classes = [ScopedRateThrottle]
+
+    @extend_schema(responses={200: dict, 404: dict})
+    def get(self, request, user_id):
+        from identity.models import User
+        from .engagement import seller_summary
+        user = User.objects.filter(pk=user_id, is_active=True).first()
+        if user is None:
+            raise Http404
+        return Response(seller_summary(user))
+
+
+class MarketplaceFeedView(APIView):
+    """Every marketplace category in one list: filtered, merged in the requested order and paged exactly,
+    so the browse page needs a single request (and a correct total) instead of one per category."""
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "marketplace_browse"
+    throttle_classes = [ScopedRateThrottle]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        filters = parse_listing_filters(request.query_params)
+        if filters["ordering"] in CAR_ORDERINGS:
+            raise ValidationError({"ordering": "Sorting by year or mileage is only available on the cars list."})
+        feed = MarketplaceFeed({category: model for category, (model, _) in MARKETPLACE_FEED_SERIALIZERS.items()}, filters)
+        paginator = PageNumberPagination()
+        results = []
+        for category, listing in paginator.paginate_queryset(feed, request, view=self):
+            data = dict(MARKETPLACE_FEED_SERIALIZERS[category][1](listing, context={"request": request}).data)
+            data["category"] = category
+            results.append(data)
+        return paginator.get_paginated_response(results)
 
 
 def _is_verified_driver(user) -> bool:
@@ -410,6 +678,8 @@ class RideViewSet(viewsets.ModelViewSet):
             fare_estimate_xaf=fare, distance_km=round(Decimal(distance_km), 2), pickup_coords=pickup_coords, dropoff_coords=dropoff_coords,
             ride_category=data["ride_category"], transport_type=data["transport_type"],
             has_luggage=data["has_luggage"], cargo_description=data.get("cargo_description", ""),
+            luggage_count=data.get("luggage_count"), luggage_size=data.get("luggage_size", ""),
+            luggage_photo_urls=data.get("luggage_photo_urls", []),
         )
         return Response(RideBookingSerializer(ride).data, status=status.HTTP_201_CREATED)
 
@@ -761,6 +1031,16 @@ class AdminSosRideViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(AdminSosRideSerializer(ride).data)
 
 
+def _infrastructure_errors() -> tuple:
+    """Failures of the services payments depend on: the Redis client package missing, or its server unreachable."""
+    errors: tuple = (ImportError,)
+    try:
+        from redis.exceptions import RedisError
+    except ImportError:
+        return errors
+    return errors + (RedisError,)
+
+
 class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
     """Buying or renting a marketplace listing through escrow: pay, seller hands over, buyer confirms.
     Only list is scoped to the caller; detail actions use an unscoped queryset with explicit checks so a
@@ -813,12 +1093,13 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
             order = place_order(
                 listing=listing, buyer=request.user, lock_client=get_booking_lock_client(),
                 payment_gateway=get_active_gateway(), phone_number=data["phone_number"],
+                rental={key: data.get(key) for key in ("start_date", "end_date", "with_driver", "delivery")},
             )
         except ListingNotAvailableError as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
         except OrderError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except (RuntimeError, NotImplementedError, ValueError):
+        except (RuntimeError, NotImplementedError, ValueError, *_infrastructure_errors()):
             logger.exception("Marketplace payment infrastructure is unavailable.")
             return Response(
                 {"detail": "Payments are temporarily unavailable. Please try again later."},
@@ -846,6 +1127,12 @@ class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
     def hand_over(self, request, pk=None):
         return self._run(request, mark_handed_over, seller=request.user)
+
+    @action(detail=True, methods=["post"])
+    @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})
+    def approve(self, request, pk=None):
+        """The owner of a car without instant booking accepts the renter's paid booking request."""
+        return self._run(request, approve_rental_request, seller=request.user)
 
     @action(detail=True, methods=["post"])
     @extend_schema(request=None, responses={200: MarketplaceOrderSerializer, 400: dict, 403: dict})

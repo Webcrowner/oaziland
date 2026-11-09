@@ -393,6 +393,10 @@ class Message(models.Model):
     trashed_at = models.DateTimeField(null=True, blank=True)  # drives the retention window
     created_at = models.DateTimeField(auto_now_add=True)
     read_receipt = models.BooleanField(default=False)
+    # The marketplace listing (car, goods, store…) this message is about, shown as a card in the chat.
+    marketplace_listing = models.ForeignKey(
+        "marketplace.MarketplaceListingBase", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
 
     class Meta:
         db_table = "messages"

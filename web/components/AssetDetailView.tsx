@@ -8,7 +8,11 @@ import PropertyMap from "@/components/PropertyMap";
 import Badge from "@/components/ui/Badge";
 import OwnerMediaManager from "@/components/OwnerMediaManager";
 import RateAndReport from "@/components/RateAndReport";
-import type { AssetMediaEndpoint, PropertyAssetPhotoItem } from "@/lib/api";
+import HideForOwner from "@/components/HideForOwner";
+import ReportContentButton from "@/components/ReportContentButton";
+import PlaceReviews from "@/components/PlaceReviews";
+import ListingChatButton from "@/components/ListingChatButton";
+import type { AssetMediaEndpoint, MarketplaceCategory, PlaceReviewKind, PropertyAssetPhotoItem, ReportKind } from "@/lib/api";
 
 export interface DetailRow {
   primary: string;
@@ -41,6 +45,16 @@ export interface AssetDetailProps {
   mediaEndpoint?: AssetMediaEndpoint;
   assetId?: string;
   actionSlot?: React.ReactNode;
+  /** Category-specific detail sections (e.g. a car's spec sheet), shown under the description. */
+  detailsSlot?: React.ReactNode;
+  /** Marketplace listings: chat with quick questions, sent with a card of the listing. Replaces the plain chat button. */
+  listingChat?: { category: MarketplaceCategory; id: string; isSale: boolean };
+  /** Replaces the plain lister box (e.g. with the marketplace seller trust card). */
+  sellerSlot?: React.ReactNode;
+  /** Shows a "Report this …" link for the place itself (hidden from its owner). */
+  report?: { kind: ReportKind; id: string };
+  /** Shows the place's reviews and, for real customers, a form to write one. */
+  reviews?: { kind: PlaceReviewKind; id: string };
 }
 
 const humanize = (value: string) => value.replace(/_/g, " ").toLowerCase();
@@ -83,6 +97,8 @@ export default async function AssetDetailView(props: AssetDetailProps) {
             <p className="text-gray-700 mb-6 border-l-4 border-[var(--gold)] pl-4 whitespace-pre-line">{props.description}</p>
           )}
 
+          {props.detailsSlot}
+
           {amenities.length > 0 && (
             <div className="mb-6">
               <h2 className="text-sm font-semibold text-gray-700 mb-2">{t("amenities")}</h2>
@@ -116,6 +132,8 @@ export default async function AssetDetailView(props: AssetDetailProps) {
             </div>
           )}
 
+          {props.reviews && <PlaceReviews kind={props.reviews.kind} id={props.reviews.id} />}
+
           {props.mediaEndpoint && props.assetId && (
             <OwnerMediaManager
               endpoint={props.mediaEndpoint}
@@ -129,7 +147,16 @@ export default async function AssetDetailView(props: AssetDetailProps) {
 
         <div className="lg:sticky lg:top-4 lg:self-start flex flex-col gap-3">
           {props.actionSlot}
-          {props.ownerId && (
+          {props.ownerId && props.listingChat && (
+            <HideForOwner ownerId={props.ownerId}>
+              <ListingChatButton
+                category={props.listingChat.category} listingId={props.listingChat.id}
+                recipientId={props.ownerId} isSale={props.listingChat.isSale}
+              />
+            </HideForOwner>
+          )}
+          {props.sellerSlot}
+          {props.ownerId && !props.sellerSlot && (
             <div className="rounded-lg p-4 bg-gray-50 border border-gray-200">
               <ListerRoleBadge role={props.listerRole} isSale={props.isSale} />
               <p className="font-semibold text-[var(--navy)] mt-1">
@@ -138,17 +165,19 @@ export default async function AssetDetailView(props: AssetDetailProps) {
                 </Link>
               </p>
               <div className="mt-3 pt-3 border-t border-black/10">
-                <RateAndReport subjectUserId={props.ownerId} />
+                <HideForOwner ownerId={props.ownerId}><RateAndReport subjectUserId={props.ownerId} /></HideForOwner>
               </div>
             </div>
           )}
-          {props.ownerId && (
-            <DirectChatButton
-              recipientId={props.ownerId}
-              recipientName={props.ownerName || undefined}
-              label={t("messageLister")}
-              className="w-full inline-flex items-center justify-center gap-1.5 bg-slate-900 text-amber-300 font-semibold px-4 py-2.5 rounded-lg text-sm hover:bg-slate-800 transition-colors"
-            />
+          {props.ownerId && !props.listingChat && (
+            <HideForOwner ownerId={props.ownerId}>
+              <DirectChatButton
+                recipientId={props.ownerId}
+                recipientName={props.ownerName || undefined}
+                label={t("messageLister")}
+                className="w-full inline-flex items-center justify-center gap-1.5 bg-slate-900 text-amber-300 font-semibold px-4 py-2.5 rounded-lg text-sm hover:bg-slate-800 transition-colors"
+              />
+            </HideForOwner>
           )}
           <WhatsAppShareButton
             variant="detail"
@@ -157,6 +186,7 @@ export default async function AssetDetailView(props: AssetDetailProps) {
             price={props.sharePrice}
             path={props.sharePath}
           />
+          {props.report && <ReportContentButton kind={props.report.kind} id={props.report.id} ownerId={props.ownerId} />}
         </div>
       </div>
     </main>

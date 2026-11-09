@@ -2,8 +2,9 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { requestRide } from "@/lib/api";
+import { requestRide, type LuggageSize } from "@/lib/api";
 import Button from "@/components/ui/Button";
+import MediaUploader from "@/components/MediaUploader";
 import { IconAlertCircle } from "@/components/Icons";
 import { useOaziGo } from "@/components/oazigo/OaziGoProvider";
 import RideLocationField from "@/components/oazigo/RideLocationField";
@@ -11,6 +12,8 @@ import { RIDE_CATEGORIES, cardCls, inputCls, labelCls } from "@/components/oazig
 import { estimateFareXaf, roadDistanceKm } from "@/components/oazigo/fare";
 
 const NO_GPS = { latitude: null, longitude: null };
+const LUGGAGE_SIZES: LuggageSize[] = ["SMALL", "MEDIUM", "LARGE", "BULKY"];
+const MAX_LUGGAGE_PHOTOS = 3;
 
 export default function OaziGoRequestPage() {
   const t = useTranslations("OaziGoPage");
@@ -25,6 +28,9 @@ export default function OaziGoRequestPage() {
   const [rideCategory, setRideCategory] = useState<string>("STANDARD");
   const [transportType, setTransportType] = useState<"PASSENGER" | "CARGO">("PASSENGER");
   const [hasLuggage, setHasLuggage] = useState(false);
+  const [luggageCount, setLuggageCount] = useState("");
+  const [luggageSize, setLuggageSize] = useState<LuggageSize | "">("");
+  const [luggagePhotos, setLuggagePhotos] = useState<string[]>([]);
   const [cargoDescription, setCargoDescription] = useState("");
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState("");
@@ -54,6 +60,9 @@ export default function OaziGoRequestPage() {
         ride_category: rideCategory,
         transport_type: transportType,
         has_luggage: hasLuggage,
+        ...(hasLuggage && transportType === "PASSENGER"
+          ? { luggage_count: luggageCount ? Number(luggageCount) : null, luggage_size: luggageSize, luggage_photo_urls: luggagePhotos }
+          : {}),
         cargo_description: transportType === "CARGO" ? cargoDescription : undefined,
       }, token);
       reload();
@@ -132,10 +141,59 @@ export default function OaziGoRequestPage() {
           <input id="oazigo-cargo" required placeholder={t("cargoDescriptionPlaceholder")} value={cargoDescription} onChange={(e) => setCargoDescription(e.target.value)} className={inputCls} />
         </div>
       ) : (
-        <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-sm font-semibold text-slate-700">
-          <input type="checkbox" checked={hasLuggage} onChange={(e) => setHasLuggage(e.target.checked)} className="h-4 w-4 accent-amber-500" />
-          {t("hasLuggageLabel")}
-        </label>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 flex flex-col gap-3">
+          <label className="flex cursor-pointer items-center gap-2.5 text-sm font-semibold text-slate-700">
+            <input type="checkbox" checked={hasLuggage} onChange={(e) => setHasLuggage(e.target.checked)} className="h-4 w-4 accent-amber-500" />
+            {t("hasLuggageLabel")}
+          </label>
+          {hasLuggage && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls} htmlFor="oazigo-luggage-count">{t("luggageCountLabel")}</label>
+                  <input
+                    id="oazigo-luggage-count" type="number" min={1} max={20} step={1} value={luggageCount}
+                    onChange={(e) => setLuggageCount(e.target.value)} className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="oazigo-luggage-size">{t("luggageSizeLabel")}</label>
+                  <select id="oazigo-luggage-size" value={luggageSize} onChange={(e) => setLuggageSize(e.target.value as LuggageSize | "")} className={inputCls}>
+                    <option value="">{t("luggageSizeChoose")}</option>
+                    {LUGGAGE_SIZES.map((size) => <option key={size} value={size}>{t(`luggageSize_${size}`)}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <p className={labelCls}>{t("luggagePhotosLabel")}</p>
+                <p className="mb-2 text-[11px] text-slate-500">{t("luggagePhotosHint")}</p>
+                {luggagePhotos.length > 0 && (
+                  <ul className="mb-2 flex flex-wrap gap-2">
+                    {luggagePhotos.map((url, i) => (
+                      <li key={url} className="relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- freshly uploaded preview */}
+                        <img src={url} alt={t("luggagePhotoAlt", { n: i + 1 })} className="h-20 w-20 rounded-xl border border-slate-200 object-cover" />
+                        <button
+                          type="button" onClick={() => setLuggagePhotos((prev) => prev.filter((p) => p !== url))}
+                          aria-label={t("luggagePhotoRemove", { n: i + 1 })}
+                          className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white cursor-pointer"
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {luggagePhotos.length < MAX_LUGGAGE_PHOTOS && (
+                  <MediaUploader
+                    folder="luggage" accept="image/*" label={t("luggagePhotoAdd")}
+                    onUploaded={(result) => setLuggagePhotos((prev) => (prev.length < MAX_LUGGAGE_PHOTOS ? [...prev, result.url] : prev))}
+                  />
+                )}
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {hasDistance && (

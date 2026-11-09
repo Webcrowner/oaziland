@@ -6,6 +6,8 @@ viewsets (Listing, Quarter, Booking...); JWT and interactive API docs
 are wired directly here.
 """
 from django.contrib import admin
+from oaziland.admin_site import DataAdminTicketView
+from identity.staff_views import StaffAccessActionView, StaffAccessListView, StaffSessionView
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
@@ -17,7 +19,7 @@ from identity.views import (
     MyKycView, ChangePasswordView, PasswordResetRequestView, PasswordResetConfirmView, LoginView, RefreshView,
     AdminKYCReviewViewSet, UserPublicIndexView, DevRoleSwitchView,
 )
-from geo.views import QuarterViewSet, AreaSuggestionView
+from geo.views import QuarterViewSet, AreaSuggestionView, AdminAreaSuggestionViewSet
 from property.views import ListingViewSet, HouseViewSet, ShopViewSet, MyLandlordPortfolioView, MyListingsView
 from land.views import LandViewSet
 from transactions.views import BookingViewSet, payment_webhook_view
@@ -29,18 +31,23 @@ from social.views import (
 )
 from trust_safety.views import (
     AdminConsoleSummaryView,
+    AdminAnalyticsView,
     AdminVerificationRequestViewSet,
     AdminContentReportViewSet,
     AdminDisputeCaseViewSet,
     AdminUserManagementViewSet,
+    AdminAuditLogViewSet,
+    AdminContentViewSet,
+    AdminAiFlagViewSet,
+    AdminPaymentViewSet,
     FileContentReportView,
 )
-from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet
+from compliance.views import ConsentRecordViewSet, DataExportRequestViewSet, PolicyDocumentViewSet, MyAccountDeletionView, AdminAccountDeletionViewSet, AdminDataExportViewSet
 from hotels.views import HotelViewSet, ReservationViewSet
-from events.views import VenueViewSet, EventBookingViewSet
+from events.views import VenueViewSet, EventBookingViewSet, AdminCatererViewSet
 from student_hostels.views import (
     StudentHostelViewSet, MyRoomAllocationViewSet, AdminWelfareAlertViewSet, MyHostelWaitlistView, AdminRoomAllocationViewSet,
-    MyParentAccessGrantsView, ParentPortalView, MyGuardianAccessesView,
+    MyParentAccessGrantsView, ParentPortalView, MyGuardianAccessesView, HostelRoomsViewSet,
 )
 from guest_houses.views import GuestHouseLodgeViewSet
 from discovery.views import WantedListingViewSet, SavedSearchViewSet, MyComparisonView, ListingWaitlistView
@@ -48,9 +55,11 @@ from discovery.home_stats import HomeStatsView
 from notifications.views import MyNotificationViewSet, AdminGreetingSettingsView, ListingShareMessageView
 from monetization.views import (
     MyCreatorPremiumView, MyWalletView, WithdrawWalletView, RechargeWalletView, SendGiftView, MyGiftsView,
-    ConvertGiftsView, BoostPriceQuoteView, PurchaseCampaignBoostView, MyAdCampaignsView,
+    ConvertGiftsView, BoostPriceQuoteView, PurchaseCampaignBoostView, MyAdCampaignsView, AdminWithdrawalViewSet,
+    AdminPricingView, AdminFeePolicyView, AdminBoostPriceView,
 )
 from uploads.views import MediaUploadView
+from visitors.views import RecordVisitView, AdminVisitorSummaryView
 from finance.views import PropertyValuationView, AffordabilityEstimateView, MyEarningsReportView, CurrencyConversionView
 from flyers.views import FlyerViewSet
 from property_management.views import (
@@ -59,7 +68,7 @@ from property_management.views import (
 )
 from marketplace.views import (
     WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, GoodsListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet,
-    MyDriverProfileView, MyDriverLocationView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView, AdminSosRideViewSet,
+    MyDriverProfileView, MyDriverLocationView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView, AdminSosRideViewSet, MarketplaceFeedView, MarketplaceSellerView,
 )
 from services.views import (
     ServiceRequestViewSet, FindTechniciansView, TechnicianDirectoryView, MyTechnicianDocumentsView, MyTechnicianDashboardView, MyTechnicianProfileView, AdminTechnicianViewSet,
@@ -67,11 +76,11 @@ from services.views import (
     AdminServiceDisputeViewSet,
 )
 from catalogue.views import PartnerServiceCategoryViewSet, RequestPartnerServiceView, MyPartnerServiceRequestsView
-from engagement.views import ContactMessageView, MyBadgesView, MySupportTicketsView, SupportTicketDetailView, AnonymousChatbotView, PublicFaqListView, AdminFaqViewSet, BlockUserView, MyBlockedUsersView
+from engagement.views import ContactMessageView, MyBadgesView, MySupportTicketsView, SupportTicketDetailView, AnonymousChatbotView, PublicFaqListView, AdminFaqViewSet, BlockUserView, MyBlockedUsersView, AdminSupportTicketViewSet, AdminContactMessageViewSet, MyVerificationRequestsView
 from careers.views import TrainingProgramViewSet, MyEnrollmentViewSet, JobPostingViewSet, MyJobApplicationViewSet
 from agency.views import (
     AgentPublicProfileView, AgencyPublicProfileView, MyAgentDashboardView, MyAgencyDashboardView, AgentDirectoryView,
-    AgencyDirectoryView, AgencyAddAgentView, AgencyRemoveAgentView,
+    AgencyDirectoryView, AgencyAddAgentView, AgencyRemoveAgentView, AgentListingsView, MyAgentProfileView,
 )
 
 router = DefaultRouter()
@@ -112,6 +121,17 @@ router.register(r"admin/welfare-alerts", AdminWelfareAlertViewSet, basename="adm
 router.register(r"admin/room-allocations", AdminRoomAllocationViewSet, basename="admin-room-allocation")
 router.register(r"admin/kyc-reviews", AdminKYCReviewViewSet, basename="admin-kyc-review")
 router.register(r"admin/faqs", AdminFaqViewSet, basename="admin-faq")
+router.register(r"admin/withdrawals", AdminWithdrawalViewSet, basename="admin-withdrawal")
+router.register(r"admin/audit-log", AdminAuditLogViewSet, basename="admin-audit-log")
+router.register(r"admin/content", AdminContentViewSet, basename="admin-content")
+router.register(r"admin/ai-flags", AdminAiFlagViewSet, basename="admin-ai-flag")
+router.register(r"admin/payments", AdminPaymentViewSet, basename="admin-payment")
+router.register(r"admin/caterers", AdminCatererViewSet, basename="admin-caterer")
+router.register(r"admin/account-deletions", AdminAccountDeletionViewSet, basename="admin-account-deletion")
+router.register(r"admin/data-exports", AdminDataExportViewSet, basename="admin-data-export")
+router.register(r"admin/area-suggestions", AdminAreaSuggestionViewSet, basename="admin-area-suggestion")
+router.register(r"admin/support-tickets", AdminSupportTicketViewSet, basename="admin-support-ticket")
+router.register(r"admin/contact-messages", AdminContactMessageViewSet, basename="admin-contact-message")
 router.register(r"bookings", BookingViewSet, basename="booking")
 router.register(r"social-accounts", SocialAccountLinkViewSet, basename="social-account")
 router.register(r"consent", ConsentRecordViewSet, basename="consent")
@@ -122,6 +142,7 @@ router.register(r"reservations", ReservationViewSet, basename="reservation")
 router.register(r"venues", VenueViewSet, basename="venue")
 router.register(r"event-bookings", EventBookingViewSet, basename="event-booking")
 router.register(r"student-hostels", StudentHostelViewSet, basename="student-hostel")
+router.register(r"hostel-rooms", HostelRoomsViewSet, basename="hostel-rooms")
 router.register(r"my-room-allocations", MyRoomAllocationViewSet, basename="my-room-allocation")
 router.register(r"guest-houses", GuestHouseLodgeViewSet, basename="guest-house")
 router.register(r"wanted-listings", WantedListingViewSet, basename="wanted-listing")
@@ -156,7 +177,10 @@ def health_check(request):
 
 
 urlpatterns = [
+    path('api/marketplace-feed/', MarketplaceFeedView.as_view(), name='marketplace-feed'),
+    path('api/marketplace-sellers/<uuid:user_id>/', MarketplaceSellerView.as_view(), name='marketplace-seller'),
     path('admin/', admin.site.urls),
+    path('api/admin/data-admin-ticket/', DataAdminTicketView.as_view(), name='data-admin-ticket'),
     path('health/', health_check, name='health-check'),
 
     # Authentication
@@ -178,6 +202,12 @@ urlpatterns = [
     path('api/presence/heartbeat/', PresenceHeartbeatView.as_view(), name='presence-heartbeat'),
     path('api/presence/offline/', PresenceOfflineView.as_view(), name='presence-offline'),
     path('api/admin/console-summary/', AdminConsoleSummaryView.as_view(), name='admin-console-summary'),
+    path('api/admin/analytics/', AdminAnalyticsView.as_view(), name='admin-analytics'),
+    path('api/analytics/visit/', RecordVisitView.as_view(), name='visitor-record'),
+    path('api/admin/visitors/', AdminVisitorSummaryView.as_view(), name='admin-visitors'),
+    path('api/admin/pricing/', AdminPricingView.as_view(), name='admin-pricing'),
+    path('api/admin/pricing/fees/<str:category>/', AdminFeePolicyView.as_view(), name='admin-pricing-fee'),
+    path('api/admin/pricing/boosts/', AdminBoostPriceView.as_view(), name='admin-pricing-boost'),
     path('api/my-favorites/', MyFavoriteListingsView.as_view(), name='my-favorites'),
     path('api/listings/<uuid:listing_id>/toggle-favorite/', ToggleFavoriteListingView.as_view(), name='toggle-favorite'),
     path('api/my-comparison/', MyComparisonView.as_view(), name='my-comparison'),
@@ -216,6 +246,8 @@ urlpatterns = [
     path('api/my-blocked-users/', MyBlockedUsersView.as_view(), name='my-blocked-users'),
     path('api/my-badges/', MyBadgesView.as_view(), name='my-badges'),
     path('api/support-tickets/', MySupportTicketsView.as_view(), name='my-support-tickets'),
+    path('api/verification-requests/', MyVerificationRequestsView.as_view(), name='my-verification-requests'),
+    path('api/account/deletion/', MyAccountDeletionView.as_view(), name='my-account-deletion'),
     path('api/support-tickets/<uuid:ticket_id>/', SupportTicketDetailView.as_view(), name='support-ticket-detail'),
     path('api/chatbot/ask/', AnonymousChatbotView.as_view(), name='chatbot-ask'),
     path('api/home-stats/', HomeStatsView.as_view(), name='home-stats'),
@@ -245,6 +277,11 @@ urlpatterns = [
 
     # Agent/agency profiles — public (anyone) and the private dashboard.
     path('api/agents/<uuid:user_id>/profile/', AgentPublicProfileView.as_view(), name='agent-public-profile'),
+    path('api/agents/<uuid:user_id>/listings/', AgentListingsView.as_view(), name='agent-listings'),
+    path('api/my-agent-profile/', MyAgentProfileView.as_view(), name='my-agent-profile'),
+    path('api/staff-access/', StaffAccessListView.as_view(), name='staff-access'),
+    path('api/staff-access/session/', StaffSessionView.as_view(), name='staff-session'),
+    path('api/staff-access/<uuid:grant_id>/<slug:action>/', StaffAccessActionView.as_view(), name='staff-access-action'),
     path('api/agencies/<int:agency_id>/profile/', AgencyPublicProfileView.as_view(), name='agency-public-profile'),
     path('api/agents/', AgentDirectoryView.as_view(), name='agent-directory'),
     path('api/agencies/', AgencyDirectoryView.as_view(), name='agency-directory'),

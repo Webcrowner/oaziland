@@ -40,6 +40,7 @@ export default async function HotelDetailPage({ params }: { params: Promise<{ id
       latitude={hotel.latitude}
       longitude={hotel.longitude}
       sharePath={`/hotels/${hotel.id}`}
+      report={{ kind: "hotel", id: String(hotel.id) }}
       mediaEndpoint="hotels"
       assetId={hotel.id}
       sharePrice={cheapest !== null ? cheapest.toLocaleString() : undefined}

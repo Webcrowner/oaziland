@@ -13,17 +13,34 @@ from .services import (
 
 
 class AgentDirectoryView(views.APIView):
-    """A real, browsable directory — every verified agent, with the
-    SAME aggregated data (real listing counts, real ratings) as their
-    individual profile page, reused rather than duplicated."""
+    """The searchable agent directory. GET ?q= (name, agency, area or bio words) &quarter= &specialty= &language=
+    &verified=1 &page= — 12 agents a page, each with their latest few listings."""
     permission_classes = [permissions.AllowAny]
+    PAGE_SIZE = 12
 
     @extend_schema(responses={200: dict})
     def get(self, request):
-        from identity.models import AgentProfile
-        agents = AgentProfile.objects.select_related("user").order_by("-user__date_joined")
-        results = [{"user_id": str(a.user.id), **get_agent_public_profile(a.user)} for a in agents]
-        return Response({"count": len(results), "results": results})
+        from .agent_profiles import directory_rows, search_agents
+
+        params = request.query_params
+        quarter = params.get("quarter", "").strip()
+        try:
+            import uuid
+            quarter = str(uuid.UUID(quarter)) if quarter else None
+        except ValueError:
+            quarter = None
+        queryset = search_agents(
+            query=params.get("q", "").strip()[:100], quarter_id=quarter, specialty=params.get("specialty", ""),
+            language=params.get("language", ""), verified_only=params.get("verified") in ("1", "true"),
+        )
+        try:
+            page = max(1, int(params.get("page", 1)))
+        except ValueError:
+            page = 1
+        total = queryset.count()
+        start = (page - 1) * self.PAGE_SIZE
+        rows = directory_rows(queryset[start:start + self.PAGE_SIZE])
+        return Response({"count": total, "page": page, "has_more": start + len(rows) < total, "results": rows})
 
 
 class AgencyDirectoryView(views.APIView):
@@ -41,11 +58,65 @@ class AgentPublicProfileView(views.APIView):
 
     @extend_schema(responses={200: dict, 404: dict})
     def get(self, request, user_id):
+        from .agent_profiles import public_details
+
         try:
             agent_user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return Response({"detail": "Agent not found."}, status=404)
-        return Response(get_agent_public_profile(agent_user))
+        return Response({**get_agent_public_profile(agent_user), **public_details(agent_user)})
+
+
+class AgentListingsView(views.APIView):
+    """All of an agent's live listings, paged ('See more'). GET ?offset=&limit= (max 24)."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(responses={200: dict, 404: dict})
+    def get(self, request, user_id):
+        from .agent_profiles import agent_listings_page
+
+        agent_user = User.objects.filter(id=user_id, agent_profile__isnull=False).first()
+        if agent_user is None:
+            return Response({"detail": "Agent not found."}, status=404)
+        try:
+            offset = max(0, int(request.query_params.get("offset", 0)))
+            limit = min(24, max(1, int(request.query_params.get("limit", 12))))
+        except ValueError:
+            offset, limit = 0, 12
+        return Response(agent_listings_page(agent_user, offset=offset, limit=limit))
+
+
+class MyAgentProfileView(views.APIView):
+    """The signed-in agent's own public details. GET returns them; PATCH changes the fields given:
+    bio, years_experience, specialties, languages, areas_served (quarter ids), intro_video_url + intro_video_seconds
+    (an empty url removes the video)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _payload(self, user):
+        from .agent_profiles import public_details
+
+        details = public_details(user)
+        details.pop("listings", None)
+        return details
+
+    @extend_schema(responses={200: dict, 403: dict})
+    def get(self, request):
+        if not hasattr(request.user, "agent_profile"):
+            return Response({"detail": "This account is not an agent."}, status=403)
+        return Response(self._payload(request.user))
+
+    @extend_schema(request=dict, responses={200: dict, 400: dict, 403: dict})
+    def patch(self, request):
+        from .agent_profiles import AgentProfileError, update_agent_profile
+
+        if not hasattr(request.user, "agent_profile"):
+            return Response({"detail": "This account is not an agent."}, status=403)
+        try:
+            update_agent_profile(request.user, request.data)
+        except AgentProfileError as e:
+            return Response({"detail": str(e)}, status=400)
+        request.user.agent_profile.refresh_from_db()
+        return Response(self._payload(request.user))
 
 
 class AgencyPublicProfileView(views.APIView):

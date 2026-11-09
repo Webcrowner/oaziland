@@ -14,6 +14,7 @@ import OwnerMediaManager from "@/components/OwnerMediaManager";
 import ListingOwnerActions from "@/components/ListingOwnerActions";
 import SimilarListings from "@/components/SimilarListings";
 import RateAndReport from "@/components/RateAndReport";
+import ReportContentButton from "@/components/ReportContentButton";
 import Badge from "@/components/ui/Badge";
 import type { Metadata } from "next";
 
@@ -231,6 +232,9 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
               </Link>
               <div className="mt-3 pt-3 border-t border-black/10">
                 <RateAndReport subjectUserId={listing.lister_id} />
+                <div className="mt-2">
+                  <ReportContentButton kind="listing" id={listing.id} ownerId={listing.lister_id} />
+                </div>
               </div>
             </div>
 

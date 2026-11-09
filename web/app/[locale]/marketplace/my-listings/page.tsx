@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
   listMyMarketplaceListings, updateMarketplaceListing, setMarketplaceListingStatus, deleteMarketplaceListing, listQuarters,
-  type MarketplaceCategory, type MarketplaceAvailability, type Quarter, type VehicleSpec, type GoodsCategory, type GoodsCondition,
+  renewMarketplaceListing, type ListingStats, type MarketplaceCategory, type MarketplaceAvailability, type Quarter, type VehicleSpec, type GoodsCategory, type GoodsCondition,
   GOODS_CATEGORIES, GOODS_CONDITIONS,
 } from "@/lib/api";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
@@ -41,6 +41,9 @@ interface MyListing {
   item_category?: GoodsCategory;
   condition?: GoodsCondition;
   quantity?: number;
+  stats?: ListingStats;
+  expires_at?: string;
+  is_expired?: boolean;
 }
 
 interface Draft {
@@ -272,6 +275,16 @@ export default function MyMarketplaceListingsPage() {
                           <div className="min-w-0">
                             <Link href={`/marketplace/${category}/${listing.id}`} className="font-semibold text-[var(--navy)] hover:underline">{listing.title}</Link>
                             <p className="text-sm text-slate-600">{Number(listing.price_xaf).toLocaleString()} XAF</p>
+                            {listing.stats && (
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                👁 {t("statViews", { count: listing.stats.views })} · ♥ {t("statSaves", { count: listing.stats.saves })} · 💬 {t("statChats", { count: listing.stats.chats })}
+                              </p>
+                            )}
+                            {listing.expires_at && !listing.removed_by_moderation && listing.availability_status === "AVAILABLE" && (
+                              <p className={`mt-0.5 text-xs ${listing.is_expired ? "font-semibold text-red-700" : "text-slate-500"}`}>
+                                {listing.is_expired ? t("expired") : t("expiresOn", { date: new Date(listing.expires_at).toLocaleDateString() })}
+                              </p>
+                            )}
                           </div>
                           <Badge variant={listing.availability_status === "AVAILABLE" ? "green" : "neutral"}>{t(`status_${listing.availability_status}`)}</Badge>
                         </div>
@@ -288,8 +301,18 @@ export default function MyMarketplaceListingsPage() {
                               {STATUSES.map((value) => <option key={value} value={value}>{t(`status_${value}`)}</option>)}
                             </select>
                           )}
-                          <button onClick={() => startEdit(category, listing)} className="text-sm font-semibold text-[var(--navy)] underline cursor-pointer">{t("edit")}</button>
+                          {category === "cars" ? (
+                            // Cars have a full spec sheet and rental terms, edited in the same step-by-step form they were posted with.
+                            <Link href={`/marketplace/sell/cars?edit=${listing.id}`} className="text-sm font-semibold text-[var(--navy)] underline">{t("edit")}</Link>
+                          ) : (
+                            <button onClick={() => startEdit(category, listing)} className="text-sm font-semibold text-[var(--navy)] underline cursor-pointer">{t("edit")}</button>
+                          )}
                           <Link href={`/marketplace/${category}/${listing.id}`} className="text-sm font-semibold text-[var(--navy)] underline">{t("managePhotos")}</Link>
+                          {!listing.removed_by_moderation && listing.availability_status === "AVAILABLE" && (
+                            <button onClick={() => run((token) => renewMarketplaceListing(category, listing.id, token))} className="text-sm font-semibold text-green-700 underline cursor-pointer">
+                              {listing.is_expired ? t("renewExpired") : t("renew")}
+                            </button>
+                          )}
                           <button onClick={() => confirmDelete(category, listing.id)} className="text-sm font-semibold text-red-700 underline cursor-pointer">{t("delete")}</button>
                         </div>
                       </>

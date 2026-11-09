@@ -112,6 +112,186 @@ def is_verified(subject) -> bool:
     ).exists()
 
 
+class VerificationSubmissionError(Exception):
+    pass
+
+
+# Request types about the requester's own professional standing: the subject is the requester's account,
+# and they must actually hold the role.
+ROLE_REQUEST_PROFILES = {
+    "AGENT_VERIFICATION": ("agent_profile", "agent"),
+    "AGENCY_VERIFICATION": ("agency_profile", "agency"),
+    "LANDLORD_VERIFICATION": ("landlord_profile", "landlord"),
+}
+MAX_DOCUMENT_URL_LENGTH = 200  # VerificationRequest.supporting_document_url is a URLField with the default limit
+ROLE_MISSING_MESSAGES = {
+    "AGENT_VERIFICATION": "You do not have an agent account to verify.",
+    "AGENCY_VERIFICATION": "You do not have an agency account to verify.",
+    "LANDLORD_VERIFICATION": "You do not have a landlord account to verify.",
+}
+
+
+def _resolve_submission_subject(requester, request_type: str, subject_id):
+    """The thing a user is asking to have verified, which they must own."""
+    from .models import VerificationRequestType as Kind
+
+    if request_type in ROLE_REQUEST_PROFILES:
+        profile, role = ROLE_REQUEST_PROFILES[request_type]
+        if not hasattr(requester, profile):
+            raise VerificationSubmissionError(ROLE_MISSING_MESSAGES[request_type])
+        if subject_id and str(subject_id) != str(requester.pk):
+            raise VerificationSubmissionError("You can only request verification for your own account.")
+        return requester
+
+    if not subject_id:
+        raise VerificationSubmissionError("Choose what you want verified.")
+
+    if request_type == Kind.HOSTEL_VERIFICATION:
+        from student_hostels.models import StudentHostel
+        subject = StudentHostel.objects.filter(pk=subject_id, owner=requester).first()
+        missing = "You can only request verification for your own student hostel."
+    elif request_type == Kind.GUEST_HOUSE_VERIFICATION:
+        from property.models import GuestHouseLodge
+        subject = GuestHouseLodge.objects.filter(pk=subject_id, owner=requester).first()
+        missing = "You can only request verification for your own guest house."
+    elif request_type == Kind.BUSINESS_VERIFICATION:
+        from marketplace.models import BusinessListing
+        subject = BusinessListing.objects.filter(pk=subject_id, lister_user=requester).first()
+        missing = "You can only request verification for your own business listing."
+    elif request_type == Kind.VEHICLE_OWNERSHIP:
+        from marketplace.models import CarListing
+        subject = CarListing.objects.filter(pk=subject_id, lister_user=requester).first()
+        missing = "You can only request verification for your own car listing."
+    else:
+        raise VerificationSubmissionError("Identity is verified through the ID check, not through this form.")
+    if subject is None:
+        raise VerificationSubmissionError(missing)
+    return subject
+
+
+def eligible_verification_subjects(user) -> list[dict]:
+    """What this user could ask to have verified right now: {request_type, subject_id, title, status} where status
+    is the latest request's status for it (or "" if never asked)."""
+    from .models import VerificationRequest
+    from marketplace.models import BusinessListing, CarListing
+    from property.models import GuestHouseLodge
+    from student_hostels.models import StudentHostel
+
+    options = []
+    for request_type, (profile, role) in ROLE_REQUEST_PROFILES.items():
+        if hasattr(user, profile):
+            options.append((request_type, user.pk, role))
+    for hostel in StudentHostel.objects.filter(owner=user).select_related("quarter"):
+        options.append(("HOSTEL_VERIFICATION", hostel.pk, hostel.quarter.name))
+    for house in GuestHouseLodge.objects.filter(owner=user).select_related("quarter"):
+        options.append(("GUEST_HOUSE_VERIFICATION", house.pk, house.quarter.name))
+    for listing in BusinessListing.objects.filter(lister_user=user, removed_by_moderation=False):
+        options.append(("BUSINESS_VERIFICATION", listing.pk, listing.title))
+    for listing in CarListing.objects.filter(lister_user=user, removed_by_moderation=False):
+        options.append(("VEHICLE_OWNERSHIP", listing.pk, listing.title))
+
+    latest = {}
+    for row in VerificationRequest.objects.filter(requester=user).order_by("submitted_at").values("request_type", "subject_id", "status"):
+        latest[(row["request_type"], row["subject_id"])] = row["status"]
+    return [
+        {"request_type": kind, "subject_id": str(pk), "title": title, "status": latest.get((kind, pk), "")}
+        for kind, pk, title in options
+    ]
+
+
+def _is_own_upload(url: str) -> bool:
+    """A file from the platform's own upload pipeline (served over plain http in local development)."""
+    from django.conf import settings
+
+    base = getattr(settings, "BACKEND_BASE_URL", "").rstrip("/")
+    media = "/" + settings.MEDIA_URL.strip("/") + "/"
+    return bool(base) and url.startswith(base + media) and ".." not in url
+
+
+def submit_verification(*, requester, request_type: str, subject_id=None, supporting_document_url: str = ""):
+    """A user asks for something of theirs to be verified. The subject must be theirs, a document is required,
+    and there can be only one open request per subject and type (a rejected one can be resubmitted)."""
+    from django.core.exceptions import ValidationError
+    from django.core.validators import URLValidator
+    from .models import VerificationRequest, VerificationRequestStatus, VerificationRequestType
+
+    if request_type not in VerificationRequestType.values:
+        raise VerificationSubmissionError("Unknown verification type.")
+    subject = _resolve_submission_subject(requester, request_type, subject_id)
+
+    url = (supporting_document_url or "").strip()
+    if not url:
+        raise VerificationSubmissionError("Attach a document so the team can check your request.")
+    if len(url) > MAX_DOCUMENT_URL_LENGTH:
+        raise VerificationSubmissionError("The document link is too long.")
+    if not _is_own_upload(url):
+        try:
+            URLValidator(schemes=["https"])(url)
+        except ValidationError:
+            raise VerificationSubmissionError("The document link must be a secure (https) web address.") from None
+
+    content_type = f"{subject._meta.app_label}.{subject.__class__.__name__}"
+    same = VerificationRequest.objects.filter(
+        requester=requester, request_type=request_type, subject_content_type=content_type, subject_id=subject.pk,
+    )
+    if same.filter(status=VerificationRequestStatus.PENDING).exists():
+        raise VerificationSubmissionError("You already have a request waiting for review for this.")
+    if same.filter(status=VerificationRequestStatus.APPROVED).exists():
+        raise VerificationSubmissionError("This is already verified.")
+
+    verification_request = submit_verification_request(
+        requester=requester, request_type=request_type, subject=subject, supporting_document_url=url,
+    )
+    notify_admins_of_verification_request(verification_request)
+    return verification_request
+
+
+def notify_admins_of_verification_request(verification_request) -> None:
+    """Tells every admin a verification request is waiting. A failed alert never loses the request."""
+    import logging
+    from identity.models import AdminProfile
+    from notifications.services import notify
+
+    who = verification_request.requester.full_name or verification_request.requester.username
+    try:
+        for admin_profile in AdminProfile.objects.select_related("user"):
+            notify(
+                recipient=admin_profile.user, notification_type="VERIFICATION_REQUESTED", channel="IN_APP",
+                title="New verification request",
+                message=f"{who} asked for {verification_request.get_request_type_display().lower()}.",
+                related_reference=str(verification_request.id),
+            )
+    except Exception:
+        logging.getLogger(__name__).exception("Could not alert admins about verification request %s", verification_request.pk)
+
+
+def verified_roles(user) -> list[str]:
+    """The professional roles an admin has verified for this account: any of agent, agency, landlord."""
+    from .models import VerificationRequest, VerificationRequestStatus
+
+    approved = set(VerificationRequest.objects.filter(
+        subject_content_type="identity.User", subject_id=user.pk, status=VerificationRequestStatus.APPROVED,
+        request_type__in=list(ROLE_REQUEST_PROFILES),
+    ).values_list("request_type", flat=True))
+    return [role for request_type, (_, role) in ROLE_REQUEST_PROFILES.items() if request_type in approved]
+
+
+def _apply_approval_effect(verification_request, admin) -> None:
+    """What approval does beyond recording it: a hostel or guest house gets a verified-document badge, the same
+    one land due diligence and agency listings already read."""
+    from .models import VerificationRequestType as Kind
+
+    if verification_request.request_type not in (Kind.HOSTEL_VERIFICATION, Kind.GUEST_HOUSE_VERIFICATION):
+        return
+    from property.models import BadgeType, PropertyAsset, VerificationBadge
+    if not PropertyAsset.objects.filter(pk=verification_request.subject_id).exists():
+        raise VerificationReviewError("The item being verified no longer exists.")
+    badge, _ = VerificationBadge.objects.get_or_create(
+        property_asset_id=verification_request.subject_id, badge_type=BadgeType.VERIFIED_DOCUMENT,
+    )
+    badge.approve(admin)
+
+
 # ---------------------------------------------------------------------------
 # Bookmarks (generalizing social.Favorite to jobs/trainings/marketplace).
 # ---------------------------------------------------------------------------
@@ -144,22 +324,127 @@ def register_for_event(*, event, attendee):
 # Account deletion — retention-policy compliant, not instant.
 # ---------------------------------------------------------------------------
 ACCOUNT_DELETION_RETENTION_DAYS = 30
+MAX_DELETION_REASON = 500
+MAX_CANCELLATION_REASON = 300
 
 
-def request_account_deletion(user):
+class AccountDeletionError(Exception):
+    pass
+
+
+def account_deletion_blockers(user) -> list[str]:
+    """What still ties this account to money or an open deal; the deletion waits until these are settled.
+    Codes: wallet_balance, pending_withdrawal, held_payment, open_dispute, open_sale."""
+    from decimal import Decimal
+    from django.db.models import Q
+    from monetization.models import Wallet, WithdrawalRequest, WithdrawalStatus
+    from transactions.models import EscrowStatus, PaymentEscrow
+    from property_management.models import DisputeCase, DisputeStatus
+    from marketplace.models import MarketplaceOrder, MarketplaceOrderStatus
+
+    blockers = []
+    wallet = Wallet.objects.filter(owner=user).first()
+    if wallet and wallet.balance_xaf > Decimal("0"):
+        blockers.append("wallet_balance")
+    if WithdrawalRequest.objects.filter(wallet__owner=user, status__in=[WithdrawalStatus.PENDING, WithdrawalStatus.APPROVED]).exists():
+        blockers.append("pending_withdrawal")
+    if PaymentEscrow.objects.filter(booking__requester=user, status__in=[EscrowStatus.HELD, EscrowStatus.DISPUTED]).exists():
+        blockers.append("held_payment")
+    if DisputeCase.objects.filter(raised_by=user, status__in=[DisputeStatus.OPEN, DisputeStatus.ADMIN_RESPONDED, DisputeStatus.ESCALATED]).exists():
+        blockers.append("open_dispute")
+    live_orders = [MarketplaceOrderStatus.PAYMENT_PENDING, MarketplaceOrderStatus.PAID, MarketplaceOrderStatus.HANDED_OVER, MarketplaceOrderStatus.DISPUTED]
+    if MarketplaceOrder.objects.filter(Q(listing__lister_user=user) | Q(buyer=user), status__in=live_orders).exists():
+        blockers.append("open_sale")
+    return blockers
+
+
+def _notify_deletion(user, title: str, message: str, request) -> None:
+    from notifications.services import notify
+    notify(recipient=user, notification_type="ACCOUNT_DELETION", channel="IN_APP", title=title, message=message, related_reference=str(request.id))
+
+
+def request_account_deletion(user, reason: str = ""):
+    """Starts the retention window. A cancelled request can be restarted; an open one cannot be duplicated."""
     from django.utils import timezone
     from datetime import timedelta
-    from .models import AccountDeletionRequest
-    return AccountDeletionRequest.objects.create(
-        user=user, retention_expires_at=timezone.now() + timedelta(days=ACCOUNT_DELETION_RETENTION_DAYS),
-    )
+    from .models import AccountDeletionRequest, AccountDeletionStatus
 
+    reason = (reason or "").strip()
+    if len(reason) > MAX_DELETION_REASON:
+        raise AccountDeletionError("Please keep the reason under 500 characters.")
+    existing = AccountDeletionRequest.objects.filter(user=user).first()
+    if existing and existing.status == AccountDeletionStatus.REQUESTED:
+        raise AccountDeletionError("Your account is already scheduled for deletion.")
+    if existing and existing.status == AccountDeletionStatus.COMPLETED:
+        raise AccountDeletionError("This account has already been deleted.")
 
-def cancel_account_deletion(request):
-    from .models import AccountDeletionStatus
-    request.status = AccountDeletionStatus.CANCELLED
-    request.save(update_fields=["status"])
+    due = timezone.now() + timedelta(days=ACCOUNT_DELETION_RETENTION_DAYS)
+    if existing:
+        existing.status = AccountDeletionStatus.REQUESTED
+        existing.requested_at = timezone.now()
+        existing.retention_expires_at = due
+        existing.reason = reason
+        existing.cancelled_at = None
+        existing.cancelled_by = None
+        existing.cancellation_reason = ""
+        existing.save()
+        request = existing
+    else:
+        request = AccountDeletionRequest.objects.create(user=user, retention_expires_at=due, reason=reason)
+    try:
+        _notify_deletion(
+            user, "Account deletion scheduled",
+            f"Your account will be deleted on {due:%d %b %Y}. You can cancel any time before then from your privacy settings.",
+            request,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Could not send the deletion notice for %s", request.pk)
     return request
+
+
+def cancel_account_deletion(request, by=None, reason: str = ""):
+    """Stops a scheduled deletion. `by` is the admin who stopped it (with a reason the user sees), or None when
+    the user changed their mind."""
+    from django.utils import timezone
+    from .models import AccountDeletionStatus
+
+    if request.status != AccountDeletionStatus.REQUESTED:
+        raise AccountDeletionError("Only a scheduled deletion can be cancelled.")
+    reason = (reason or "").strip()
+    if by is not None:
+        if not reason:
+            raise AccountDeletionError("A reason is required to stop a user's deletion.")
+        if len(reason) > MAX_CANCELLATION_REASON:
+            raise AccountDeletionError("The reason must be 300 characters or fewer.")
+    request.status = AccountDeletionStatus.CANCELLED
+    request.cancelled_at = timezone.now()
+    request.cancelled_by = by
+    request.cancellation_reason = reason
+    request.save(update_fields=["status", "cancelled_at", "cancelled_by", "cancellation_reason"])
+    if by is not None:
+        _notify_deletion(request.user, "Your account deletion was stopped", f"Our team stopped the deletion of your account. Reason: {reason}", request)
+    return request
+
+
+def complete_deletion_request(request, now=None):
+    """Deletes the account behind a scheduled request now. Refuses while money or a deal is still open."""
+    from django.db import transaction
+    from django.utils import timezone
+    from .models import AccountDeletionRequest, AccountDeletionStatus
+    from compliance.services import complete_account_deletion
+
+    with transaction.atomic():
+        locked = AccountDeletionRequest.objects.select_for_update().select_related("user").get(pk=request.pk)
+        if locked.status != AccountDeletionStatus.REQUESTED:
+            raise AccountDeletionError("Only a scheduled deletion can be completed.")
+        if account_deletion_blockers(locked.user):
+            raise AccountDeletionError("This account still has money or an open deal on the platform. Settle it first.")
+        complete_account_deletion(locked.user)
+        locked.status = AccountDeletionStatus.COMPLETED
+        locked.completed_at = now or timezone.now()
+        locked.save(update_fields=["status", "completed_at"])
+    return locked
 
 
 def process_due_account_deletions(now=None):
@@ -168,22 +453,21 @@ def process_due_account_deletions(now=None):
     is what makes the RETENTION DISTINCTION real: financial/legal
     records stay untouched, personal identifying data (KYC, contact
     info) genuinely gets scrubbed, not just a bare deleted_at flag with
-    no policy behind it."""
+    no policy behind it. Accounts that still hold money or an open deal
+    are left scheduled (admins see them as blocked) and retried next run."""
     from django.utils import timezone
     from .models import AccountDeletionRequest, AccountDeletionStatus
-    from compliance.services import complete_account_deletion
 
     now = now or timezone.now()
     due = AccountDeletionRequest.objects.filter(
         status=AccountDeletionStatus.REQUESTED, retention_expires_at__lte=now,
-    )
+    ).select_related("user")
     completed = []
     for request in due:
-        complete_account_deletion(request.user)
-        request.status = AccountDeletionStatus.COMPLETED
-        request.completed_at = now
-        request.save(update_fields=["status", "completed_at"])
-        completed.append(request)
+        try:
+            completed.append(complete_deletion_request(request, now=now))
+        except AccountDeletionError:
+            continue
     return completed
 
 
@@ -283,12 +567,16 @@ def continue_support_ticket(*, ticket, user, message: str):
     the same live platform data — so a multi-turn conversation stays
     consistent. Once escalated, further messages are just logged for
     the human agent; no more auto-replies."""
-    from .models import SupportMessage
+    from .models import SupportMessage, SupportTicketStatus
 
     history = [{"sender_type": m.sender_type, "text": m.text} for m in ticket.messages.order_by("sent_at")]
     SupportMessage.objects.create(ticket=ticket, sender_type=SupportMessage.SenderType.USER, sender_user=user, text=message)
 
     if not ticket.ai_handled:
+        # A person is handling this chat: reopen it if it had been resolved, and let the admins know.
+        if ticket.status in (SupportTicketStatus.RESOLVED, SupportTicketStatus.CLOSED):
+            reopen_ticket(ticket)
+        notify_admins_of_support_ticket(ticket, escalated=False)
         return ticket
 
     from .support_agent import get_active_support_agent_provider
@@ -305,17 +593,52 @@ def continue_support_ticket(*, ticket, user, message: str):
     return ticket
 
 
+MAX_SUPPORT_REPLY_LENGTH = 4000
+
+
 def escalate_ticket_to_human(ticket):
     from .models import SupportTicketStatus
     ticket.ai_handled = False
     ticket.status = SupportTicketStatus.IN_PROGRESS
     ticket.save(update_fields=["ai_handled", "status"])
+    notify_admins_of_support_ticket(ticket, escalated=True)
     return ticket
 
 
+def notify_admins_of_support_ticket(ticket, *, escalated: bool) -> None:
+    """Tells every admin a person is waiting for a human answer."""
+    from identity.models import AdminProfile
+    from notifications.services import notify
+
+    person = ticket.submitted_by.full_name or ticket.submitted_by.username
+    for admin_profile in AdminProfile.objects.select_related("user"):
+        notify(
+            recipient=admin_profile.user, notification_type="SUPPORT_TICKET_WAITING", channel="IN_APP",
+            title="Support chat needs a person" if escalated else "New message in a support chat",
+            message=f"{person}: {ticket.subject}",
+            related_reference=str(ticket.id),
+        )
+
+
 def respond_as_human_agent(*, ticket, agent, text: str):
-    from .models import SupportMessage
-    return SupportMessage.objects.create(ticket=ticket, sender_type=SupportMessage.SenderType.HUMAN_AGENT, sender_user=agent, text=text)
+    """An admin's reply. Also takes the conversation over from the AI (so it stops
+    answering), reopens a resolved ticket, and tells the user they have a reply."""
+    from .models import SupportMessage, SupportTicketStatus
+    from notifications.services import notify
+
+    message = SupportMessage.objects.create(ticket=ticket, sender_type=SupportMessage.SenderType.HUMAN_AGENT, sender_user=agent, text=text)
+    ticket.ai_handled = False
+    ticket.status = SupportTicketStatus.IN_PROGRESS
+    ticket.resolved_at = None
+    if ticket.assigned_to_id is None:
+        ticket.assigned_to = agent
+    ticket.save(update_fields=["ai_handled", "status", "resolved_at", "assigned_to"])
+
+    notify(
+        recipient=ticket.submitted_by, notification_type="SUPPORT_REPLY", channel="IN_APP",
+        title="Oaziland support replied", message=text[:200], related_reference=str(ticket.id),
+    )
+    return message
 
 
 def resolve_ticket(ticket):
@@ -325,6 +648,40 @@ def resolve_ticket(ticket):
     ticket.resolved_at = timezone.now()
     ticket.save(update_fields=["status", "resolved_at"])
     return ticket
+
+
+def reopen_ticket(ticket):
+    from .models import SupportTicketStatus
+    ticket.status = SupportTicketStatus.IN_PROGRESS if not ticket.ai_handled else SupportTicketStatus.OPEN
+    ticket.resolved_at = None
+    ticket.save(update_fields=["status", "resolved_at"])
+    return ticket
+
+
+def support_ticket_queryset():
+    """Tickets annotated with what an admin needs at a glance: how many messages, who wrote
+    last and what they said. Used by the admin inbox and the console counters."""
+    from django.db.models import Count, Max, OuterRef, Subquery
+    from .models import SupportMessage, SupportTicket
+
+    last = SupportMessage.objects.filter(ticket=OuterRef("pk")).order_by("-sent_at", "-id")
+    return SupportTicket.objects.select_related("submitted_by", "assigned_to").annotate(
+        message_count=Count("messages", distinct=True),
+        last_message_at=Max("messages__sent_at"),
+        last_sender=Subquery(last.values("sender_type")[:1]),
+        last_text=Subquery(last.values("text")[:1]),
+    )
+
+
+def tickets_awaiting_admin(queryset=None):
+    """Active tickets that have been handed to a person and whose last word is not an admin's."""
+    from django.db.models import Q
+    from .models import SupportMessage, SupportTicketStatus
+
+    queryset = support_ticket_queryset() if queryset is None else queryset
+    return queryset.filter(
+        ai_handled=False, status__in=[SupportTicketStatus.OPEN, SupportTicketStatus.IN_PROGRESS],
+    ).filter(~Q(last_sender=SupportMessage.SenderType.HUMAN_AGENT))
 
 
 # ---------------------------------------------------------------------------
@@ -395,15 +752,29 @@ def submit_contact_message(*, name: str, email: str, message: str):
 # could be CREATED, but nothing ever let an admin actually approve or
 # reject one, despite APPROVED/REJECTED existing as real status values.
 # ---------------------------------------------------------------------------
+class VerificationReviewError(Exception):
+    pass
+
+
+MAX_REJECTION_REASON = 300
+
+
 def approve_verification_request(*, verification_request, reviewed_by):
+    from django.db import transaction
     from django.utils import timezone
-    from .models import VerificationRequestStatus
+    from .models import VerificationRequest, VerificationRequestStatus
     from notifications.services import notify
 
-    verification_request.status = VerificationRequestStatus.APPROVED
-    verification_request.reviewed_by = reviewed_by
-    verification_request.reviewed_at = timezone.now()
-    verification_request.save(update_fields=["status", "reviewed_by", "reviewed_at"])
+    with transaction.atomic():
+        locked = VerificationRequest.objects.select_for_update().get(pk=verification_request.pk)
+        if locked.status != VerificationRequestStatus.PENDING:
+            raise VerificationReviewError("This request has already been reviewed.")
+        locked.status = VerificationRequestStatus.APPROVED
+        locked.reviewed_by = reviewed_by
+        locked.reviewed_at = timezone.now()
+        locked.save(update_fields=["status", "reviewed_by", "reviewed_at"])
+        _apply_approval_effect(locked, reviewed_by)
+    verification_request.refresh_from_db()
 
     notify(
         recipient=verification_request.requester, notification_type="VERIFICATION_APPROVED", channel="WHATSAPP",
@@ -414,19 +785,32 @@ def approve_verification_request(*, verification_request, reviewed_by):
 
 
 def reject_verification_request(*, verification_request, reviewed_by, reason: str = ""):
+    from django.db import transaction
     from django.utils import timezone
-    from .models import VerificationRequestStatus
+    from .models import VerificationRequest, VerificationRequestStatus
     from notifications.services import notify
 
-    verification_request.status = VerificationRequestStatus.REJECTED
-    verification_request.reviewed_by = reviewed_by
-    verification_request.reviewed_at = timezone.now()
-    verification_request.save(update_fields=["status", "reviewed_by", "reviewed_at"])
+    reason = (reason or "").strip()
+    if not reason:
+        raise VerificationReviewError("A reason is required to reject a verification request.")
+    if len(reason) > MAX_REJECTION_REASON:
+        raise VerificationReviewError(f"The reason must be {MAX_REJECTION_REASON} characters or fewer.")
+
+    with transaction.atomic():
+        locked = VerificationRequest.objects.select_for_update().get(pk=verification_request.pk)
+        if locked.status != VerificationRequestStatus.PENDING:
+            raise VerificationReviewError("This request has already been reviewed.")
+        locked.status = VerificationRequestStatus.REJECTED
+        locked.reviewed_by = reviewed_by
+        locked.reviewed_at = timezone.now()
+        locked.rejection_reason = reason
+        locked.save(update_fields=["status", "reviewed_by", "reviewed_at", "rejection_reason"])
+    verification_request.refresh_from_db()
 
     notify(
         recipient=verification_request.requester, notification_type="VERIFICATION_REJECTED", channel="WHATSAPP",
         title="Verification Not Approved",
-        message=f"Your verification request was not approved.{' Reason: ' + reason if reason else ''}",
+        message=f"Your verification request was not approved. Reason: {reason}",
         related_reference=str(verification_request.id),
     )
     return verification_request

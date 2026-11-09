@@ -128,10 +128,40 @@ class AgentProfile(models.Model):
         related_name="agents",
     )
     agent_commission_percent = models.DecimalField(max_digits=5, decimal_places=2)
+    # Public professional details (all optional), shown on the agent's profile and searchable in the directory.
+    bio = models.TextField(blank=True, max_length=1500)
+    years_experience = models.PositiveSmallIntegerField(null=True, blank=True)
+    specialties = models.JSONField(default=list, blank=True)  # AgentSpecialty values
+    languages = models.JSONField(default=list, blank=True)  # AgentLanguage values
+    areas_served = models.ManyToManyField("geo.Quarter", blank=True, related_name="agents_serving")
+    # A short self-introduction video (shared upload pipeline URL); live once uploaded, removable after a report.
+    intro_video_url = models.URLField(max_length=500, blank=True)
+    intro_video_seconds = models.PositiveSmallIntegerField(null=True, blank=True)
+    intro_video_uploaded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "agent_profiles"
+
+
+class AgentSpecialty(models.TextChoices):
+    RENTALS = "RENTALS", "Rentals"
+    SALES = "SALES", "Property sales"
+    LAND = "LAND", "Land"
+    COMMERCIAL = "COMMERCIAL", "Shops & offices"
+    STUDENT_HOUSING = "STUDENT_HOUSING", "Student housing"
+    SHORT_STAY = "SHORT_STAY", "Furnished & short stays"
+    PROPERTY_MANAGEMENT = "PROPERTY_MANAGEMENT", "Property management"
+
+
+class AgentLanguage(models.TextChoices):
+    EN = "EN", "English"
+    FR = "FR", "French"
+    PIDGIN = "PIDGIN", "Pidgin"
+    FULFULDE = "FULFULDE", "Fulfulde"
+    EWONDO = "EWONDO", "Ewondo"
+    DUALA = "DUALA", "Duala"
+    OTHER = "OTHER", "Other"
 
     def __str__(self):
         return f"Agent: {self.user}" + (f" @ {self.agency}" if self.agency_id else " (independent)")
@@ -345,6 +375,18 @@ class KYCProfile(models.Model):
     class Meta:
         db_table = "kyc_profiles"
 
+    def save(self, *args, **kwargs):
+        # A decided check always has a review date, even when set outside the review screen (seeds, scripts);
+        # analytics counts approvals by it.
+        if self.kyc_status in (VerificationStatus.VERIFIED, VerificationStatus.REJECTED) and self.reviewed_at is None:
+            from django.utils import timezone
+
+            self.reviewed_at = timezone.now()
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and "reviewed_at" not in update_fields:
+                kwargs["update_fields"] = [*update_fields, "reviewed_at"]
+        super().save(*args, **kwargs)
+
 
 class PasswordResetToken(models.Model):
     """A single-use, expiring token sent by EMAIL — 'password resets'
@@ -366,3 +408,69 @@ class PasswordResetToken(models.Model):
     def is_valid(self) -> bool:
         from django.utils import timezone
         return self.consumed_at is None and timezone.now() < self.expires_at
+
+
+class StaffPermission(models.TextChoices):
+    LISTINGS = "listings", "Create and edit listings, photos and prices"
+    MESSAGES = "messages", "Reply to messages and enquiries"
+    BOOKINGS = "bookings", "Handle bookings, orders and viewings"
+    POSTS = "posts", "Publish posts and edit the public profile"
+    REVIEWS = "reviews", "See reviews and ratings (read-only)"
+    EARNINGS_VIEW = "earnings_view", "See earnings (read-only, never withdraw)"
+
+
+class StaffAccessStatus(models.TextChoices):
+    PENDING = "PENDING", "Invited"
+    ACTIVE = "ACTIVE", "Active"
+    DECLINED = "DECLINED", "Declined"
+    REVOKED = "REVOKED", "Removed"
+
+
+class StaffAccess(models.Model):
+    """An account owner (landlord, agency, hotel owner, seller...) letting another person work on their account
+    with limited permissions. The staff member keeps their own login and switches into 'Managing: <owner>'; what
+    they may do there is decided by `permissions` (StaffPermission values) and enforced in
+    identity.staff_access. Money, security, ID checks and managing staff are never delegated."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="staff_granted")
+    staff = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="staff_roles")
+    title = models.CharField(max_length=80, blank=True)  # e.g. "Property manager", shown to both sides
+    permissions = models.JSONField(default=list)
+    status = models.CharField(max_length=10, choices=StaffAccessStatus.choices, default=StaffAccessStatus.PENDING)
+    expires_on = models.DateField(null=True, blank=True)
+    invited_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    ended_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+
+    class Meta:
+        db_table = "staff_access"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner", "staff"], name="uq_open_staff_access",
+                condition=models.Q(status__in=["PENDING", "ACTIVE"]),
+            ),
+        ]
+        indexes = [models.Index(fields=["staff", "status"])]
+
+    def is_usable(self) -> bool:
+        from django.utils import timezone
+
+        return (
+            self.status == StaffAccessStatus.ACTIVE
+            and (self.expires_on is None or self.expires_on >= timezone.localdate())
+            and self.staff.is_active and self.owner.is_active
+        )
+
+
+class StaffActionLog(models.Model):
+    """Every change a staff member made while managing someone's account, for the owner to review."""
+    access = models.ForeignKey(StaffAccess, on_delete=models.CASCADE, related_name="actions")
+    method = models.CharField(max_length=8)
+    path = models.CharField(max_length=255)
+    status_code = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "staff_action_log"
+        ordering = ["-created_at"]

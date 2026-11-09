@@ -4,6 +4,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
 import JobApplyButton from "@/components/JobApplyButton";
 import JobPostingManagement from "@/components/JobPostingManagement";
+import ReportContentButton from "@/components/ReportContentButton";
 import type { Metadata } from "next";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -59,6 +60,9 @@ export default async function CareersPage() {
               <p className="text-sm text-gray-600 mb-4">{job.description}</p>
               <JobApplyButton jobId={job.id} applyLabel={t("apply")} />
               <JobPostingManagement jobId={job.id} postedBy={job.posted_by} />
+              <div className="mt-3">
+                <ReportContentButton kind="job_posting" id={job.id} ownerId={job.posted_by} />
+              </div>
             </div>
           ))}
         </div>

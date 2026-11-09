@@ -6,6 +6,7 @@ import {
   reactToPost, removePostReaction, getPostComments, addPostComment, deletePostComment, deletePost, reportPost,
   type SocialPost, type PostComment, type PostReportReason,
 } from "@/lib/api";
+import ReportContentButton from "@/components/ReportContentButton";
 
 const EMOJIS: Record<string, string> = { LIKE: "👍", LOVE: "❤️", LAUGH: "😂", WOW: "😮", SAD: "😢" };
 const REPORT_REASONS: PostReportReason[] = ["INAPPROPRIATE_CONTENT", "SCAM_SUSPECTED", "HARASSMENT", "OTHER"];
@@ -241,15 +242,17 @@ export default function PostCard({ post, onDeleted, onTagClick }: PostCardProps)
           ) : (
             <div className="flex flex-col gap-2 mb-3">
               {comments.map((c) => (
-                <div key={c.id} className="text-sm flex items-start justify-between gap-2">
+                <div key={c.id} className="text-sm flex flex-wrap items-start justify-between gap-2">
                   <p className="break-words min-w-0">
                     <span className="font-semibold text-[var(--navy)]">{c.author_name}</span>{" "}
                     <span className="text-gray-700">{c.text}</span>
                   </p>
-                  {c.is_mine && (
+                  {c.is_mine ? (
                     <button type="button" onClick={() => handleDeleteComment(c.id)} className="text-xs text-red-600 hover:underline shrink-0">
                       {t("deleteComment")}
                     </button>
+                  ) : (
+                    <ReportContentButton kind="comment" id={String(c.id)} variant="inline" />
                   )}
                 </div>
               ))}

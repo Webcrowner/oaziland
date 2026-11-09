@@ -6,14 +6,63 @@ VenueViewSet is no longer ReadOnlyModelViewSet — the real gap this
 closes: no real venue owner could ever list their own property. New
 venues start unverified (matching the field's own default).
 """
+from django.db.models import Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import Venue, VenueSpace, EventBooking
+from trust_safety.audit import audit_note
+from .models import Venue, VenueSpace, EventBooking, Caterer
 from .serializers import VenueSerializer, VenueCreateSerializer, EventBookingSerializer
 from .services import create_event_booking, VenueUnavailableError, get_venue_financial_dashboard
 from oaziland.permissions import IsKycVerified, IsAdminRole
+
+
+class AdminCatererViewSet(viewsets.GenericViewSet):
+    """Caterers are curated by the team (they have no owner account to request verification), so this is where one
+    is marked verified. GET ?state=pending|verified|all (default pending) and ?q= (name or cuisine), paged.
+    POST verify, or unverify, on one caterer."""
+    permission_classes = [IsAdminRole]
+    serializer_class = None
+    queryset = Caterer.objects.all()
+
+    @staticmethod
+    def _row(caterer):
+        rating = caterer.rating
+        return {
+            "id": str(caterer.pk), "name": caterer.name, "cuisine_type": caterer.cuisine_type, "verified": caterer.verified,
+            "price_per_head_min_xaf": f"{caterer.price_per_head_min_xaf:.2f}", "price_per_head_max_xaf": f"{caterer.price_per_head_max_xaf:.2f}",
+            "rating": round(float(rating), 2) if rating is not None else None, "review_count": caterer.reviews.count(),
+        }
+
+    def list(self, request):
+        state = request.query_params.get("state", "pending")
+        if state not in ("pending", "verified", "all"):
+            return Response({"detail": "Unknown state."}, status=status.HTTP_400_BAD_REQUEST)
+        queryset = Caterer.objects.all()
+        if state != "all":
+            queryset = queryset.filter(verified=(state == "verified"))
+        for term in request.query_params.get("q", "").split()[:4]:
+            queryset = queryset.filter(Q(name__icontains=term) | Q(cuisine_type__icontains=term))
+        page = self.paginate_queryset(queryset.order_by("name"))
+        return self.get_paginated_response([self._row(caterer) for caterer in page])
+
+    def _set_verified(self, request, value: bool):
+        caterer = self.get_object()
+        audit_note(request, target_type="caterer", target_label=caterer.name)
+        if caterer.verified == value:
+            return Response({"detail": "This caterer is already verified." if value else "This caterer is not verified."}, status=status.HTTP_400_BAD_REQUEST)
+        caterer.verified = value
+        caterer.save(update_fields=["verified"])
+        return Response(self._row(caterer))
+
+    @action(detail=True, methods=["post"])
+    def verify(self, request, pk=None):
+        return self._set_verified(request, True)
+
+    @action(detail=True, methods=["post"])
+    def unverify(self, request, pk=None):
+        return self._set_verified(request, False)
 
 
 class VenueViewSet(viewsets.ModelViewSet):
@@ -34,11 +83,12 @@ class VenueViewSet(viewsets.ModelViewSet):
             if user.is_authenticated and hasattr(user, "admin_profile"):
                 return Venue.objects.all().select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos").order_by("-created_at")
             from django.db.models import Q
-            base = Q(verified=True)
+            base = Q(verified=True, deleted_at__isnull=True)
             if user.is_authenticated:
                 base |= Q(owner=user)
             return Venue.objects.filter(base).select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos").order_by("-created_at")
-        return Venue.objects.select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos")
+        from trust_safety.report_targets import visible_places
+        return visible_places(Venue.objects.select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos"), self.request.user)
 
     @extend_schema(request=VenueCreateSerializer, responses={201: VenueSerializer})
     def create(self, request, *args, **kwargs):
@@ -114,6 +164,13 @@ class VenueViewSet(viewsets.ModelViewSet):
         venue.verified = True
         venue.save(update_fields=["verified"])
         return Response(VenueSerializer(venue).data)
+
+    @extend_schema(request=None, responses={200: dict, 201: dict})
+    @action(detail=True, methods=["get", "post"], url_path="reviews", permission_classes=[permissions.AllowAny])
+    def reviews(self, request, pk=None):
+        """Public reviews of this venue; organisers whose event here has taken place can add one."""
+        from property.place_reviews import place_reviews_response
+        return place_reviews_response(request, "venue", self.get_object())
 
     @action(detail=True, methods=["get"], url_path="financial-dashboard")
     def financial_dashboard(self, request, pk=None):

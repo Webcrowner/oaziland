@@ -36,6 +36,8 @@ export default async function StudentHostelDetailPage({ params }: { params: Prom
       latitude={hostel.latitude}
       longitude={hostel.longitude}
       sharePath={`/student-hostels/${hostel.id}`}
+      report={{ kind: "student_hostel", id: String(hostel.id) }}
+      reviews={{ kind: "hostel", id: String(hostel.id) }}
       mediaEndpoint="student-hostels"
       assetId={hostel.id}
     />

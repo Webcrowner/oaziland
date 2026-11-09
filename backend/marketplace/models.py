@@ -12,6 +12,7 @@ parallel payment system.
 import uuid
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class ListerRole(models.TextChoices):
@@ -62,6 +63,12 @@ class MarketplaceListingBase(models.Model):
     # Set when an admin confirms a report; the lister cannot make the listing available again.
     removed_by_moderation = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Listings drop off the marketplace LISTING_LIFETIME_DAYS after their last renewal, like Jiji or Leboncoin ads,
+    # so buyers don't keep finding things that were sold long ago. The lister renews with one tap.
+    renewed_at = models.DateTimeField(default=timezone.now)
+    expiry_reminded_at = models.DateTimeField(null=True, blank=True)
+    # Detail-page views by people other than the lister (at most one per viewer per day).
+    view_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "marketplace_listings"
@@ -97,13 +104,109 @@ class BusinessListing(MarketplaceListingBase):
         db_table = "business_listings"
 
 
+class CarBodyType(models.TextChoices):
+    SEDAN = "SEDAN", "Sedan"
+    HATCHBACK = "HATCHBACK", "Hatchback"
+    SUV = "SUV", "SUV / 4x4"
+    PICKUP = "PICKUP", "Pick-up"
+    WAGON = "WAGON", "Station wagon"
+    COUPE = "COUPE", "Coupe"
+    CONVERTIBLE = "CONVERTIBLE", "Convertible"
+    VAN = "VAN", "Van"
+    MINIBUS = "MINIBUS", "Minibus"
+    BUS = "BUS", "Bus"
+    TRUCK = "TRUCK", "Truck"
+    OTHER = "OTHER", "Other"
+
+
+class FuelType(models.TextChoices):
+    PETROL = "PETROL", "Petrol"
+    DIESEL = "DIESEL", "Diesel"
+    HYBRID = "HYBRID", "Hybrid"
+    ELECTRIC = "ELECTRIC", "Electric"
+    GAS = "GAS", "Gas (LPG)"
+
+
+class Transmission(models.TextChoices):
+    MANUAL = "MANUAL", "Manual"
+    AUTOMATIC = "AUTOMATIC", "Automatic"
+
+
+class Drivetrain(models.TextChoices):
+    FWD = "FWD", "Front-wheel drive"
+    RWD = "RWD", "Rear-wheel drive"
+    AWD = "AWD", "All-wheel drive"
+    FOUR_WD = "4WD", "4x4"
+
+
+class VehicleCondition(models.TextChoices):
+    """How the car reached the seller — in Cameroon a car 'venant' (just imported, foreign used) sells very
+    differently from one already driven locally."""
+    NEW = "NEW", "New"
+    FOREIGN_USED = "FOREIGN_USED", "Foreign used"
+    LOCALLY_USED = "LOCALLY_USED", "Locally used"
+
+
+class DriverOption(models.TextChoices):
+    SELF_DRIVE = "SELF_DRIVE", "Self-drive only"
+    WITH_DRIVER = "WITH_DRIVER", "With driver only"
+    EITHER = "EITHER", "Self-drive or with driver"
+
+
+class FuelPolicy(models.TextChoices):
+    SAME_LEVEL = "SAME_LEVEL", "Return with the same fuel level"
+    FULL_TO_FULL = "FULL_TO_FULL", "Full to full"
+    INCLUDED = "INCLUDED", "Fuel included"
+
+
+CAR_FEATURES = (
+    "AIR_CONDITIONING", "BLUETOOTH", "REVERSE_CAMERA", "PARKING_SENSORS", "NAVIGATION", "LEATHER_SEATS",
+    "SUNROOF", "CRUISE_CONTROL", "KEYLESS_ENTRY", "ALLOY_WHEELS", "POWER_WINDOWS", "THIRD_ROW_SEATS",
+    "TOW_HITCH", "ROOF_RACK", "CHILD_SEAT", "USB_CHARGER",
+)
+
+
 class CarListing(MarketplaceListingBase):
-    """For sale OR for rent — price_basis (inherited) already
-    distinguishes these; the car's own specs live in the composed
-    VehicleSpec below, not duplicated as flat fields here."""
+    """For sale OR for rent — price_basis (inherited) distinguishes these; the car's own specs live in the
+    composed VehicleSpec below. A rental car is priced per day (price_basis RENT_NIGHTLY) and booked for chosen
+    dates, so the rental terms below only apply when it is for rent."""
+    price_negotiable = models.BooleanField(default=False)
+    driver_option = models.CharField(max_length=12, choices=DriverOption.choices, default=DriverOption.SELF_DRIVE)
+    driver_fee_per_day_xaf = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    weekly_discount_pct = models.PositiveSmallIntegerField(default=0)
+    monthly_discount_pct = models.PositiveSmallIntegerField(default=0)
+    min_rental_days = models.PositiveSmallIntegerField(default=1)
+    max_rental_days = models.PositiveSmallIntegerField(null=True, blank=True)
+    # Blank means unlimited kilometres.
+    daily_km_limit = models.PositiveIntegerField(null=True, blank=True)
+    extra_km_fee_xaf = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    fuel_policy = models.CharField(max_length=15, choices=FuelPolicy.choices, blank=True)
+    min_driver_age = models.PositiveSmallIntegerField(null=True, blank=True)
+    min_licence_years = models.PositiveSmallIntegerField(null=True, blank=True)
+    insurance_included = models.BooleanField(default=False)
+    delivery_available = models.BooleanField(default=False)
+    delivery_fee_xaf = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    out_of_town_allowed = models.BooleanField(default=True)
+    # Off: each booking is a request the owner accepts or declines (the payment waits in escrow meanwhile).
+    instant_book = models.BooleanField(default=True)
 
     class Meta:
         db_table = "car_listings"
+
+
+class CarBlockedPeriod(models.Model):
+    """Days the owner keeps a rental car off the calendar (servicing, personal use). Like a booking, the period
+    runs from starts_on up to but not including ends_on."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    car = models.ForeignKey(CarListing, on_delete=models.CASCADE, related_name="blocked_periods")
+    starts_on = models.DateField()
+    ends_on = models.DateField()
+    note = models.CharField(max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "car_blocked_periods"
+        ordering = ["starts_on"]
 
 
 class GoodsCategory(models.TextChoices):
@@ -149,6 +252,25 @@ class VehicleSpec(models.Model):
     year = models.PositiveSmallIntegerField()
     mileage_km = models.PositiveIntegerField(null=True, blank=True)
     engine_size_cc = models.PositiveIntegerField(null=True, blank=True)
+    trim = models.CharField(max_length=60, blank=True)
+    body_type = models.CharField(max_length=12, choices=CarBodyType.choices, blank=True)
+    fuel_type = models.CharField(max_length=10, choices=FuelType.choices, blank=True)
+    transmission = models.CharField(max_length=10, choices=Transmission.choices, blank=True)
+    drivetrain = models.CharField(max_length=5, choices=Drivetrain.choices, blank=True)
+    exterior_color = models.CharField(max_length=30, blank=True)
+    interior_color = models.CharField(max_length=30, blank=True)
+    doors = models.PositiveSmallIntegerField(null=True, blank=True)
+    seats = models.PositiveSmallIntegerField(null=True, blank=True)
+    vehicle_condition = models.CharField(max_length=15, choices=VehicleCondition.choices, blank=True)
+    # Paperwork buyers in Cameroon ask about first: customs cleared (dédouané) and the carte grise in the seller's name.
+    customs_cleared = models.BooleanField(null=True, blank=True)
+    registration_in_seller_name = models.BooleanField(null=True, blank=True)
+    previous_owners = models.PositiveSmallIntegerField(null=True, blank=True)
+    accident_free = models.BooleanField(null=True, blank=True)
+    service_history = models.BooleanField(null=True, blank=True)
+    features = models.JSONField(default=list, blank=True)
+    # Chassis number (VIN). Only its last 6 characters are ever shown to anyone but the lister.
+    vin = models.CharField(max_length=17, blank=True)
 
     class Meta:
         db_table = "vehicle_specs"
@@ -209,6 +331,7 @@ class DepositStatus(models.TextChoices):
     CLAIMED = "CLAIMED", "Claimed by the seller"
     RETURNED = "RETURNED", "Returned to the renter"
     FORFEITED = "FORFEITED", "Paid to the seller"
+    SPLIT = "SPLIT", "Split between the seller and the renter"
 
 
 class MarketplaceOrder(models.Model):
@@ -238,6 +361,16 @@ class MarketplaceOrder(models.Model):
         "transactions.Booking", on_delete=models.PROTECT, null=True, blank=True, related_name="marketplace_deposit_order",
     )
     deposit_settled_at = models.DateTimeField(null=True, blank=True)
+    # Car rentals booked for chosen dates: the rental dates are fixed at booking and the listing stays on the
+    # market for other dates instead of going under offer.
+    booked_dates = models.BooleanField(default=False)
+    rental_days = models.PositiveSmallIntegerField(null=True, blank=True)
+    with_driver = models.BooleanField(default=False)
+    delivery_requested = models.BooleanField(default=False)
+    price_breakdown = models.JSONField(default=dict, blank=True)
+    # A booking request on a car without instant booking: the owner must accept it before the handover.
+    needs_approval = models.BooleanField(default=False)
+    owner_approved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "marketplace_orders"
@@ -264,6 +397,13 @@ class RideCategory(models.TextChoices):
     COMFORT = "COMFORT", "Comfort"
     VAN = "VAN", "Van"
     TRUCK = "TRUCK", "Truck"
+
+
+class LuggageSize(models.TextChoices):
+    SMALL = "SMALL", "Small (backpack, handbag)"
+    MEDIUM = "MEDIUM", "Medium (cabin suitcase)"
+    LARGE = "LARGE", "Large (big suitcase, sack)"
+    BULKY = "BULKY", "Bulky (several large items)"
 
 
 class TransportType(models.TextChoices):
@@ -336,6 +476,11 @@ class RideBooking(models.Model):
     ride_category = models.CharField(max_length=10, choices=RideCategory.choices, default=RideCategory.STANDARD)
     transport_type = models.CharField(max_length=10, choices=TransportType.choices, default=TransportType.PASSENGER)
     has_luggage = models.BooleanField(default=False)
+    # What the rider says about their luggage so the driver can judge if it fits: how many bags, how big, and up
+    # to 3 photos (URLs from the shared upload pipeline).
+    luggage_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    luggage_size = models.CharField(max_length=10, choices=LuggageSize.choices, blank=True)
+    luggage_photo_urls = models.JSONField(default=list, blank=True)
     cargo_description = models.CharField(max_length=255, blank=True)
     booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="ride_booking")
     requested_at = models.DateTimeField(auto_now_add=True)

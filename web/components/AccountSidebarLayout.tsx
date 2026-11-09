@@ -38,6 +38,7 @@ const ACCOUNT_NAV_GROUPS: AccountNavGroup[] = [
       { href: "/account", label: "Profile & Settings", icon: IconUser },
       { href: "/security", label: "Password & Security", icon: IconLock },
       { href: "/kyc", label: "KYC Verification", icon: IconShieldCheck },
+      { href: "/verification", label: "Business Verification", icon: IconShieldCheck },
       { href: "/privacy-settings", label: "Privacy", icon: IconEyeOff },
     ],
   },
@@ -49,6 +50,9 @@ const ACCOUNT_NAV_GROUPS: AccountNavGroup[] = [
       { href: "/ratings", label: "Ratings & Reviews", icon: IconStar },
       { href: "/marketplace/my-listings", label: "My Marketplace Listings", icon: IconFileText },
       { href: "/marketplace/orders", label: "Marketplace Orders", icon: IconCreditCard },
+      { href: "/hostel-rooms", label: "Hostel Rooms", icon: IconFileText },
+      { href: "/agent-profile", label: "Agent Profile & Video", icon: IconUser },
+      { href: "/staff-access", label: "Staff & Team Access", icon: IconLock },
     ],
   },
   {

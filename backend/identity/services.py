@@ -146,6 +146,34 @@ def user_has_submitted_kyc(user) -> bool:
     return hasattr(user, "kyc_profile")
 
 
+def get_user_kyc_status(user) -> str:
+    """The user's KYC state as a plain string: NONE when nothing has been
+    submitted, otherwise the review status (PENDING / VERIFIED / REJECTED...)."""
+    kyc = getattr(user, "kyc_profile", None)
+    return kyc.kyc_status if kyc else "NONE"
+
+
+def user_is_kyc_verified(user) -> bool:
+    """True only once an admin has APPROVED the user's identity. Use this
+    (not user_has_submitted_kyc) for anything that moves money out."""
+    return get_user_kyc_status(user) == "VERIFIED"
+
+
+def is_super_admin(user) -> bool:
+    """A full-access administrator: may grant or remove the admin role and
+    read the audit log. An admin whose AdminProfile.permissions list is empty
+    or contains "*" has full access; any other list marks a limited admin."""
+    if not (user and getattr(user, "is_authenticated", False)):
+        return False
+    if user.is_superuser:
+        return True
+    profile = getattr(user, "admin_profile", None)
+    if profile is None:
+        return False
+    permissions = profile.permissions or []
+    return not permissions or "*" in permissions
+
+
 def require_kyc_submitted_for_registration(user):
     """Call this at the point registration is considered 'complete' —
     e.g. right before granting full account access."""
@@ -283,6 +311,12 @@ def get_or_create_referral_code(user) -> str:
 # houses, lands, shops, guest houses, venues, listings) and public professional
 # stats for public sharing and QR code discovery.
 # ---------------------------------------------------------------------------
+def verified_roles_for(user) -> list[str]:
+    """Professional roles (agent, agency, landlord) an admin has verified for this account."""
+    from engagement.services import verified_roles
+    return verified_roles(user)
+
+
 def get_user_public_index(user):
     from django.db.models import Avg
     from social.models import Rating
@@ -486,6 +520,7 @@ def get_user_public_index(user):
         "profile_image_url": user.profile_image_url,
         "phone": user.phone,
         "roles": roles,
+        "verified_roles": verified_roles_for(user),
         "is_kyc_verified": is_kyc,
         "average_rating": round(avg_rating, 2) if avg_rating else None,
         "rating_count": ratings.count(),

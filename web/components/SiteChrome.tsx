@@ -32,9 +32,16 @@ export const SIDEBAR_ROUTES = new Set([
   "/wallet",
 ]);
 
-/** Renders its children (the global Header/Footer) everywhere except sidebar-driven pages. */
-export default function SiteChrome({ children }: { children: ReactNode }) {
+/** True for the admin console and its sign-in page, which run without the public site's top navbar. */
+export const isAdminRoute = (pathname: string) => /^\/admin(\/|$)/.test(pathname.replace(/\/$/, "") + "/");
+
+/**
+ * Renders its children (the global Header/Footer) everywhere except sidebar-driven pages.
+ * With `hideOnAdmin`, it also hides them on the admin console and its sign-in page.
+ */
+export default function SiteChrome({ children, hideOnAdmin = false }: { children: ReactNode; hideOnAdmin?: boolean }) {
   const pathname = usePathname();
   if (SIDEBAR_ROUTES.has(pathname.replace(/\/$/, ""))) return null;
+  if (hideOnAdmin && isAdminRoute(pathname)) return null;
   return <>{children}</>;
 }

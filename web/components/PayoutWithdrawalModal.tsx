@@ -63,6 +63,14 @@ export default function PayoutWithdrawalModal({
       setErrorMessage(`Insufficient balance. You have ${currentBalance.toLocaleString()} XAF available.`);
       return;
     }
+    if (wallet && wallet.kyc_status !== "VERIFIED") {
+      setErrorMessage(
+        wallet.kyc_status === "PENDING"
+          ? "Your identity verification is still under review. You can withdraw once it is approved."
+          : "Verify your identity (KYC) before withdrawing money."
+      );
+      return;
+    }
 
     setStatus("submitting");
     setErrorMessage("");
@@ -99,13 +107,13 @@ export default function PayoutWithdrawalModal({
           <div>
             <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 inline-flex items-center gap-1 mb-1">
               <IconShieldCheck size={11} />
-              <span>Fapshi Instant Payout</span>
+              <span>Reviewed Mobile Money payout</span>
             </span>
             <h3 className="font-black text-slate-900 text-lg leading-tight">
               Withdraw Earnings
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Direct transfer to your Cameroon Mobile Money account
+              Paid to your Cameroon Mobile Money account after a quick review
             </p>
           </div>
           <button
@@ -124,10 +132,10 @@ export default function PayoutWithdrawalModal({
             </div>
             <div>
               <h3 className="font-extrabold text-slate-900 text-xl">
-                Payout Disbursed!
+                Withdrawal requested
               </h3>
               <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
-                {successDetail || `Transferred ${Number(amount).toLocaleString()} XAF to ${phone}.`}
+                {successDetail || `Your request for ${Number(amount).toLocaleString()} XAF was received and will be reviewed shortly.`}
               </p>
             </div>
             <div className="pt-2">
@@ -226,7 +234,7 @@ export default function PayoutWithdrawalModal({
                 className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
               />
               <p className="text-[10px] text-slate-400 mt-1">
-                Processed via Fapshi disbursement directly to your local phone wallet.
+                Reviewed by our team, then sent to your local Mobile Money number.
               </p>
             </div>
 
@@ -243,7 +251,7 @@ export default function PayoutWithdrawalModal({
                 disabled={status === "submitting" || currentBalance <= 0}
                 className="flex-1 py-3 text-xs font-black shadow-md shadow-amber-500/20"
               >
-                {status === "submitting" ? "Processing Payout..." : "Confirm & Send to MoMo"}
+                {status === "submitting" ? "Sending request..." : "Request withdrawal"}
               </Button>
               <button
                 type="button"

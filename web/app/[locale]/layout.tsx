@@ -8,7 +8,9 @@ import Footer from "@/components/Footer";
 import SiteChrome from "@/components/SiteChrome";
 import SupportChatWidget from "@/components/SupportChatWidget";
 import PresenceHeartbeat from "@/components/PresenceHeartbeat";
+import VisitorTracker from "@/components/VisitorTracker";
 import GlobalMobileNav from "@/components/GlobalMobileNav";
+import StaffSessionBar from "@/components/StaffSessionBar";
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));
@@ -31,21 +33,23 @@ export default async function LocaleLayout({
 
   return (
     <NextIntlClientProvider>
+      <StaffSessionBar />
       {/* WHY Header/Footer live here, once, instead of being repeated
           on every page: it's the only way to GUARANTEE every page has
           consistent navigation — a page file simply can't forget to
           include it if it's not that page's responsibility at all. */}
-      <SiteChrome>
+      <SiteChrome hideOnAdmin>
         <Navbar />
       </SiteChrome>
       <div className="flex-1">{children}</div>
-      <SiteChrome>
+      <SiteChrome hideOnAdmin>
         <Footer />
       </SiteChrome>
       <ServiceWorkerRegister />
       <SupportChatWidget />
       <GlobalMobileNav />
       <PresenceHeartbeat />
+      <VisitorTracker />
     </NextIntlClientProvider>
   );
 }

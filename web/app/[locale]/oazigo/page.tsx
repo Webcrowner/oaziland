@@ -37,6 +37,7 @@ export default function OaziGoPage() {
     ...(driverProfile?.is_verified
       ? [{ href: "/oazigo/requests", icon: "📡", title: t("navRequests"), desc: driverProfile.is_online ? t("onlineHint") : t("offlineHint") }]
       : []),
+    { href: "/oazigo/cars", icon: "🚙", title: t("navCars"), desc: t("carsCardDesc") },
     { href: "/oazigo/safety", icon: "🆘", title: t("navSafety"), desc: t("safetyCardDesc") },
   ];
 

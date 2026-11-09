@@ -54,6 +54,10 @@ class BookingAlreadySettledError(Exception):
     for, completed, or cancelled."""
 
 
+class EscrowSettlementError(Exception):
+    """A held payment could not be settled as asked (already settled, bad amount, nobody to pay)."""
+
+
 @dataclass
 class PaymentDetails:
     provider: str          # PaymentProvider choice, e.g. "MTN_MOMO"
@@ -366,3 +370,77 @@ def complete_booking(*, booking: Booking, agent=None, commission=None):
         from engagement.services import evaluate_badges_for_user
         evaluate_badges_for_user(booking.requester)
     return escrow
+
+
+def _credit_wallet(user, amount_xaf: Decimal, transaction_type: str, reference: str) -> None:
+    from django.db.models import F
+    from monetization.models import Wallet, WalletTransaction
+    from monetization.services import get_or_create_wallet
+
+    wallet = get_or_create_wallet(user)
+    Wallet.objects.filter(pk=wallet.pk).update(balance_xaf=F("balance_xaf") + amount_xaf)
+    WalletTransaction.objects.create(
+        wallet=wallet, transaction_type=transaction_type, amount_xaf=amount_xaf, related_reference=reference[:100],
+    )
+
+
+def split_amounts(escrow: PaymentEscrow, payer_amount_xaf) -> dict:
+    """How a held payment divides when payer_amount_xaf goes back to the payer: the platform fee is charged only
+    on the payee's share (in proportion, rounded to the franc), and the payee gets the rest."""
+    from decimal import ROUND_HALF_UP, InvalidOperation
+
+    try:
+        refund = Decimal(str(payer_amount_xaf))
+    except (InvalidOperation, ValueError, TypeError):
+        raise EscrowSettlementError("Enter the refund as a number of francs.")
+    gross = escrow.gross_amount_xaf
+    if refund != refund.to_integral_value():
+        raise EscrowSettlementError("Enter the refund in whole francs.")
+    if refund < 0 or refund > gross:
+        raise EscrowSettlementError("The refund must be between 0 and the amount paid.")
+    payee_gross = gross - refund
+    if refund == 0:
+        fee = escrow.platform_fee_xaf
+    elif gross > 0:
+        fee = (escrow.platform_fee_xaf * payee_gross / gross).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    else:
+        fee = Decimal("0")
+    return {"payer_xaf": refund, "payee_gross_xaf": payee_gross, "fee_xaf": fee, "payee_xaf": payee_gross - fee}
+
+
+def settle_escrow(*, escrow: PaymentEscrow, payer_amount_xaf, reference: str = "") -> dict:
+    """Pays out a held (or disputed) payment in one go: payer_amount_xaf back to the payer's wallet and the rest
+    to the payee's wallet, minus the platform fee on the payee's share only. 0 releases everything to the
+    payee, the full amount refunds everything. The escrow keeps the split (refunded_amount_xaf); its status is
+    RELEASED when the payee received anything, else REFUNDED. Returns the amounts and the payee."""
+    from monetization.models import WalletTransactionType
+
+    with db_transaction.atomic():
+        locked = PaymentEscrow.objects.select_for_update().select_related("booking__requester").get(pk=escrow.pk)
+        if locked.status not in (EscrowStatus.HELD, EscrowStatus.DISPUTED):
+            raise EscrowSettlementError("This payment has already been settled.")
+        amounts = split_amounts(locked, payer_amount_xaf)
+        booking = locked.booking
+        payee = resolve_target_owner(booking) if amounts["payee_xaf"] > 0 else None
+        if amounts["payee_xaf"] > 0 and payee is None:
+            raise EscrowSettlementError("Couldn't find who should be paid for this booking, so nothing was moved.")
+        reference = reference or f"booking #{booking.id}"
+
+        if amounts["payee_xaf"] > 0:
+            _credit_wallet(payee, amounts["payee_xaf"], WalletTransactionType.GIFT_PAYOUT, f"Escrow release: {reference}")
+        if amounts["payer_xaf"] > 0:
+            _credit_wallet(booking.requester, amounts["payer_xaf"], WalletTransactionType.REFUND, f"Refund: {reference}")
+
+        released = amounts["payee_gross_xaf"] > 0
+        locked.platform_fee_xaf = amounts["fee_xaf"]
+        locked.payee_amount_xaf = amounts["payee_xaf"]
+        locked.refunded_amount_xaf = amounts["payer_xaf"]
+        locked.status = EscrowStatus.RELEASED if released else EscrowStatus.REFUNDED
+        locked.released_at = timezone.now() if released else None
+        locked.save(update_fields=["platform_fee_xaf", "payee_amount_xaf", "refunded_amount_xaf", "status", "released_at"])
+        if released:
+            booking.complete()
+        else:
+            booking.cancel()
+    escrow.refresh_from_db()
+    return {**amounts, "payee": payee, "payer": booking.requester}

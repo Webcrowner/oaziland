@@ -9,6 +9,7 @@ import { IconMapPin, IconCompass, IconAlertCircle, IconMessageCircle, IconChevro
 import { useOaziGo } from "./OaziGoProvider";
 import DriverTrackingMap from "./DriverTrackingMap";
 import { STATUS_VARIANT, cardCls, dangerBtnCls, inputCls, labelCls, pillBtnCls, solidBtnCls } from "./styles";
+import LuggageDetails from "@/components/oazigo/LuggageDetails";
 
 export default function TripCard({ ride }: { ride: RideBookingItem }) {
   const t = useTranslations("OaziGoPage");
@@ -98,8 +99,8 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
       <div className="mt-3 flex items-center gap-2 flex-wrap">
         <Badge variant="neutral">{t(`category_${ride.ride_category}`)}</Badge>
         {ride.transport_type === "CARGO" && <Badge variant="gold">{t("transportCargo")}</Badge>}
-        {ride.has_luggage && <Badge variant="neutral">🧳 {t("hasLuggageLabel")}</Badge>}
       </div>
+      <LuggageDetails ride={ride} />
       {ride.cargo_description && <p className="mt-2 text-xs text-slate-500">{ride.cargo_description}</p>}
 
       {ride.driver && ride.status !== "CANCELLED" && (

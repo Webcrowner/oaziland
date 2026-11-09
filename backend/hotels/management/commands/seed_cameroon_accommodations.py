@@ -3,6 +3,7 @@ Seed script for Cameroon locations and real verified hospitality/accommodations/
 Ensures quarters, hotels, hostels, guest houses, venues, and listings exist in SQLite DB.
 """
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
 from identity.models import User, VerificationStatus, KYCProfile, MfaMethod, MfaType
 from hotels.models import Hotel, RoomType
@@ -70,6 +71,7 @@ class Command(BaseCommand):
             user=host,
             defaults={
                 "kyc_status": VerificationStatus.VERIFIED,
+                "reviewed_at": timezone.now(),
                 "legal_full_name": "Oaziland Verified Host Partner",
                 "national_id_number": "1122334455",
                 "date_of_birth": "1988-06-15",

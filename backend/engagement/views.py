@@ -1,4 +1,6 @@
-"""engagement.views — the public Contact Us endpoint and the admin-managed FAQ."""
+"""engagement.views — the public Contact Us endpoint, the support inbox for admins, and the admin-managed FAQ."""
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.views import APIView
@@ -8,9 +10,17 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from oaziland.permissions import IsAdminRole
-from .models import Faq
-from .serializers import AdminFaqSerializer, PublicFaqSerializer
-from .services import submit_contact_message
+from trust_safety.audit import audit_note
+from .models import Faq, ContactMessage, SupportTicket, SupportTicketStatus
+from .serializers import (
+    AdminFaqSerializer, PublicFaqSerializer, AdminSupportTicketSerializer, AdminContactMessageSerializer,
+)
+from .services import (
+    submit_contact_message, support_ticket_queryset, tickets_awaiting_admin,
+    respond_as_human_agent, resolve_ticket, reopen_ticket, MAX_SUPPORT_REPLY_LENGTH,
+)
+
+MAX_CONTACT_MESSAGE_LENGTH = 5000
 
 
 class PublicFaqListView(generics.ListAPIView):
@@ -60,14 +70,109 @@ class ContactMessageView(APIView):
 
     @extend_schema(request=dict, responses={201: dict, 400: dict})
     def post(self, request):
-        name = request.data.get("name")
-        email = request.data.get("email")
-        message = request.data.get("message")
+        name = str(request.data.get("name") or "").strip()
+        email = str(request.data.get("email") or "").strip()
+        message = str(request.data.get("message") or "").strip()
         if not all([name, email, message]):
             return Response({"detail": "name, email, and message are all required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_email(email)
+        except DjangoValidationError:
+            return Response({"detail": "Please enter a valid email address."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(name) > 200 or len(message) > MAX_CONTACT_MESSAGE_LENGTH:
+            return Response({"detail": "Your name or message is too long."}, status=status.HTTP_400_BAD_REQUEST)
 
         submit_contact_message(name=name, email=email, message=message)
         return Response({"detail": "Message sent."}, status=status.HTTP_201_CREATED)
+
+
+class AdminSupportTicketViewSet(viewsets.ReadOnlyModelViewSet):
+    """The support inbox. ?view=awaiting (default: handed to a person and not yet answered),
+    ?view=open (every active chat, including the ones the AI is still handling) or ?view=resolved.
+    Actions: reply, resolve, reopen."""
+    serializer_class = AdminSupportTicketSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return SupportTicket.objects.none()
+        queryset = support_ticket_queryset()
+        if self.action != "list":
+            return queryset
+        view = self.request.query_params.get("view", "awaiting")
+        if view == "resolved":
+            return queryset.filter(status__in=[SupportTicketStatus.RESOLVED, SupportTicketStatus.CLOSED]).order_by("-resolved_at", "-created_at")
+        if view == "open":
+            return queryset.filter(status__in=[SupportTicketStatus.OPEN, SupportTicketStatus.IN_PROGRESS]).order_by("-last_message_at")
+        return tickets_awaiting_admin(queryset).order_by("last_message_at")
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["include_messages"] = self.action != "list"
+        return context
+
+    def _respond(self, ticket):
+        fresh = support_ticket_queryset().get(pk=ticket.pk)
+        return Response(AdminSupportTicketSerializer(fresh, context={"include_messages": True, "request": self.request}).data)
+
+    def _label(self, request, ticket):
+        audit_note(request, target_type="support_ticket", target_label=f"{ticket.submitted_by.username} · {ticket.subject[:80]}")
+
+    @action(detail=True, methods=["post"])
+    def reply(self, request, pk=None):
+        ticket = self.get_object()
+        self._label(request, ticket)
+        text = str(request.data.get("message") or "").strip()
+        if not text:
+            return Response({"detail": "message is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(text) > MAX_SUPPORT_REPLY_LENGTH:
+            return Response({"detail": "That reply is too long."}, status=status.HTTP_400_BAD_REQUEST)
+        respond_as_human_agent(ticket=ticket, agent=request.user, text=text)
+        return self._respond(ticket)
+
+    @action(detail=True, methods=["post"])
+    def resolve(self, request, pk=None):
+        ticket = self.get_object()
+        self._label(request, ticket)
+        resolve_ticket(ticket)
+        return self._respond(ticket)
+
+    @action(detail=True, methods=["post"])
+    def reopen(self, request, pk=None):
+        ticket = self.get_object()
+        self._label(request, ticket)
+        reopen_ticket(ticket)
+        return self._respond(ticket)
+
+
+class AdminContactMessageViewSet(viewsets.ReadOnlyModelViewSet):
+    """Messages sent through the public Contact Us form. ?resolved=0 (default) or ?resolved=1.
+    Actions: resolve, reopen. Replying is done from the admin's own mail app (the email address is shown)."""
+    serializer_class = AdminContactMessageSerializer
+    permission_classes = [IsAdminRole]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return ContactMessage.objects.none()
+        if self.action != "list":
+            return ContactMessage.objects.all()
+        resolved = self.request.query_params.get("resolved") == "1"
+        return ContactMessage.objects.filter(resolved=resolved).order_by("-created_at" if resolved else "created_at")
+
+    def _set(self, request, resolved: bool):
+        message = self.get_object()
+        audit_note(request, target_type="contact_message", target_label=f"{message.name} <{message.email}>"[:200])
+        message.resolved = resolved
+        message.save(update_fields=["resolved"])
+        return Response(AdminContactMessageSerializer(message).data)
+
+    @action(detail=True, methods=["post"])
+    def resolve(self, request, pk=None):
+        return self._set(request, True)
+
+    @action(detail=True, methods=["post"])
+    def reopen(self, request, pk=None):
+        return self._set(request, False)
 
 
 class AnonymousChatbotView(APIView):
@@ -207,6 +312,54 @@ class MySupportTicketsView(APIView):
 
         ticket = create_support_ticket(user=request.user, subject=subject, first_message=message)
         return Response(_serialize_ticket(ticket, include_messages=True), status=status.HTTP_201_CREATED)
+
+
+class MyVerificationRequestsView(APIView):
+    """A user's own verification requests (with the decision and any reason), and where they ask for something
+    of theirs to be verified: their agent, agency or landlord standing, a student hostel, a guest house, a
+    business or a car listing. The subject must be theirs and a secure document link is required."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(operation_id="list_my_verification_requests", responses={200: dict})
+    def get(self, request):
+        from trust_safety.verification import describe_subject
+        from .services import eligible_verification_subjects
+
+        rows = request.user.verification_requests_made.order_by("-submitted_at")
+        results = []
+        for item in rows:
+            subject = describe_subject(item.subject_content_type, item.subject_id, item.request_type)
+            results.append({
+                "id": str(item.id), "request_type": item.request_type, "status": item.status, "submitted_at": item.submitted_at,
+                "reviewed_at": item.reviewed_at, "rejection_reason": item.rejection_reason,
+                "supporting_document_url": item.supporting_document_url,
+                "subject": {"kind": subject["kind"], "title": subject["title"], "found": subject["found"]},
+            })
+        return Response({"count": len(results), "results": results, "options": eligible_verification_subjects(request.user)})
+
+    @extend_schema(operation_id="submit_verification_request", request=dict, responses={201: dict, 400: dict})
+    def post(self, request):
+        import uuid
+        from .services import VerificationSubmissionError, submit_verification
+
+        raw_subject = request.data.get("subject_id")
+        subject_id = None
+        if raw_subject:
+            try:
+                subject_id = uuid.UUID(str(raw_subject))
+            except ValueError:
+                return Response({"detail": "Choose what you want verified."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            item = submit_verification(
+                requester=request.user, request_type=str(request.data.get("request_type") or ""),
+                subject_id=subject_id, supporting_document_url=str(request.data.get("supporting_document_url") or ""),
+            )
+        except VerificationSubmissionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"id": str(item.id), "request_type": item.request_type, "status": item.status, "submitted_at": item.submitted_at},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class SupportTicketDetailView(APIView):

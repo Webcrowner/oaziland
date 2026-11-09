@@ -1,6 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
-import Image from "next/image";
 import { listQuarters, searchListings, listTestimonials, getHomeStats, listPublicFaqs } from "@/lib/api";
 import type { Metadata } from "next";
 import {
@@ -31,6 +30,9 @@ import PopularNeighborhoods from "@/components/home/PopularNeighborhoods";
 import InteractiveAffordabilityCalculator from "@/components/home/InteractiveAffordabilityCalculator";
 import InteractiveFaqAccordion from "@/components/home/InteractiveFaqAccordion";
 import WelcomeChoices from "@/components/home/WelcomeChoices";
+import HeroBackdrop from "@/components/home/HeroBackdrop";
+import CountUp from "@/components/home/CountUp";
+import Reveal, { RevealGroup } from "@/components/home/Reveal";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params;
@@ -67,29 +69,30 @@ export default async function HomePage() {
         .map((item) => ({ text: t(item.key, { count: item.count }), link: item.link }))
     : [];
 
+  const heroStats = stats
+    ? [
+        { value: stats.published_listings, label: t("statListings") },
+        { value: stats.new_listings_24h, label: t("statNewToday") },
+        { value: stats.hotels + stats.guest_houses + stats.student_hostels + stats.venues, label: t("statStays") },
+        { value: stats.drivers, label: t("statDrivers") },
+      ].filter((item) => item.value > 0)
+    : [];
+
   return (
     <main className="bg-slate-50 min-h-screen">
       {/* ================= HERO WITH DYNAMIC SEARCH CONSOLE ================= */}
-      <section className="relative overflow-hidden hero-gradient text-white pt-8 pb-20 md:pt-14 md:pb-24 border-b border-slate-800">
-        <div className="absolute inset-0 pointer-events-none">
-          <Image
-            src="/images/hero-trust-cameroon.png"
-            alt=""
-            fill
-            preload
-            sizes="100vw"
-            className="object-cover object-center"
-          />
-        </div>
+      <section className="relative overflow-hidden hero-gradient text-white pt-8 pb-28 md:pt-14 md:pb-32 border-b border-slate-800">
+        <HeroBackdrop />
 
         {/* Ambient background glow & geometric grid */}
         <div className="absolute inset-0 bg-[radial-gradient(#ffffff0a_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none opacity-40" />
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[700px] h-[350px] bg-amber-500/10 blur-[120px] rounded-full pointer-events-none" />
-        <div className="absolute top-1/2 right-10 w-[400px] h-[300px] bg-blue-600/10 blur-[100px] rounded-full pointer-events-none" />
+        <div className="animate-float-orb absolute -top-32 left-1/2 -translate-x-1/2 w-[700px] h-[350px] bg-amber-500/10 blur-[120px] rounded-full pointer-events-none" />
+        <div className="animate-float-orb absolute top-1/2 right-10 w-[400px] h-[300px] bg-blue-600/10 blur-[100px] rounded-full pointer-events-none [animation-delay:-7s]" />
 
         <div className="relative max-w-6xl mx-auto px-4 sm:px-6 text-center">
           {/* Trust Pill */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/15 text-xs font-medium text-amber-300 mb-6 backdrop-blur-md animate-rise-in">
+          <div className="relative overflow-hidden inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/15 text-xs font-medium text-amber-300 mb-6 backdrop-blur-md animate-rise-in">
+            <span aria-hidden="true" className="pill-sheen" />
             <IconSparkles size={14} className="text-amber-400" />
             <span>{t("trustPill")}</span>
           </div>
@@ -110,6 +113,23 @@ export default async function HomePage() {
 
           {/* Interactive Dynamic Search Console (Client Component) */}
           <HeroSearchConsole quarters={quarters ?? []} areasFailed={quarters === null} popularQuarters={stats?.popular_quarters ?? []} />
+
+          {heroStats.length > 0 && (
+            <dl className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl mx-auto">
+              {heroStats.map((item, i) => (
+                <div
+                  key={item.label}
+                  className="animate-rise-in flex flex-col-reverse rounded-2xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur-md transition-colors hover:bg-white/15"
+                  style={{ animationDelay: `${450 + i * 90}ms` }}
+                >
+                  <dt className="mt-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-200">{item.label}</dt>
+                  <dd className="font-[family-name:var(--font-display)] text-2xl sm:text-3xl font-bold text-amber-300 [text-shadow:0_1px_12px_rgba(0,0,0,0.6)]">
+                    <CountUp value={item.value} />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
       </section>
 
@@ -119,7 +139,7 @@ export default async function HomePage() {
       {/* ================= TRUST BADGES STRIP ================= */}
       <section className="relative -mt-10 sm:-mt-12 z-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 p-5 sm:p-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+          <RevealGroup className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
             <div className="flex items-start gap-3.5 pt-3 sm:pt-0 sm:px-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
                 <IconShieldCheck size={22} />
@@ -167,17 +187,17 @@ export default async function HomePage() {
                 </p>
               </div>
             </div>
-          </div>
+          </RevealGroup>
         </div>
       </section>
 
-      <FeaturedListings liveListings={featuredListings ?? []} loadFailed={featuredListings === null} />
-      <WelcomeChoices />
+      <Reveal soft><FeaturedListings liveListings={featuredListings ?? []} loadFailed={featuredListings === null} /></Reveal>
+      <Reveal soft><WelcomeChoices /></Reveal>
 
       {/* ================= EXPLORE CATEGORIES (SUPER-APP) ================= */}
       <section className="py-16 sm:py-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 sm:mb-10">
+          <Reveal className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 sm:mb-10">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-amber-600 mb-1.5">{t("ecosystemEyebrow")}</p>
               <h2 className="font-[family-name:var(--font-display)] text-2xl sm:text-3xl font-bold text-slate-900">
@@ -187,9 +207,9 @@ export default async function HomePage() {
             <p className="text-xs sm:text-sm text-slate-500 mt-2 sm:mt-0 max-w-md">
               {t("ecosystemSubtitle")}
             </p>
-          </div>
+          </Reveal>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
+          <RevealGroup className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
             {[
               {
                 title: t("catRentalsTitle"),
@@ -297,19 +317,19 @@ export default async function HomePage() {
                 </div>
               </Link>
             ))}
-          </div>
+          </RevealGroup>
         </div>
       </section>
 
       {/* ================= INTERACTIVE NEIGHBORHOOD EXPLORER (CITY TABS & STATS) ================= */}
-      <PopularNeighborhoods quarters={stats?.popular_quarters ?? []} />
+      <Reveal soft><PopularNeighborhoods quarters={stats?.popular_quarters ?? []} /></Reveal>
 
       {/* ================= THE CAMEROON TRUST ADVANTAGE ================= */}
       <section className="py-20 px-4 sm:px-6 bg-[var(--navy)] text-white relative overflow-hidden">
         <div className="absolute -bottom-20 right-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="max-w-6xl mx-auto relative z-10">
-          <div className="text-center max-w-3xl mx-auto mb-14">
+          <Reveal className="text-center max-w-3xl mx-auto mb-14">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 block">
               {t("trustAdvEyebrow")}
             </span>
@@ -319,9 +339,9 @@ export default async function HomePage() {
             <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
               {t("trustAdvSubtitle")}
             </p>
-          </div>
+          </Reveal>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <RevealGroup className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="bg-white/5 border border-white/10 rounded-2xl p-7 backdrop-blur-sm transition-all duration-300 hover:bg-white/10 hover:border-amber-400/40">
               <div className="w-12 h-12 rounded-xl bg-amber-400/20 text-amber-400 flex items-center justify-center mb-5">
                 <IconShieldCheck size={26} />
@@ -351,25 +371,25 @@ export default async function HomePage() {
                 {t("trustAdvCard3Desc")}
               </p>
             </div>
-          </div>
+          </RevealGroup>
         </div>
       </section>
 
       {/* ================= DYNAMIC INTERACTIVE AFFORDABILITY CALCULATOR ================= */}
-      <InteractiveAffordabilityCalculator />
+      <Reveal soft><InteractiveAffordabilityCalculator /></Reveal>
 
       {/* ================= TESTIMONIALS / PROOF ================= */}
       {testimonials.length > 0 && (
       <section className="py-16 sm:py-20 px-4 sm:px-6 bg-slate-50">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center max-w-2xl mx-auto mb-12">
+          <Reveal className="text-center max-w-2xl mx-auto mb-12">
             <p className="text-xs font-bold uppercase tracking-wider text-amber-600 mb-1">{t("testimonialsEyebrow")}</p>
             <h2 className="font-[family-name:var(--font-display)] text-2xl sm:text-3xl font-bold text-slate-900">
               {t("testimonialsTitleV2")}
             </h2>
-          </div>
+          </Reveal>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <RevealGroup className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {testimonials.map((testi, i) => (
               <div key={i} className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
                 <div>
@@ -387,13 +407,13 @@ export default async function HomePage() {
                 </div>
               </div>
             ))}
-          </div>
+          </RevealGroup>
         </div>
       </section>
       )}
 
       {/* ================= DYNAMIC INTERACTIVE FAQS ================= */}
-      <InteractiveFaqAccordion faqs={faqs} showViewAll />
+      <Reveal soft><InteractiveFaqAccordion faqs={faqs} showViewAll /></Reveal>
 
       {/* ================= MOBILE APP & SUPER-APP BANNER ================= */}
       <section className="py-14 px-4 sm:px-6 bg-gradient-to-br from-slate-900 via-slate-800 to-amber-950 text-white border-t border-slate-800">

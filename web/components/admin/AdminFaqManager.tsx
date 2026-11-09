@@ -1,5 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
+import { useAdminDialogs } from "@/components/admin/useAdminDialogs";
 import {
   createAdminFaq, deleteAdminFaq, listAdminFaqs, reorderAdminFaqs, updateAdminFaq, type AdminFaq, type AdminFaqInput,
 } from "@/lib/api";
@@ -16,6 +18,8 @@ const smallBtn =
 
 /** Admin console panel: add, edit, reorder, hide and delete FAQ entries (English + optional French). */
 export default function AdminFaqManager() {
+  const tAdmin = useTranslations("AdminConsolePage");
+  const dialogs = useAdminDialogs();
   const [faqs, setFaqs] = useState<AdminFaq[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [editingId, setEditingId] = useState<number | "new" | null>(null);
@@ -62,7 +66,7 @@ export default function AdminFaqManager() {
       setMessage(success);
       return true;
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Something went wrong");
+      setMessage(err instanceof Error ? err.message : tAdmin("faqGenericError"));
       return false;
     } finally {
       setBusy(false);
@@ -73,7 +77,7 @@ export default function AdminFaqManager() {
     e.preventDefault();
     const ok = await run(
       () => (editingId === "new" ? createAdminFaq(form, token()) : updateAdminFaq(editingId as number, form, token())),
-      editingId === "new" ? "FAQ added." : "FAQ saved."
+      editingId === "new" ? tAdmin("faqAdded") : tAdmin("faqSaved")
     );
     if (ok) setEditingId(null);
   }
@@ -81,20 +85,21 @@ export default function AdminFaqManager() {
   function move(index: number, direction: -1 | 1) {
     const ids = faqs.map((f) => f.id);
     [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
-    run(() => reorderAdminFaqs(ids, token()), "Order updated.");
+    run(() => reorderAdminFaqs(ids, token()), tAdmin("faqOrderUpdated"));
   }
 
   return (
     <div className="space-y-5 animate-rise-in max-w-4xl">
+      {dialogs.element}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="font-bold text-slate-900 text-lg">Frequently Asked Questions</h3>
+          <h3 className="font-bold text-slate-900 text-lg">{tAdmin("faqTitle")}</h3>
           <p className="text-xs text-slate-500">
-            Shown on the public FAQ page and, when ticked, on the homepage. French is optional &mdash; visitors fall back to English.
+            {tAdmin("faqIntro")}
           </p>
         </div>
         <button type="button" onClick={startNew} className="gold-gradient text-[var(--navy)] text-sm font-bold px-4 py-2 rounded-xl">
-          + Add FAQ
+          {tAdmin("faqAdd")}
         </button>
       </div>
 
@@ -102,27 +107,27 @@ export default function AdminFaqManager() {
 
       {editingId !== null && (
         <form onSubmit={handleSave} className="bg-white border border-amber-300 rounded-2xl p-5 space-y-4 shadow-xs">
-          <h4 className="font-bold text-slate-900">{editingId === "new" ? "New FAQ" : "Edit FAQ"}</h4>
+          <h4 className="font-bold text-slate-900">          {editingId === "new" ? tAdmin("faqNew") : tAdmin("faqEditTitle")}</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-3">
-              <p className="text-[11px] font-black uppercase tracking-widest text-amber-700">English (required)</p>
+                        <p className="text-[11px] font-black uppercase tracking-widest text-amber-700">{tAdmin("faqEnglishRequired")}</p>
               <div>
-                <label className={labelClass}>Question</label>
+                          <label className={labelClass}>{tAdmin("faqQuestion")}</label>
                 <input required maxLength={300} className={inputClass} value={form.question_en} onChange={(e) => setForm({ ...form, question_en: e.target.value })} />
               </div>
               <div>
-                <label className={labelClass}>Answer</label>
+                <label className={labelClass}>{tAdmin("faqAnswer")}</label>
                 <textarea required rows={6} className={inputClass} value={form.answer_en} onChange={(e) => setForm({ ...form, answer_en: e.target.value })} />
               </div>
             </div>
             <div className="space-y-3">
-              <p className="text-[11px] font-black uppercase tracking-widest text-slate-500">Fran&ccedil;ais (optional)</p>
+              <p className="text-[11px] font-black uppercase tracking-widest text-slate-500">              {tAdmin("faqFrenchOptional")}</p>
               <div>
-                <label className={labelClass}>Question</label>
+                              <label className={labelClass}>{tAdmin("faqQuestion")}</label>
                 <input maxLength={300} className={inputClass} value={form.question_fr} onChange={(e) => setForm({ ...form, question_fr: e.target.value })} />
               </div>
               <div>
-                <label className={labelClass}>Answer</label>
+                <label className={labelClass}>{tAdmin("faqAnswer")}</label>
                 <textarea rows={6} className={inputClass} value={form.answer_fr} onChange={(e) => setForm({ ...form, answer_fr: e.target.value })} />
               </div>
             </div>
@@ -130,30 +135,30 @@ export default function AdminFaqManager() {
           <div className="flex flex-wrap items-center gap-5 text-sm text-slate-700">
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={form.is_published} onChange={(e) => setForm({ ...form, is_published: e.target.checked })} />
-              Published
+              {tAdmin("faqPublishedLabel")}
             </label>
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={form.show_on_homepage} onChange={(e) => setForm({ ...form, show_on_homepage: e.target.checked })} />
-              Show on homepage
+              {tAdmin("faqShowHome")}
             </label>
           </div>
           <div className="flex gap-2">
             <button type="submit" disabled={busy} className="bg-slate-900 text-white text-sm font-bold px-5 py-2 rounded-xl disabled:opacity-50">
-              {busy ? "Saving…" : "Save"}
+              {busy ? tAdmin("faqSaving") : tAdmin("faqSave")}
             </button>
             <button type="button" onClick={() => setEditingId(null)} className="text-sm font-bold px-4 py-2 rounded-xl border border-slate-200 bg-white">
-              Cancel
+              {tAdmin("faqCancel")}
             </button>
           </div>
         </form>
       )}
 
       {state === "loading" ? (
-        <p className="text-sm text-slate-400 py-6 text-center">Loading FAQs…</p>
+        <p className="text-sm text-slate-400         py-6 text-center">{tAdmin("faqLoading")}</p>
       ) : state === "error" ? (
-        <p className="text-sm text-rose-600 py-6 text-center">Could not load the FAQs.</p>
+                <p className="text-sm text-rose-600 py-6 text-center">{tAdmin("faqLoadError")}</p>
       ) : faqs.length === 0 ? (
-        <p className="text-sm text-slate-500 py-8 text-center bg-white rounded-2xl border border-slate-200">No FAQs yet. Add the first one.</p>
+                <p className="text-sm text-slate-500 py-8 text-center bg-white rounded-2xl border border-slate-200">{tAdmin("faqEmpty")}</p>
       ) : (
         <ul className="space-y-2.5">
           {faqs.map((faq, index) => (
@@ -161,34 +166,36 @@ export default function AdminFaqManager() {
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5 mb-1">
                   <span className="text-[11px] font-black text-slate-400">#{index + 1}</span>
-                  {!faq.is_published && <span className="text-[10px] font-bold uppercase bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">Hidden</span>}
-                  {faq.is_published && !faq.show_on_homepage && <span className="text-[10px] font-bold uppercase bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full">FAQ page only</span>}
+                  {!faq.is_published && <span className="text-[10px] font-bold uppercase bg-slate-200 text-slate-700                   px-2 py-0.5 rounded-full">{tAdmin("faqHiddenBadge")}</span>}
+                                    {faq.is_published && !faq.show_on_homepage && <span className="text-[10px] font-bold uppercase bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full">{tAdmin("faqPageOnlyBadge")}</span>}
                   {faq.question_fr && <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">FR</span>}
                 </div>
                 <p className="font-bold text-slate-900 text-sm">{faq.question_en}</p>
                 <p className="text-xs text-slate-500 mt-1 line-clamp-2">{faq.answer_en}</p>
               </div>
               <div className="flex flex-wrap gap-1.5 shrink-0">
-                <button type="button" className={smallBtn} disabled={busy || index === 0} onClick={() => move(index, -1)} aria-label="Move up">&uarr;</button>
-                <button type="button" className={smallBtn} disabled={busy || index === faqs.length - 1} onClick={() => move(index, 1)} aria-label="Move down">&darr;</button>
+                <button type="button" className={smallBtn} disabled={busy || index === 0} onClick={() => move(index, -1)}                 aria-label={tAdmin("faqMoveUp")}>&uarr;</button>
+                                <button type="button" className={smallBtn} disabled={busy || index === faqs.length - 1} onClick={() => move(index, 1)} aria-label={tAdmin("faqMoveDown")}>&darr;</button>
                 <button
                   type="button"
                   className={smallBtn}
                   disabled={busy}
-                  onClick={() => run(() => updateAdminFaq(faq.id, { is_published: !faq.is_published }, token()), faq.is_published ? "FAQ hidden." : "FAQ published.")}
+                                  onClick={() => run(() => updateAdminFaq(faq.id, { is_published: !faq.is_published }, token()), faq.is_published ? tAdmin("faqHiddenDone") : tAdmin("faqPublishedDone"))}
                 >
-                  {faq.is_published ? "Hide" : "Publish"}
+                                  {faq.is_published ? tAdmin("faqHide") : tAdmin("faqPublish")}
                 </button>
-                <button type="button" className={smallBtn} disabled={busy} onClick={() => startEdit(faq)}>Edit</button>
+                                <button type="button" className={smallBtn} disabled={busy} onClick={() => startEdit(faq)}>{tAdmin("faqEditButton")}</button>
                 <button
                   type="button"
                   className={`${smallBtn} !text-rose-700 !border-rose-200 hover:!bg-rose-50`}
                   disabled={busy}
-                  onClick={() => {
-                    if (window.confirm("Delete this FAQ permanently?")) run(() => deleteAdminFaq(faq.id, token()), "FAQ deleted.");
+                  onClick={async () => {
+                    if (await dialogs.confirm(tAdmin("faqDeleteConfirm"), { destructive: true, confirmLabel: tAdmin("faqDeleteLabel") })) {
+                      void run(() => deleteAdminFaq(faq.id, token()), tAdmin("faqDeleted"));
+                    }
                   }}
                 >
-                  Delete
+                  {tAdmin("faqDeleteLabel")}
                 </button>
               </div>
             </li>

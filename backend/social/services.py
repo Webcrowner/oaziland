@@ -313,7 +313,7 @@ def schedule_message(*, conversation, sender, text, send_at):
     )
 
 
-def send_message_now(*, conversation, sender, text, client_message_id=None):
+def send_message_now(*, conversation, sender, text, client_message_id=None, marketplace_listing=None):
     """The primary way an ordinary, immediately-sent message gets
     created — sent_at and folder=SENT are always set together, in one
     place, rather than left to whichever caller remembers to set both.
@@ -337,10 +337,12 @@ def send_message_now(*, conversation, sender, text, client_message_id=None):
     message = Message.objects.create(
         conversation=conversation, sender=sender, text=text,
         client_message_id=client_message_id, folder=MessageFolder.SENT, sent_at=timezone.now(),
+        marketplace_listing=marketplace_listing,
     )
     create_receipts_for_message(message)
 
     from notifications.services import notify
+    preview = f"About \"{marketplace_listing.title}\": {text}" if marketplace_listing is not None else text
     for recipient in conversation.participants.exclude(id=sender.id):
         if is_user_online(recipient):
             # An online recipient's device is presumed to receive it
@@ -350,7 +352,7 @@ def send_message_now(*, conversation, sender, text, client_message_id=None):
             notify(
                 recipient=recipient, notification_type="NEW_MESSAGE_WHILE_OFFLINE",
                 title=f"New message from {sender.full_name or sender.username}",
-                message=text[:100], related_reference=str(message.id),
+                message=preview[:100], related_reference=str(message.id),
             )
 
     return message

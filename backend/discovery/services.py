@@ -86,7 +86,7 @@ def check_saved_searches_for_new_listing(listing):
     from .models import SavedSearch
 
     notified = []
-    for saved_search in SavedSearch.objects.all():
+    for saved_search in SavedSearch.objects.filter(scope="PROPERTY"):
         if listing_matches_filters(listing, saved_search.filters):
             notification = notify(
                 recipient=saved_search.user,

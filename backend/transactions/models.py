@@ -108,6 +108,8 @@ class PaymentEscrow(models.Model):
     gross_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
     platform_fee_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     payee_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2)
+    # Set when a dispute gives part (or all) of the money back to the payer; the rest went to the payee.
+    refunded_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=EscrowStatus.choices, default=EscrowStatus.HELD)
     provider = models.CharField(max_length=20, choices=PaymentProvider.choices)
     provider_reference = models.CharField(max_length=100, null=True, blank=True)
@@ -135,7 +137,8 @@ class PaymentEscrow(models.Model):
 
     def refund(self):
         self.status = EscrowStatus.REFUNDED
-        self.save(update_fields=["status"])
+        self.refunded_amount_xaf = self.gross_amount_xaf
+        self.save(update_fields=["status", "refunded_amount_xaf"])
 
 
 class Commission(models.Model):

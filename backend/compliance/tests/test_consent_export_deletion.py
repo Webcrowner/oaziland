@@ -77,6 +77,7 @@ def test_data_export_contains_real_downloadable_data(quarter):
     export_request.export_file.open()
     exported_data = json.loads(export_request.export_file.read())
     export_request.export_file.close()
+    export_request.export_file.delete(save=False)
 
     assert exported_data["profile"]["username"] == "export_user"
     assert exported_data["kyc"]["legal_full_name"] == "Export Test User"
@@ -108,11 +109,12 @@ def test_deletion_retains_financial_records_but_scrubs_personal_data(quarter):
     user.refresh_from_db()
 
     # DELETED: personal identifying data.
-    assert user.phone == ""
-    assert user.email == ""
+    assert user.phone == f"del-{user_id.hex[:16]}"
+    assert user.email is None
     assert user.first_name == ""
     assert user.username == f"deleted_user_{user_id}"
     assert user.deleted_at is not None
+    assert user.is_active is False and not user.has_usable_password()
     assert hasattr(user, "kyc_profile") is False  # KYC record genuinely gone, not just hidden
 
     # RETAINED: the financial/legal record, unchanged, still linked.
@@ -137,7 +139,7 @@ def test_full_deletion_request_workflow_applies_the_real_retention_policy():
 
     assert len(completed) == 1
     user.refresh_from_db()
-    assert user.email == ""  # genuinely scrubbed, not just flagged
+    assert user.email is None  # genuinely scrubbed, not just flagged
     assert hasattr(user, "kyc_profile") is False
 
 

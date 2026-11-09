@@ -257,14 +257,31 @@ class WithdrawalStatus(models.TextChoices):
 class WithdrawalRequest(models.Model):
     """A request to cash OUT of the wallet to a real Mobile Money account.
     NOT auto-approved — real payout rails need a human/admin check before
-    real money leaves the platform, at least until a real payout API is
-    connected (flagged the same way the payment gateways were)."""
+    real money leaves the platform. The amount is reserved (deducted from
+    the wallet) when the request is made; an admin then either approves
+    it (the payout is sent, minus the WALLET_WITHDRAWAL fee) or rejects
+    it (the reserved amount goes back to the wallet)."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name="withdrawal_requests")
     amount_xaf = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=15, choices=WithdrawalStatus.choices, default=WithdrawalStatus.PENDING)
     requested_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
+    phone_number = models.CharField(max_length=50, blank=True)
+    provider = models.CharField(max_length=20, default="MTN_MOMO")
+    fee_xaf = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="withdrawals_reviewed",
+    )
+    rejection_reason = models.TextField(blank=True)
+    payout_reference = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+
+    @property
+    def net_amount_xaf(self):
+        return self.amount_xaf - self.fee_xaf
 
 
 class GiftType(models.TextChoices):

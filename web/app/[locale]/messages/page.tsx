@@ -205,7 +205,8 @@ export default function MessagesPage() {
 
   // Find active conversation
   const activeConversation = useMemo(() => {
-    return conversations.find((c) => c.id === selectedId) || null;
+    // Ids come back from the API as numbers but from ?conversation= links as strings.
+    return conversations.find((c) => String(c.id) === String(selectedId)) || null;
   }, [conversations, selectedId]);
 
   // Name and avatar of other participant
@@ -327,7 +328,7 @@ export default function MessagesPage() {
               </div>
             ) : (
               filteredConversations.map((conv) => {
-                const isSelected = selectedId === conv.id;
+                const isSelected = String(selectedId) === String(conv.id);
                 const otherDetail = conv.participants_details?.[0];
                 const name = conv.participant_usernames.join(", ") || otherDetail?.full_name || "User";
                 const lastMsg = conv.last_message;
@@ -540,6 +541,28 @@ export default function MessagesPage() {
                               <p className="text-[10px] font-extrabold text-amber-600 mb-0.5">
                                 {msg.sender_name}
                               </p>
+                            )}
+
+                            {msg.listing && (
+                              <Link
+                                href={`/marketplace/${msg.listing.category}/${msg.listing.id}`}
+                                className={`mb-2 flex items-center gap-2.5 rounded-xl border p-2 ${isMe ? "border-white/15 bg-white/10" : "border-slate-200 bg-slate-50"}`}
+                              >
+                                {msg.listing.photo_url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={msg.listing.photo_url} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" />
+                                ) : (
+                                  <span className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-xl" aria-hidden>{msg.listing.category === "cars" ? "🚗" : "🛍️"}</span>
+                                )}
+                                <span className="min-w-0">
+                                  <span className={`block text-[10px] font-semibold uppercase tracking-wide ${isMe ? "text-amber-300" : "text-amber-600"}`}>{t("listingAbout")}</span>
+                                  <span className="block truncate text-xs font-bold">{msg.listing.title}</span>
+                                  <span className={`block text-[11px] ${isMe ? "text-slate-300" : "text-slate-500"}`}>
+                                    {Number(msg.listing.price_xaf).toLocaleString(locale)} XAF{msg.listing.price_basis === "RENT_NIGHTLY" ? ` ${t("listingPerDay")}` : ""}
+                                    {msg.listing.availability_status !== "AVAILABLE" ? ` · ${t("listingUnavailable")}` : ""}
+                                  </span>
+                                </span>
+                              </Link>
                             )}
 
                             <div className="text-xs sm:text-[13px] leading-relaxed break-words whitespace-pre-wrap">

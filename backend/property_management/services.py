@@ -189,24 +189,66 @@ def admin_respond_to_dispute(dispute):
     return dispute
 
 
-def resolve_dispute(*, dispute, outcome: str, notes: str = ""):
+DISPUTE_OUTCOMES = ("RELEASE", "REFUND", "SPLIT")
+
+
+def resolve_dispute(*, dispute, outcome: str, notes: str = "", payer_amount_xaf=None):
+    """An admin's decision on a disputed payment. RELEASE pays the payee in full, REFUND returns everything to the
+    payer's Oaziland wallet, SPLIT gives payer_amount_xaf (more than 0, less than the amount paid) back to the payer
+    and the rest to the payee. The platform fee is charged only on what the payee receives."""
+    from django.db import transaction
     from django.utils import timezone
+    from transactions.services import EscrowSettlementError, settle_escrow, split_amounts
     from .models import DisputeStatus
     from marketplace.services import order_for_escrow, resolve_order_dispute
 
-    if outcome not in ("RELEASE", "REFUND"):
-        raise ValueError("outcome must be 'RELEASE' or 'REFUND'")
-    order = order_for_escrow(dispute.escrow)
-    if order is not None:
-        # A marketplace order also pays the seller's wallet or reopens the listing, not just the escrow.
-        resolve_order_dispute(order=order, outcome=outcome, escrow=dispute.escrow)
-    elif outcome == "RELEASE":
-        dispute.escrow.release()
+    if outcome not in DISPUTE_OUTCOMES:
+        raise ValueError("outcome must be 'RELEASE', 'REFUND' or 'SPLIT'")
+    if dispute.status == DisputeStatus.RESOLVED:
+        raise EscrowSettlementError("This dispute has already been resolved.")
+    escrow = dispute.escrow
+    gross = escrow.gross_amount_xaf
+    if outcome == "SPLIT":
+        if payer_amount_xaf in (None, ""):
+            raise EscrowSettlementError("Enter how much goes back to the payer.")
+        refund = split_amounts(escrow, payer_amount_xaf)["payer_xaf"]
+        if refund <= 0 or refund >= gross:
+            raise EscrowSettlementError("For a split, the refund must be more than 0 and less than the amount paid.")
     else:
-        dispute.escrow.refund()
+        refund = 0 if outcome == "RELEASE" else gross
 
-    dispute.status = DisputeStatus.RESOLVED
-    dispute.resolved_at = timezone.now()
-    dispute.resolution_notes = notes
-    dispute.save(update_fields=["status", "resolved_at", "resolution_notes"])
+    with transaction.atomic():
+        dispute.resolution_notes = notes
+        order = order_for_escrow(escrow)
+        if order is not None:
+            # A marketplace order also updates the order and listing, and notifies both sides itself.
+            resolve_order_dispute(order=order, escrow=escrow, payer_amount_xaf=refund)
+        else:
+            result = settle_escrow(escrow=escrow, payer_amount_xaf=refund, reference=f"dispute #{str(dispute.pk)[:8]}")
+            _notify_dispute_outcome(dispute, result)
+        dispute.status = DisputeStatus.RESOLVED
+        dispute.resolved_at = timezone.now()
+        dispute.save(update_fields=["status", "resolved_at", "resolution_notes"])
     return dispute
+
+
+def _notify_dispute_outcome(dispute, result: dict) -> None:
+    from notifications.services import notify
+
+    refund, payout = result["payer_xaf"], result["payee_xaf"]
+    if payout == 0:
+        summary = f"The full {refund:.0f} XAF was refunded to the payer's Oaziland wallet."
+    elif refund == 0:
+        summary = f"The payment was released: {payout:.0f} XAF to the payee's Oaziland wallet (after the platform fee)."
+    else:
+        summary = (
+            f"The payment was split: {refund:.0f} XAF back to the payer's Oaziland wallet and "
+            f"{payout:.0f} XAF to the payee's Oaziland wallet (after the platform fee)."
+        )
+    if dispute.resolution_notes:
+        summary += f" Note from support: {dispute.resolution_notes}"
+    for person in {p.pk: p for p in (result["payer"], result["payee"]) if p is not None}.values():
+        notify(
+            recipient=person, notification_type="DISPUTE_RESOLVED", title="Your dispute has been resolved",
+            message=summary[:1000], related_reference=str(dispute.pk),
+        )

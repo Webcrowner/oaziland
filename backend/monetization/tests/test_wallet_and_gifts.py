@@ -136,6 +136,11 @@ def test_cannot_fund_ad_beyond_wallet_balance(recipient):
 
 @pytest.mark.django_db
 def test_withdrawal_request_reserves_balance_and_requires_approval(recipient, gift_fee_policy):
+    from identity.models import KYCProfile, VerificationStatus
+    KYCProfile.objects.create(
+        user=recipient, legal_full_name="Gift Recipient", date_of_birth="1990-01-01",
+        national_id_number="ID-gift-recipient", residential_address="Yaoundé", kyc_status=VerificationStatus.VERIFIED,
+    )
     PlatformFeePolicy.objects.update_or_create(category=TransactionCategory.WALLET_WITHDRAWAL, defaults={"fee_percent": Decimal("2.0")})
     wallet = get_or_create_wallet(recipient)
     wallet.balance_xaf = Decimal("20000")

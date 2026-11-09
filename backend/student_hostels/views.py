@@ -55,7 +55,18 @@ class StudentHostelViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return StudentHostel.objects.none()
-        return StudentHostel.objects.select_related("owner__agent_profile").prefetch_related("asset_photos").order_by("-created_at")
+        from trust_safety.report_targets import visible_places
+        return visible_places(
+            StudentHostel.objects.select_related("owner__agent_profile").prefetch_related("asset_photos").order_by("-created_at"),
+            self.request.user,
+        )
+
+    @extend_schema(request=None, responses={200: dict, 201: dict})
+    @action(detail=True, methods=["get", "post"], url_path="reviews", permission_classes=[permissions.AllowAny])
+    def reviews(self, request, pk=None):
+        """Public reviews of this hostel; students who have had a room here can add one."""
+        from property.place_reviews import place_reviews_response
+        return place_reviews_response(request, "hostel", self.get_object())
 
     @extend_schema(request=StudentHostelCreateSerializer, responses={201: StudentHostelSerializer})
     def create(self, request, *args, **kwargs):
@@ -213,6 +224,137 @@ class AdminRoomAllocationViewSet(viewsets.ReadOnlyModelViewSet):
         allocation = self.get_object()
         end_room_allocation(allocation)
         return Response(RoomAllocationSerializer(allocation).data)
+
+
+class HostelRoomsViewSet(viewsets.GenericViewSet):
+    """Running a hostel's rooms. The owner, or a manager on an active FULL/BOOKINGS_ONLY contract, sees their own
+    hostels; an admin sees every hostel (with ?q= to search). Other hostels answer 404.
+    GET / (hostels) and GET /<id>/?semester= (rooms, beds, who holds each place, waitlist). Every POST returns
+    the refreshed board: institutions, remove-institution, semesters, rooms, delete-room, allocate,
+    end-allocation and move-allocation."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = None
+    audit_admin_actions = True  # an admin acting here is recorded in the audit log like any console action
+
+    def get_queryset(self):
+        from .management import hostels_managed_by
+        if getattr(self, "swagger_fake_view", False):
+            return StudentHostel.objects.none()
+        return hostels_managed_by(self.request.user)
+
+    def list(self, request):
+        from django.db.models import Q
+        from .management import hostel_summary
+
+        qs = self.get_queryset().order_by("quarter__name")
+        for term in request.query_params.get("q", "").split()[:4]:
+            qs = qs.filter(
+                Q(quarter__name__icontains=term) | Q(owner__username__icontains=term)
+                | Q(owner__first_name__icontains=term) | Q(owner__last_name__icontains=term)
+            )
+        page = self.paginate_queryset(qs)
+        return self.get_paginated_response([hostel_summary(h) for h in page])
+
+    def retrieve(self, request, pk=None):
+        from .management import hostel_board
+        return Response(hostel_board(self.get_object(), request.query_params.get("semester")))
+
+    def _act(self, request, work):
+        from trust_safety.audit import audit_note
+        from .management import HostelManagementError, hostel_board, hostel_label
+
+        hostel = self.get_object()
+        audit_note(request, target_type="student-hostel", target_label=hostel_label(hostel))
+        try:
+            work(hostel, request.data)
+        except HostelManagementError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(hostel_board(hostel, request.data.get("semester") or request.query_params.get("semester")))
+
+    @action(detail=True, methods=["post"])
+    def institutions(self, request, pk=None):
+        from .management import add_institution
+        return self._act(request, lambda hostel, data: add_institution(hostel, str(data.get("name") or "")))
+
+    @action(detail=True, methods=["post"], url_path="remove-institution")
+    def remove_institution(self, request, pk=None):
+        from .management import HostelManagementError, remove_institution
+        def work(hostel, data):
+            institution = hostel.institution_partnerships.filter(pk=_int(data.get("institution"))).first()
+            if institution is None:
+                raise HostelManagementError("Choose one of this hostel's institutions.")
+            remove_institution(hostel, institution)
+        return self._act(request, work)
+
+    @action(detail=True, methods=["post"])
+    def semesters(self, request, pk=None):
+        from rest_framework import serializers as drf
+        from .management import HostelManagementError, create_semester
+
+        def work(hostel, data):
+            try:
+                dates = {key: drf.DateField().to_internal_value(data.get(key)) for key in ("start_date", "end_date", "billing_due_date")}
+            except drf.ValidationError:
+                raise HostelManagementError("Enter the start, end and billing dates.") from None
+            create_semester(hostel, institution_id=_int(data.get("institution")), name=str(data.get("name") or ""), **dates)
+        return self._act(request, work)
+
+    @action(detail=True, methods=["post"])
+    def rooms(self, request, pk=None):
+        from .management import create_unit
+        return self._act(request, lambda hostel, data: create_unit(
+            hostel, room_code=str(data.get("room_code") or ""), unit_type=str(data.get("unit_type") or ""),
+            occupancy_model=str(data.get("occupancy_model") or ""), bed_capacity=_int(data.get("bed_capacity"), default=1),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="delete-room")
+    def delete_room(self, request, pk=None):
+        from .management import _unit_for, delete_unit
+        return self._act(request, lambda hostel, data: delete_unit(_unit_for(hostel, _uuid(data.get("unit")))))
+
+    @action(detail=True, methods=["post"])
+    def allocate(self, request, pk=None):
+        from .management import allocate_student, find_student
+        return self._act(request, lambda hostel, data: allocate_student(
+            hostel, student=find_student(str(data.get("student") or "")), unit_id=_uuid(data.get("unit")),
+            semester_id=_int(data.get("semester")), by=request.user,
+        ))
+
+    def _allocation(self, hostel, data):
+        from .management import HostelManagementError
+        allocation = RoomAllocation.objects.filter(pk=_uuid(data.get("allocation")), unit__building_id=hostel.building_ptr_id).first()
+        if allocation is None:
+            raise HostelManagementError("That allocation was not found in this hostel.")
+        return allocation
+
+    @action(detail=True, methods=["post"], url_path="end-allocation")
+    def end_allocation(self, request, pk=None):
+        from .management import end_allocation
+        return self._act(request, lambda hostel, data: end_allocation(
+            self._allocation(hostel, data), by=request.user, reason=str(data.get("reason") or ""),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="move-allocation")
+    def move_allocation(self, request, pk=None):
+        from .management import move_allocation
+        return self._act(request, lambda hostel, data: move_allocation(
+            self._allocation(hostel, data), unit_id=_uuid(data.get("unit")), by=request.user,
+        ))
+
+
+def _int(value, default=None):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _uuid(value):
+    import uuid
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 class MyParentAccessGrantsView(APIView):
