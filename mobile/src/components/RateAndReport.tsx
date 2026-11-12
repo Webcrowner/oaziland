@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
-import { rateUser, fileReportAgainstUser } from "../lib/api";
+import { rateUser, fileReportAgainstUser, getRatingEligibility } from "../lib/api";
 
 const REPORT_REASONS = ["SCAM_SUSPECTED", "HARASSMENT", "MISLEADING_LISTING", "USER_BEHAVIOR", "OTHER"];
 
@@ -15,6 +15,13 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
   const [reason, setReason] = useState(REPORT_REASONS[0]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const [canRate, setCanRate] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    getRatingEligibility(subjectUserId)
+      .then((res) => setCanRate(res.can_rate))
+      .catch(() => setCanRate(false));
+  }, [subjectUserId]);
 
   async function handleRate(score: number) {
     try {
@@ -64,6 +71,10 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
 
   return (
     <View style={styles.row}>
+      {canRate === false && (
+        <Text style={styles.rateLabel}>You can rate after completing a purchase, rental, booking, ride or job with them.</Text>
+      )}
+      {canRate && (
       <View style={styles.starsRow}>
         <Text style={styles.rateLabel}>Rate this person:</Text>
         {[1, 2, 3, 4, 5].map((star) => (
@@ -72,6 +83,7 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
           </TouchableOpacity>
         ))}
       </View>
+      )}
       <TouchableOpacity onPress={() => setMode("reporting")}>
         <Text style={styles.reportLink}>Report</Text>
       </TouchableOpacity>

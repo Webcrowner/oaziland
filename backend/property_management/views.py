@@ -22,7 +22,7 @@ from .serializers import (
 from .services import (
     add_maintenance_cost, request_tenant_screening, tenant_grants_consent, generate_screening_report,
     ConsentRequiredError, start_safety_check_in, check_out_safely, CheckInAlreadyClosedError,
-    open_dispute, schedule_renewal_reminders,
+    open_dispute, DisputeNotAllowedError, schedule_renewal_reminders,
 )
 
 
@@ -189,6 +189,27 @@ class LeaseViewSet(viewsets.ModelViewSet):
         schedule_renewal_reminders(lease)
 
 
+def _notify_respondent(booking, dispute):
+    """The person being paid (host, seller, trainer...) learns a dispute froze their payment and can reply in the
+    mediation chat. A notification problem never blocks the dispute itself."""
+    import logging
+    from notifications.services import notify
+    from transactions.services import resolve_target_owner
+    payee = resolve_target_owner(booking)
+    if payee is None or payee.pk == booking.requester_id:
+        return
+    payer = booking.requester.full_name or booking.requester.username
+    try:
+        notify(
+            recipient=payee, notification_type="DISPUTE_OPENED", title="A payment to you is disputed",
+            message=(f"{payer} opened a dispute on their {booking.amount_xaf:.0f} XAF payment. The money stays held until "
+                     f"support decides; you can explain your side in the dispute chat. Reason: {dispute.reason[:300]}"),
+            related_reference=str(dispute.pk),
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Could not notify the respondent of dispute %s", dispute.pk)
+
+
 class OpenDisputeView(APIView):
     """THE most serious real gap in this whole area: open_dispute()
     existed, fully implemented (sets real SLA deadlines, flips the
@@ -213,7 +234,11 @@ class OpenDisputeView(APIView):
 
         input_serializer = OpenDisputeSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
-        dispute = open_dispute(escrow=booking.escrow, raised_by=request.user, reason=input_serializer.validated_data["reason"])
+        try:
+            dispute = open_dispute(escrow=booking.escrow, raised_by=request.user, reason=input_serializer.validated_data["reason"])
+        except DisputeNotAllowedError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        _notify_respondent(booking, dispute)
         return Response({
             "id": dispute.id, "status": dispute.status,
             "response_due_at": dispute.response_due_at, "resolution_due_at": dispute.resolution_due_at,

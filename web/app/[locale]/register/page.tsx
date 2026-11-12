@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter, Link } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
 import { registerUser, SIGNUP_ROLES, type SignupRole } from "@/lib/api";
+import { loginHref, safeNextPath } from "@/lib/authRedirect";
 import Button from "@/components/ui/Button";
 import {
   IconUser,
@@ -28,6 +29,8 @@ function RegisterForm() {
   const t = useTranslations("RegisterPage");
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Where the person was going before signing up (e.g. a course), carried through to the sign-in page.
+  const nextPath = safeNextPath(searchParams.get("next"));
   const [form, setForm] = useState<{ username: string; phone: string; password: string; role: SignupRole }>({
     username: "", phone: "", password: "", role: "renter",
   });
@@ -54,7 +57,7 @@ function RegisterForm() {
       // straight to the homepage — but only once, for this new account.
       sessionStorage.setItem("oaziland_just_registered", "1");
       sessionStorage.setItem("oaziland_signup_role", form.role);
-      router.push("/login");
+      router.push(nextPath ? loginHref(nextPath) : "/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("registrationFailed"));
     } finally {
@@ -203,7 +206,7 @@ function RegisterForm() {
           <p className="text-xs text-slate-500 mt-5 text-center">
             {t("alreadyHaveAccount")}{" "}
             <Link
-              href="/login"
+              href={nextPath ? loginHref(nextPath) : "/login"}
               className="text-amber-600 font-bold hover:text-amber-700 transition-colors"
             >
               {t("signInInstead")} &rarr;

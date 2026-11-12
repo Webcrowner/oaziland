@@ -1,8 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { rateUser, fileReportAgainstUser } from "@/lib/api";
+import { rateUser, fileReportAgainstUser, getRatingEligibility } from "@/lib/api";
 
 const REPORT_REASONS = ["SCAM_SUSPECTED", "HARASSMENT", "MISLEADING_LISTING", "USER_BEHAVIOR", "OTHER"] as const;
 
@@ -23,6 +23,19 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
   const [reason, setReason] = useState<string>(REPORT_REASONS[0]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  // null while checking; signed-out visitors keep the stars so clicking one sends them to sign in.
+  const [canRate, setCanRate] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      void Promise.resolve().then(() => setCanRate(true));
+      return;
+    }
+    getRatingEligibility(subjectUserId, token)
+      .then((res) => setCanRate(res.can_rate))
+      .catch(() => setCanRate(false));
+  }, [subjectUserId]);
 
   function requireAuth(): string | null {
     const token = localStorage.getItem("access_token");
@@ -81,6 +94,8 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
 
   return (
     <div className="flex items-center gap-4">
+      {canRate === false && <span className="text-xs text-gray-500">{t("rateAfterDeal")}</span>}
+      {canRate && (
       <div className="flex items-center gap-1" onMouseLeave={() => setHoveredStar(0)}>
         <span className="text-xs text-gray-500 mr-1">{t("rateThisPerson")}:</span>
         {[1, 2, 3, 4, 5].map((star) => (
@@ -93,6 +108,7 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
           </button>
         ))}
       </div>
+      )}
       <button onClick={() => setMode("reporting")} className="text-xs text-gray-400 underline hover:text-[var(--clay)]">
         {t("report")}
       </button>

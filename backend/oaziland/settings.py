@@ -300,6 +300,8 @@ REST_FRAMEWORK = {
         'search': '600/hour',
         # Marketplace browsing: the "All" tab issues one request per category on every load or filter change.
         'marketplace_browse': '3000/hour',
+        # Public certificate verification pages and their PDF/image (careers.views.CertificateView).
+        'certificate_view': '1200/hour',
         # A dedicated, tighter bucket for login attempts specifically —
         # separate from the general anon budget so credential-stuffing
         # against one account can't also exhaust ordinary anonymous

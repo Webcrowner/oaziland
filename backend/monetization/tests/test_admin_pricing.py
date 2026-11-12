@@ -148,11 +148,11 @@ def test_setting_updating_and_removing_a_boost_price(boss):
 
     updated = client.put("/api/admin/pricing/boosts/", {**body, "price_xaf": 3500.5}, format="json")
     assert boost_row(updated.data, "FEED_BOOSTED_POST", "DAILY")["price_xaf"] == "3500.50"
-    assert BoostPricingTier.objects.count() == 1
+    assert BoostPricingTier.objects.filter(placement="FEED_BOOSTED_POST").count() == 1
 
     removed = client.put("/api/admin/pricing/boosts/", {**body, "price_xaf": None}, format="json")
     assert boost_row(removed.data, "FEED_BOOSTED_POST", "DAILY")["price_xaf"] is None
-    assert BoostPricingTier.objects.count() == 0
+    assert BoostPricingTier.objects.filter(placement="FEED_BOOSTED_POST").count() == 0
 
     entries = list(AuditLog.objects.filter(action="AdminBoostPriceView/put").order_by("created_at"))
     assert [(e.details["old_value"], e.details["new_value"]) for e in entries] == [
@@ -169,7 +169,7 @@ def test_bad_boost_prices_are_rejected(boss, price):
     )
 
     assert res.status_code == 400
-    assert BoostPricingTier.objects.count() == 0
+    assert BoostPricingTier.objects.filter(placement="FEED_BOOSTED_POST").count() == 0
 
 
 @pytest.mark.django_db

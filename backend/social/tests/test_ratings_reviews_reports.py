@@ -25,6 +25,33 @@ def _auth_client(user):
     return client
 
 
+def _listing_by(agent, owner=None):
+    from geo.models import Country, Region, Division, Subdivision, VillageOrDistrict, Quarter
+    from property.models import House, Listing, ListingType, ListingStatus
+
+    country = Country.objects.create(name=f"Cameroon {agent.username}", iso_code=agent.username[-3:].upper())
+    region = Region.objects.create(country=country, name="Centre")
+    division = Division.objects.create(region=region, name="Mfoundi")
+    subdivision = Subdivision.objects.create(division=division, name="Yaounde I")
+    village = VillageOrDistrict.objects.create(subdivision=subdivision, name="Bastos")
+    quarter = Quarter.objects.create(village_or_district=village, name="Bastos")
+    house = House.objects.create(owner=owner or agent, quarter=quarter, type="HOUSE")
+    return Listing.objects.create(
+        property_asset=house, listed_by=agent, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("100000"),
+    )
+
+
+def _booking(listing, requester, status=BookingStatus.COMPLETED):
+    return Booking.objects.create(
+        booking_type=BookingType.GENERAL_RENTAL, target_content_type="property.Listing", target_id=listing.id,
+        requester=requester, status=status, amount_xaf=Decimal("100000"), idempotency_key=f"rate-{listing.id}-{requester.id}",
+    )
+
+
+def _completed_deal(agent, rater):
+    return _booking(_listing_by(agent), rater)
+
+
 # ---------------------------------------------------------------------
 # Ratings — a real gap this closes
 # ---------------------------------------------------------------------
@@ -32,6 +59,7 @@ def _auth_client(user):
 def test_rating_an_agent_creates_a_real_rating():
     agent = User.objects.create(username="rate_agent", phone="+237699101001")
     rater = User.objects.create(username="rate_rater", phone="+237699101002")
+    _completed_deal(agent, rater)
 
     response = _auth_client(rater).post("/api/ratings/", {"subject_user": str(agent.id), "score": "4.5"})
 
@@ -43,6 +71,7 @@ def test_rating_an_agent_creates_a_real_rating():
 def test_re_rating_the_same_agent_updates_in_place_not_a_second_row():
     agent = User.objects.create(username="rate_update_agent", phone="+237699101003")
     rater = User.objects.create(username="rate_update_rater", phone="+237699101004")
+    _completed_deal(agent, rater)
     client = _auth_client(rater)
     client.post("/api/ratings/", {"subject_user": str(agent.id), "score": "3.0"})
 
@@ -60,6 +89,7 @@ def test_a_new_ratings_average_is_reflected_in_the_real_agent_dashboard():
     agent = User.objects.create(username="rate_dashboard_agent", phone="+237699101005")
     AgentProfile.objects.create(user=agent, agent_commission_percent=Decimal("10.0"))
     rater = User.objects.create(username="rate_dashboard_rater", phone="+237699101006")
+    _completed_deal(agent, rater)
     _auth_client(rater).post("/api/ratings/", {"subject_user": str(agent.id), "score": "4.0"})
 
     from agency.services import get_agent_public_profile
@@ -81,6 +111,64 @@ def test_rating_requires_authentication():
     agent = User.objects.create(username="rate_noauth_agent", phone="+237699101008")
     response = APIClient().post("/api/ratings/", {"subject_user": str(agent.id), "score": "4.0"})
     assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_an_agent_cannot_be_rated_without_a_completed_deal():
+    agent = User.objects.create(username="rate_gate_agent", phone="+237699101009")
+    stranger = User.objects.create(username="rate_gate_stranger", phone="+237699101010")
+    client = _auth_client(stranger)
+    rate = lambda: client.post("/api/ratings/", {"subject_user": str(agent.id), "score": "5.0"})
+
+    assert rate().status_code == 403
+    booking = _booking(_listing_by(agent), stranger, status=BookingStatus.CONFIRMED)
+    assert rate().status_code == 403, "a paid but not yet completed booking does not earn a rating"
+
+    booking.status = BookingStatus.COMPLETED
+    booking.save(update_fields=["status"])
+    assert rate().status_code == 201
+    assert not Rating.objects.filter(subject_user=agent).exclude(author=stranger).exists()
+
+
+@pytest.mark.django_db
+def test_both_the_listing_agent_and_the_owner_can_be_rated_and_can_rate_back():
+    agent = User.objects.create(username="rate_both_agent", phone="+237699101011")
+    owner = User.objects.create(username="rate_both_owner", phone="+237699101012")
+    tenant = User.objects.create(username="rate_both_tenant", phone="+237699101013")
+    _booking(_listing_by(agent, owner=owner), tenant)
+
+    tenant_client = _auth_client(tenant)
+    assert tenant_client.post("/api/ratings/", {"subject_user": str(agent.id), "score": "4.0"}).status_code == 201
+    assert tenant_client.post("/api/ratings/", {"subject_user": str(owner.id), "score": "4.0"}).status_code == 201
+    assert _auth_client(owner).post("/api/ratings/", {"subject_user": str(tenant.id), "score": "5.0"}).status_code == 201
+    assert _auth_client(agent).post("/api/ratings/", {"subject_user": str(owner.id), "score": "5.0"}).status_code == 403
+
+
+@pytest.mark.django_db
+def test_a_property_can_only_be_rated_after_a_completed_booking_there():
+    agent = User.objects.create(username="rate_prop_agent", phone="+237699101014")
+    guest = User.objects.create(username="rate_prop_guest", phone="+237699101015")
+    stranger = User.objects.create(username="rate_prop_stranger", phone="+237699101016")
+    listing = _listing_by(agent)
+    _booking(listing, guest)
+    payload = {"subject_property_id": str(listing.property_asset_id), "score": "4.0"}
+
+    assert _auth_client(stranger).post("/api/ratings/", payload).status_code == 403
+    assert _auth_client(guest).post("/api/ratings/", payload).status_code == 201
+
+
+@pytest.mark.django_db
+def test_the_rating_eligibility_check_tells_the_ui_whether_to_show_stars():
+    agent = User.objects.create(username="rate_check_agent", phone="+237699101017")
+    customer = User.objects.create(username="rate_check_customer", phone="+237699101018")
+    stranger = User.objects.create(username="rate_check_stranger", phone="+237699101019")
+    _completed_deal(agent, customer)
+    check = lambda user: _auth_client(user).get("/api/ratings/", {"subject_user": str(agent.id)}).data
+
+    assert check(customer) == {"can_rate": True, "reason": ""}
+    assert check(stranger)["can_rate"] is False
+    assert "after completing" in check(stranger)["reason"]
+    assert check(agent)["can_rate"] is False
 
 
 # ---------------------------------------------------------------------

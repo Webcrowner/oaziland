@@ -2,9 +2,9 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { getMyProfile, listManagedCourses } from "@/lib/api";
+import { getCourseAccess } from "@/lib/api";
 
-/** Shown only to admins and to people assigned to a course as lecturer/supervisor. */
+/** Shown to admins, trainers given course-creator access, and people assigned to a course as lecturer/supervisor. */
 export default function ManageCoursesLink() {
   const t = useTranslations("TrainingPage");
   const [show, setShow] = useState(false);
@@ -12,9 +12,9 @@ export default function ManageCoursesLink() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) return;
-    Promise.all([getMyProfile(token).catch(() => null), listManagedCourses(token).catch(() => null)]).then(([profile, courses]) =>
-      setShow(Boolean(profile?.is_admin) || (courses?.count ?? 0) > 0),
-    );
+    getCourseAccess(token)
+      .then((access) => setShow(access.can_create || access.has_courses))
+      .catch(() => setShow(false));
   }, []);
 
   if (!show) return null;

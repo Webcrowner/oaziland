@@ -46,9 +46,9 @@ def test_training_directory_is_public_and_enroll_requires_login():
     anon_enroll = APIClient().post(f"/api/trainings/{program.id}/enroll/")
     assert anon_enroll.status_code == 401
 
-    enroll_response = _auth_client(student).post(f"/api/trainings/{program.id}/enroll/")
-    assert enroll_response.status_code == 201
-    assert enroll_response.data["status"] == TrainingEnrollmentStatus.ENROLLED
+    enroll_response = _auth_client(student).post(f"/api/trainings/{program.id}/enroll/", {"phone_number": "+237670000002"}, format="json")
+    assert enroll_response.status_code == 202  # a paid course waits for the Mobile Money payment
+    assert enroll_response.data["status"] == TrainingEnrollmentStatus.PAYMENT_PENDING
 
 
 @pytest.mark.django_db
@@ -66,7 +66,7 @@ def test_enrolling_twice_via_the_api_returns_a_clean_conflict_not_a_500():
 
 
 @pytest.mark.django_db
-def test_my_enrollments_are_scoped_to_self_and_completion_works():
+def test_my_enrollments_are_scoped_to_self_and_learners_cannot_complete_themselves():
     provider = User.objects.create(username="training_api_provider_4", phone="+237699900007")
     student_a = User.objects.create(username="training_api_student_a", phone="+237699900008")
     student_b = User.objects.create(username="training_api_student_b", phone="+237699900009")
@@ -83,10 +83,44 @@ def test_my_enrollments_are_scoped_to_self_and_completion_works():
     assert b_enrollments.data["count"] == 0  # never sees student_a's enrollment
 
     enrollment_id = a_enrollments.data["results"][0]["id"]
-    complete_response = a_client.post(f"/api/my-enrollments/{enrollment_id}/complete/")
-    assert complete_response.status_code == 200
-    assert complete_response.data["status"] == TrainingEnrollmentStatus.COMPLETED
-    assert complete_response.data["certificate_issued_at"] is not None
+    assert a_client.post(f"/api/my-enrollments/{enrollment_id}/complete/").status_code in (404, 405)
+    assert a_client.get("/api/my-enrollments/").data["results"][0]["status"] == TrainingEnrollmentStatus.ENROLLED
+
+
+@pytest.mark.django_db
+def test_course_staff_confirm_completion_of_a_course_without_lessons():
+    provider = User.objects.create(username="training_api_provider_c", phone="+237699900020", is_staff=True)
+    student = User.objects.create(username="training_api_student_c", phone="+237699900021")
+    outsider = User.objects.create(username="training_api_outsider_c", phone="+237699900022")
+    program = TrainingProgram.objects.create(provider=provider, title="In-person Workshop", category=TrainingCategory.TENANT_LAW, issues_certification=True)
+    enrollment = enroll_in_training(program=program, student=student)
+    url = f"/api/manage/courses/{program.id}/learners/{enrollment.id}/complete/"
+
+    assert _auth_client(student).post(url).status_code == 404  # learners can't reach the staff endpoint
+    assert _auth_client(outsider).post(url).status_code == 404
+
+    response = _auth_client(provider).post(url)
+    assert response.status_code == 200, response.data
+    enrollment.refresh_from_db()
+    assert enrollment.status == TrainingEnrollmentStatus.COMPLETED
+    assert enrollment.certificate_issued_at is not None
+    assert _auth_client(provider).post(url).status_code == 409  # already completed, certificate never re-issued
+
+
+@pytest.mark.django_db
+def test_staff_cannot_complete_a_lesson_course_the_learner_has_not_finished():
+    from careers.models import CourseModule, Lesson
+    provider = User.objects.create(username="training_api_provider_d", phone="+237699900023", is_staff=True)
+    student = User.objects.create(username="training_api_student_d", phone="+237699900024")
+    program = TrainingProgram.objects.create(provider=provider, title="Online Course", category=TrainingCategory.TENANT_LAW)
+    module = CourseModule.objects.create(program=program, title="Week 1")
+    Lesson.objects.create(module=module, title="Intro")
+    enrollment = enroll_in_training(program=program, student=student)
+
+    response = _auth_client(provider).post(f"/api/manage/courses/{program.id}/learners/{enrollment.id}/complete/")
+    assert response.status_code == 409
+    enrollment.refresh_from_db()
+    assert enrollment.status == TrainingEnrollmentStatus.ENROLLED
 
 
 @pytest.mark.django_db
@@ -98,11 +132,12 @@ def test_invalid_enrollment_transitions_are_rejected_with_409():
     client = _auth_client(student)
     base = f"/api/my-enrollments/{enrollment.id}"
 
-    assert client.post(f"{base}/complete/").status_code == 200
+    from careers.services import mark_training_completed
+    mark_training_completed(enrollment)
     enrollment.refresh_from_db()
     certificate_time = enrollment.certificate_issued_at
 
-    for action in ("start", "drop", "complete"):
+    for action in ("start", "drop"):
         response = client.post(f"{base}/{action}/")
         assert response.status_code == 409, action
 

@@ -1488,6 +1488,15 @@ export async function sendServiceRequestMessage(id: string, text: string): Promi
 // Real ratings and reporting a person directly — mobile parity with
 // the web app's RateAndReport component, same session.
 // ---------------------------------------------------------------------------
+export async function getRatingEligibility(subjectUserId: string): Promise<{ can_rate: boolean; reason: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/ratings/?subject_user=${encodeURIComponent(subjectUserId)}`, {
+    headers: { ...(await authHeaders()) },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not check rating eligibility");
+  return data;
+}
+
 export async function rateUser(subjectUserId: string, score: number) {
   const res = await fetch(`${API_BASE_URL}/api/ratings/`, {
     method: "POST",

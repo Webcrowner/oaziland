@@ -64,7 +64,7 @@ def test_cancelling_a_booking_on_a_waitlisted_listing_notifies_waiters(quarter):
         def acquire(self, key, ttl_seconds):
             return True
 
-        def release(self, key):
+        def release(self, key, permanent=False):
             return True
 
     landlord = User.objects.create(username="waitlist_notify_landlord", phone="+237699996003")

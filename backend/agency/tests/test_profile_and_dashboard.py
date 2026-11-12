@@ -154,7 +154,7 @@ def test_agency_public_profile_endpoint_is_actually_reachable():
 
 
 @pytest.mark.django_db
-def test_rating_an_agent_moves_the_real_agencys_aggregate_rating():
+def test_rating_an_agent_moves_the_real_agencys_aggregate_rating(quarter):
     """Verifies the actual chain end-to-end, not just that the
     aggregation code LOOKS correct: rate a real agent through the
     real API, then confirm the agency they belong to genuinely shows
@@ -165,6 +165,13 @@ def test_rating_an_agent_moves_the_real_agencys_aggregate_rating():
     agent_user = User.objects.create(username="agency_rating_chain_agent", phone="+237699555502")
     AgentProfile.objects.create(user=agent_user, agency=agency, agent_commission_percent=Decimal("10"))
     rater = User.objects.create(username="agency_rating_chain_rater", phone="+237699555503")
+    house = House.objects.create(owner=agency_user, quarter=quarter, type="HOUSE")
+    listing = Listing.objects.create(property_asset=house, listed_by=agent_user, listing_type=ListingType.RENT, status=ListingStatus.PUBLISHED, price_xaf=Decimal("100000"))
+    from transactions.models import Booking, BookingStatus, BookingType
+    Booking.objects.create(
+        booking_type=BookingType.GENERAL_RENTAL, target_content_type="property.Listing", target_id=listing.id,
+        requester=rater, status=BookingStatus.COMPLETED, amount_xaf=Decimal("100000"), idempotency_key="agency-rating-chain",
+    )
 
     before = APIClient().get(f"/api/agencies/{agency.id}/profile/")
     assert before.data["average_rating"] is None

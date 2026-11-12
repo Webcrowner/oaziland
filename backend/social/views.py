@@ -667,6 +667,23 @@ class RateUserView(APIView):
     number meant to reflect real people's real opinions."""
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(responses={200: dict, 404: dict})
+    def get(self, request):
+        """Whether the signed-in user may rate ?subject_user=<id> and/or ?subject_property_id=<id> right now."""
+        from .services import why_cannot_rate
+        subject_user_id = request.query_params.get("subject_user")
+        subject_property_id = request.query_params.get("subject_property_id")
+        if not subject_user_id and not subject_property_id:
+            return Response({"detail": "Either subject_user or subject_property_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        subject_user = None
+        if subject_user_id:
+            from identity.models import User
+            subject_user = User.objects.filter(id=subject_user_id).first()
+            if subject_user is None:
+                return Response({"detail": "That user was not found."}, status=status.HTTP_404_NOT_FOUND)
+        reason = why_cannot_rate(author=request.user, subject_user=subject_user, subject_property_id=subject_property_id)
+        return Response({"can_rate": reason is None, "reason": reason or ""})
+
     @extend_schema(request=RatingSerializer, responses={201: RatingSerializer, 400: dict})
     def post(self, request):
         subject_user_id = request.data.get("subject_user")

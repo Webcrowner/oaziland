@@ -152,6 +152,7 @@ def get_admin_console_summary():
     from .payments import stuck_payment_count
     from engagement.models import AccountDeletionRequest, AccountDeletionStatus
     from geo.models import AreaSuggestion, AreaSuggestionStatus
+    from careers.models import TrainingProgram
 
     reports_trend = compute_period_over_period(queryset=ContentReport.objects.all(), date_field="created_at")
 
@@ -187,6 +188,7 @@ def get_admin_console_summary():
         "open_contact_messages": ContactMessage.objects.filter(resolved=False).count(),
         "ai_flags_pending": pending_flag_count(),
         "pending_area_suggestions": AreaSuggestion.objects.filter(status=AreaSuggestionStatus.PENDING).count(),
+        "courses_awaiting_review": TrainingProgram.objects.filter(review_requested_at__isnull=False, is_published=False).count(),
         "stuck_payments": stuck_payment_count(),
         "scheduled_account_deletions": AccountDeletionRequest.objects.filter(status=AccountDeletionStatus.REQUESTED).count(),
         "flagged_users_count": flagged_users_count,

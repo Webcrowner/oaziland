@@ -1,9 +1,10 @@
 from rest_framework import serializers
 
-from .course_services import MAX_PDF_BYTES, MAX_VIDEO_BYTES, VIDEO_CONTENT_TYPES, staff_role_for
+from .course_services import MAX_PDF_BYTES, MAX_VIDEO_BYTES, VIDEO_CONTENT_TYPES, may_publish, staff_role_for
 from .models import (
     CourseModule, CourseStaff, Lesson, LessonKind, QuizChoice, QuizQuestion, TrainingProgram,
 )
+from .serializers import cover_image_url
 
 
 class QuizChoiceStaffSerializer(serializers.ModelSerializer):
@@ -76,17 +77,16 @@ class LessonStaffSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id"]
 
-    def _file_url(self, file) -> str:
-        if not file:
-            return ""
+    def _file_url(self, lesson, kind: str) -> str:
+        from .course_media import media_url
         request = self.context.get("request")
-        return request.build_absolute_uri(file.url) if request else file.url
+        return media_url(request, lesson, kind, getattr(request, "user", None))
 
     def get_pdf_url(self, lesson) -> str:
-        return self._file_url(lesson.pdf_file)
+        return self._file_url(lesson, "pdf")
 
     def get_video_file_url(self, lesson) -> str:
-        return self._file_url(lesson.video_file)
+        return self._file_url(lesson, "video")
 
     def validate_video_file(self, file):
         if file.size > MAX_VIDEO_BYTES:
@@ -158,20 +158,57 @@ class CourseManageSerializer(serializers.ModelSerializer):
     modules = CourseModuleStaffSerializer(many=True, read_only=True)
     my_role = serializers.SerializerMethodField()
     learner_count = serializers.SerializerMethodField()
+    cover_image = serializers.ImageField(write_only=True, required=False, allow_empty_file=False)
+    remove_cover_image = serializers.BooleanField(write_only=True, required=False, default=False)
+    cover_image_url = serializers.SerializerMethodField()
+    provider_name = serializers.SerializerMethodField()
+    can_publish = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingProgram
         fields = [
             "id", "title", "description", "category", "price_xaf", "issues_certification",
-            "is_published", "modules", "my_role", "learner_count",
+            "duration_hours", "certificate_validity_months",
+            "is_published", "cover_image", "remove_cover_image", "cover_image_url", "modules", "my_role", "learner_count",
+            "provider_name", "review_requested_at", "can_publish",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "review_requested_at"]
+
+    def get_can_publish(self, program) -> bool:
+        return may_publish(self.context["request"].user, program)
+
+    def get_provider_name(self, program) -> str:
+        return program.provider.full_name or program.provider.username
 
     def get_my_role(self, program) -> str | None:
         return staff_role_for(self.context["request"].user, program)
 
     def get_learner_count(self, program) -> int:
         return program.enrollments.count()
+
+    def get_cover_image_url(self, program) -> str:
+        return cover_image_url(program, self.context.get("request"))
+
+    def validate_cover_image(self, file):
+        from uploads.services import ALLOWED_IMAGE_TYPES, MAX_IMAGE_SIZE_BYTES
+        if file.size > MAX_IMAGE_SIZE_BYTES:
+            raise serializers.ValidationError("Cover images can be at most 10 MB.")
+        if file.content_type not in ALLOWED_IMAGE_TYPES:
+            raise serializers.ValidationError("Upload a JPEG, PNG or WebP image.")
+        return file
+
+    def create(self, validated_data):
+        validated_data.pop("remove_cover_image", None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        old_cover = instance.cover_image.name if instance.cover_image else ""
+        if validated_data.pop("remove_cover_image", False) and "cover_image" not in validated_data:
+            validated_data["cover_image"] = ""
+        program = super().update(instance, validated_data)
+        if old_cover and old_cover != (program.cover_image.name if program.cover_image else ""):
+            program.cover_image.storage.delete(old_cover)  # replaced or removed: don't leave the old file behind
+        return program
 
 
 class CourseStaffSerializer(serializers.ModelSerializer):

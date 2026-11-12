@@ -82,6 +82,8 @@ import AdminPayments from "@/components/admin/AdminPayments";
 import AdminVerificationQueue from "@/components/admin/AdminVerificationQueue";
 import AdminPrivacyRequests from "@/components/admin/AdminPrivacyRequests";
 import AdminAnalyticsPanel from "@/components/admin/AdminAnalyticsPanel";
+import AdminCertificateDesigner from "@/components/admin/AdminCertificateDesigner";
+import AdminCourseCreators from "@/components/admin/AdminCourseCreators";
 import HostelRoomsManager from "@/components/HostelRoomsManager";
 import AdminUserOverviewPanel from "@/components/admin/AdminUserOverviewPanel";
 import MobileTabBar, { type MobileTabItem } from "@/components/MobileTabBar";
@@ -155,6 +157,8 @@ const TABS = [
   "privacy",
   "analytics",
   "rooms",
+  "certificates",
+  "trainers",
   "audit",
 ] as const;
 
@@ -1016,13 +1020,17 @@ export default function AdminConsolePage() {
     privacy: IconLock,
     analytics: IconSparkles,
     rooms: IconGraduationCap,
+    certificates: IconGraduationCap,
+    trainers: IconUsers,
   };
 
-  const tabs: { key: Tab; label: string; count?: number; isUrgent?: boolean }[] = [
+  const tabs: { key: Tab; label: string; count?: number; isUrgent?: boolean }[] = [
+
     { key: "summary", label: t("tabSummary") },
     { key: "analytics", label: t("tabAnalytics") },
     { key: "properties", label: t("tabPropertyListings"), count: pendingProperties.length },
-    { key: "listings", label: t("tabListings"), count: pendingListingsTotal },
+    { key: "listings", label: t("tabListings"), count: pendingListingsTotal },
+
     { key: "verifications", label: t("tabVerifications"), count: pendingVerifications },
     { key: "kyc", label: t("tabKyc"), count: kycReviews.length },
     { key: "areas", label: t("tabAreas"), count: summary.pending_area_suggestions ?? 0 },
@@ -1033,13 +1041,16 @@ export default function AdminConsolePage() {
     { key: "withdrawals", label: t("tabWithdrawals"), count: summary.pending_withdrawals ?? 0, isUrgent: (summary.pending_withdrawals ?? 0) > 0 },
     { key: "payments", label: t("tabPayments"), count: summary.stuck_payments ?? 0, isUrgent: (summary.stuck_payments ?? 0) > 0 },
     ...(isSuperAdmin ? [{ key: "pricing" as Tab, label: t("tabPricing") }] : []),
-    { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
+    { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
+
     { key: "rooms", label: t("tabRooms") },
     { key: "sos", label: t("tabSos"), count: sosRides.length, isUrgent: sosRides.length > 0 },
     { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
     { key: "support", label: t("tabSupport"), count: supportCount, isUrgent: (summary.support_tickets_awaiting ?? 0) > 0 },
     { key: "greetings", label: t("tabGreetings") || "Celebratory Messages" },
-    { key: "faqs", label: t("tabFaqs") },
+    { key: "faqs", label: t("tabFaqs") },
+    { key: "certificates", label: t("tabCertificates") }, { key: "trainers", label: t("tabTrainers"), count: summary.courses_awaiting_review ?? 0 },
+
     { key: "visitors", label: t("tabVisitors") },
     { key: "privacy", label: t("tabPrivacy"), count: summary.scheduled_account_deletions ?? 0 },
     ...(isSuperAdmin ? [{ key: "audit" as Tab, label: t("tabAudit") }] : []),
@@ -1058,11 +1069,14 @@ export default function AdminConsolePage() {
   const tabGroups: TabGroup[] = [
     {
       title: t("groupSystem"),
-      items: [
+      items: [
+
         { key: "summary", label: t("tabSummary") },
         { key: "analytics", label: t("tabAnalytics") },
         { key: "greetings", label: t("tabGreetings") || "Celebratory Messages" },
-        { key: "faqs", label: t("tabFaqs") },
+        { key: "faqs", label: t("tabFaqs") },
+        { key: "certificates", label: t("tabCertificates") }, { key: "trainers", label: t("tabTrainers"), count: summary.courses_awaiting_review ?? 0 },
+
         { key: "visitors", label: t("tabVisitors") },
         { key: "privacy", label: t("tabPrivacy"), count: summary.scheduled_account_deletions ?? 0 },
         ...(isSuperAdmin ? [{ key: "audit" as Tab, label: t("tabAudit") }] : []),
@@ -1072,7 +1086,8 @@ export default function AdminConsolePage() {
       title: t("groupApprovals"),
       items: [
         { key: "properties", label: t("tabPropertyListings"), count: pendingProperties.length },
-        { key: "listings", label: t("tabListings"), count: pendingListingsTotal },
+        { key: "listings", label: t("tabListings"), count: pendingListingsTotal },
+
         { key: "verifications", label: t("tabVerifications"), count: pendingVerifications },
         { key: "kyc", label: t("tabKyc"), count: kycReviews.length },
         { key: "areas", label: t("tabAreas"), count: summary.pending_area_suggestions ?? 0 },
@@ -1093,7 +1108,8 @@ export default function AdminConsolePage() {
         { key: "content", label: t("tabContent") },
         { key: "aiflags", label: t("tabAiFlags"), count: summary.ai_flags_pending ?? 0, isUrgent: (summary.ai_flags_pending ?? 0) > 0 },
         { key: "disputes", label: t("tabDisputes"), count: disputes.length + serviceDisputes.length, isUrgent: disputes.length + serviceDisputes.length > 0 },
-        { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
+        { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
+
         { key: "rooms", label: t("tabRooms") },
         { key: "sos", label: t("tabSos"), count: sosRides.length, isUrgent: sosRides.length > 0 },
         { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
@@ -2591,6 +2607,10 @@ export default function AdminConsolePage() {
       )}
 
       {tab === "analytics" && token && <AdminAnalyticsPanel token={token} />}
+
+      {tab === "certificates" && token && <AdminCertificateDesigner token={token} dialogs={dialogs} />}
+
+      {tab === "trainers" && token && <AdminCourseCreators token={token} dialogs={dialogs} />}
 
       {tab === "rooms" && token && <HostelRoomsManager token={token} adminMode />}
 

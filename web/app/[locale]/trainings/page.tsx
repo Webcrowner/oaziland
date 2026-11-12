@@ -1,5 +1,5 @@
 import { getTranslations } from "next-intl/server";
-import { listTrainings } from "@/lib/api";
+import { listTrainings, TRAINING_ORDERINGS, type TrainingOrdering } from "@/lib/api";
 import TrainingCatalog from "@/components/TrainingCatalog";
 import TrainingFilters from "@/components/TrainingFilters";
 import ManageCoursesLink from "@/components/ManageCoursesLink";
@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
 
 const PAGE_SIZE = 20;
 
-type SearchParams = { q?: string; category?: string; free?: string; certificate?: string; page?: string };
+type SearchParams = { q?: string; category?: string; free?: string; certificate?: string; ordering?: string; page?: string };
 
 export default async function TrainingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const t = await getTranslations("TrainingPage");
@@ -30,13 +30,14 @@ export default async function TrainingsPage({ searchParams }: { searchParams: Pr
     category: (TRAINING_CATEGORIES as readonly string[]).includes(sp.category ?? "") ? sp.category! : "",
     free: sp.free === "true",
     certificate: sp.certificate === "true",
+    ordering: (TRAINING_ORDERINGS as readonly string[]).includes(sp.ordering ?? "") ? (sp.ordering as TrainingOrdering) : ("" as const),
   };
   const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
   const hasFilters = Boolean(filters.q || filters.category || filters.free || filters.certificate);
 
   let data: Awaited<ReturnType<typeof listTrainings>> | null = null;
   try {
-    data = await listTrainings({ ...filters, page });
+    data = await listTrainings({ ...filters, ordering: filters.ordering || undefined, page });
   } catch {
     data = null;
   }
@@ -47,6 +48,7 @@ export default async function TrainingsPage({ searchParams }: { searchParams: Pr
     ...(filters.category && { category: filters.category }),
     ...(filters.free && { free: "true" }),
     ...(filters.certificate && { certificate: "true" }),
+    ...(filters.ordering && { ordering: filters.ordering }),
     ...(targetPage > 1 && { page: String(targetPage) }),
   });
 

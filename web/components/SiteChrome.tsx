@@ -21,6 +21,7 @@ export const SIDEBAR_ROUTES = new Set([
   "/favorites",
   "/kyc",
   "/messages",
+  "/my-learning",
   "/notifications",
   "/parent-portal",
   "/premium",

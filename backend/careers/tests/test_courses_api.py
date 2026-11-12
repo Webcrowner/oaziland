@@ -98,7 +98,8 @@ def test_quiz_validation_and_pdf_validation():
     assert client.post("/api/manage/lessons/", {"module": module, "title": "P", "kind": "PDF", "pdf_file": fake}, format="multipart").status_code == 400
     real = SimpleUploadedFile("x.pdf", b"%PDF-1.4 test", content_type="application/pdf")
     ok = client.post("/api/manage/lessons/", {"module": module, "title": "P", "kind": "PDF", "pdf_file": real}, format="multipart")
-    assert ok.status_code == 201 and ok.data["pdf_url"].endswith(".pdf")
+    assert ok.status_code == 201 and "/api/course-media/" in ok.data["pdf_url"]  # a signed private link, not a public file
+    Lesson.objects.get(pk=ok.data["id"]).pdf_file.delete(save=False)
 
 
 @pytest.mark.django_db
@@ -119,15 +120,16 @@ def test_video_lesson_accepts_link_or_uploaded_file_and_learner_sees_both(settin
 
     real = SimpleUploadedFile("x.mp4", b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32, content_type="video/mp4")
     up = a.post("/api/manage/lessons/", {"module": module, "title": "F", "kind": "VIDEO", "video_file": real}, format="multipart")
-    assert up.status_code == 201 and up.data["video_file_url"].endswith(".mp4")
+    assert up.status_code == 201 and "/api/course-media/" in up.data["video_file_url"]
 
     enrollment = s.post(f"/api/trainings/{course_id}/enroll/").data["id"]
     lessons = s.get(f"/api/my-enrollments/{enrollment}/course/").data["modules"][0]["lessons"]
     assert lessons[0]["video_url"] == "https://youtu.be/abc"
-    assert lessons[1]["video_file_url"].endswith(".mp4")
+    assert "/api/course-media/" in lessons[1]["video_file_url"]
 
     removed = a.patch(f"/api/manage/lessons/{up.data['id']}/", {"remove_video_file": "true"}, format="multipart")
     assert removed.status_code == 400  # a video lesson must keep a link or a file
+    Lesson.objects.get(pk=up.data["id"]).video_file.delete(save=False)
 
     progress = s.get("/api/my-enrollments/").data["results"][0]["progress"]
     assert progress == {"total": 2, "done": 0, "percent": 0}
@@ -146,8 +148,8 @@ def test_learner_completes_course_through_lessons_and_quiz_and_gets_certificate(
     enrollment = s.post(f"/api/trainings/{course_id}/enroll/").data["id"]
     base = f"/api/my-enrollments/{enrollment}"
 
-    # Manual completion is blocked while lessons remain.
-    assert s.post(f"{base}/complete/").status_code == 409
+    # Learners can never complete a course themselves; only finishing the lessons does it.
+    assert s.post(f"{base}/complete/").status_code == 404
 
     outline = s.get(f"{base}/course/").data
     lessons = outline["modules"][0]["lessons"]
@@ -165,10 +167,15 @@ def test_learner_completes_course_through_lessons_and_quiz_and_gets_certificate(
     wrong = s.post(f"{base}/quizzes/{quiz}/submit/", {"answers": {question["id"]: [choices["A"]]}}, format="json")
     assert wrong.data["passed"] is False and wrong.data["score_percent"] == 0  # partial selection is wrong
     assert wrong.data["status"] == TrainingEnrollmentStatus.IN_PROGRESS
+    # A failed attempt says what was wrong, never the right answers, so they can't simply be copied next time.
+    assert wrong.data["results"] == [{"question": question["id"], "correct": False}]
+    assert wrong.data["attempts_left"] == 2
 
     right = s.post(f"{base}/quizzes/{quiz}/submit/", {"answers": {question["id"]: [choices["A"], choices["B"]]}}, format="json")
     assert right.data["passed"] is True and right.data["score_percent"] == 100
     assert right.data["status"] == TrainingEnrollmentStatus.COMPLETED
+    assert sorted(right.data["results"][0]["correct_choices"]) == sorted([choices["A"], choices["B"]])
+    assert right.data["results"][0]["explanation"] == "Because."
 
     enrollment_row = s.get(base + "/").data
     assert enrollment_row["certificate_issued_at"] is not None
@@ -177,6 +184,74 @@ def test_learner_completes_course_through_lessons_and_quiz_and_gets_certificate(
     rows = a.get(f"/api/manage/courses/{course_id}/learners/").data
     assert rows[0]["progress_percent"] == 100
     assert rows[0]["quizzes"][0]["attempts"] == 2 and rows[0]["quizzes"][0]["best_score_percent"] == 100
+
+
+@pytest.mark.django_db
+def test_quiz_attempts_are_limited_and_a_passed_quiz_is_closed_with_its_review():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from careers.models import QuizAttempt
+
+    admin = _user("c_admin", is_staff=True)
+    a, s = _client(admin), _client(_user("c_student"))
+    course_id = _create_course(a)
+    module = a.post("/api/manage/modules/", {"program": course_id, "title": "M"}, format="json").data["id"]
+    a.post("/api/manage/lessons/", {"module": module, "title": "Read", "kind": "TEXT", "content_text": "hi"}, format="json")
+    quiz, question = _quiz(a, module)
+    base = f"/api/my-enrollments/{s.post(f'/api/trainings/{course_id}/enroll/').data['id']}"
+    choices = {c["text"]: c["id"] for c in question["choices"]}
+    submit = lambda picked: s.post(f"{base}/quizzes/{quiz}/submit/", {"answers": {question["id"]: picked}}, format="json")
+
+    for _ in range(3):
+        assert submit([choices["C"]]).status_code == 200
+    locked = submit([choices["A"], choices["B"]])
+    assert locked.status_code == 409 and locked.data["retry_at"]
+    quiz_item = s.get(f"{base}/course/").data["modules"][0]["lessons"][1]
+    assert quiz_item["attempts_left"] == 0 and quiz_item["retry_at"] and quiz_item["review"] is None
+
+    # The oldest attempt leaves the 8-hour window: one attempt opens up again.
+    oldest = QuizAttempt.objects.order_by("submitted_at").first()
+    QuizAttempt.objects.filter(pk=oldest.pk).update(submitted_at=timezone.now() - timedelta(hours=9))
+    passed = submit([choices["A"], choices["B"]])
+    assert passed.status_code == 200 and passed.data["passed"] is True
+
+    assert submit([choices["A"], choices["B"]]).status_code == 409  # no retakes once the answers have been shown
+    review = s.get(f"{base}/course/").data["modules"][0]["lessons"][1]["review"]
+    assert review["score_percent"] == 100 and review["results"][0]["explanation"] == "Because."
+    assert sorted(review["answers"][question["id"]]) == sorted([choices["A"], choices["B"]])
+
+
+@pytest.mark.django_db
+def test_a_course_with_an_unfinished_quiz_cant_go_live_and_a_live_quiz_keeps_its_questions():
+    admin = _user("c_admin", is_staff=True)
+    a, s = _client(admin), _client(_user("c_student"))
+    course_id = _create_course(a, is_published=False)
+    url = f"/api/manage/courses/{course_id}/"
+    module = a.post("/api/manage/modules/", {"program": course_id, "title": "M"}, format="json").data["id"]
+    reading = a.post("/api/manage/lessons/", {"module": module, "title": "Read", "kind": "TEXT", "content_text": "hi"}, format="json").data["id"]
+    empty = a.post("/api/manage/lessons/", {"module": module, "title": "Final quiz", "kind": "QUIZ"}, format="json").data["id"]
+
+    refused = a.patch(url, {"is_published": True}, format="json")
+    assert refused.status_code == 400 and "“Final quiz”" in refused.data["detail"]
+    assert a.post(f"{url}request-review/").status_code == 400
+
+    question = lambda text: a.post("/api/manage/questions/", {
+        "lesson": empty, "text": text, "choices": [{"text": "A", "is_correct": True}, {"text": "B", "is_correct": False}],
+    }, format="json").data
+    first = question("Q1")
+    assert a.patch(url, {"is_published": True}, format="json").status_code == 200
+
+    # Once live, a quiz can't lose its last question: add the replacement first.
+    assert a.delete(f"/api/manage/questions/{first['id']}/").status_code == 400
+    question("Q2")
+    assert a.delete(f"/api/manage/questions/{first['id']}/").status_code == 204
+
+    # The quiz always counts: reading alone never completes the course; the learner finishes by passing it.
+    base = f"/api/my-enrollments/{s.post(f'/api/trainings/{course_id}/enroll/').data['id']}"
+    assert s.post(f"{base}/lessons/{reading}/complete/").data["status"] == TrainingEnrollmentStatus.IN_PROGRESS
+    assert s.get(f"/api/trainings/{course_id}/").data["lesson_count"] == 2
 
 
 @pytest.mark.django_db
@@ -266,7 +341,7 @@ def test_learner_is_notified_when_an_assignment_is_reviewed():
     assert first.title.startswith("Changes requested") and "Add a conclusion" in first.message
 
     sup.post(review_url, {"decision": "APPROVED"}, format="json")
-    titles = list(Notification.objects.filter(recipient=student).order_by("created_at").values_list("title", flat=True))
+    titles = list(Notification.objects.filter(recipient=student, notification_type="COURSE_ASSIGNMENT_REVIEW").order_by("created_at").values_list("title", flat=True))
     assert titles[-1].startswith("Assignment approved") and len(titles) == 2
 
 
@@ -276,7 +351,9 @@ def test_review_notification_uses_the_learners_language():
 
     student, sup, review_url = _assignment_setup(student_language="FR")
     sup.post(review_url, {"decision": "APPROVED"}, format="json")
-    assert Notification.objects.get(recipient=student).title.startswith("Devoir approuvé")
+    assert Notification.objects.get(recipient=student, notification_type="COURSE_ASSIGNMENT_REVIEW").title.startswith("Devoir approuvé")
+    # Approving the only lesson also completes the course, announced in French too.
+    assert Notification.objects.get(recipient=student, notification_type="TRAINING_COMPLETED").title == "Formation terminée"
 
 
 @pytest.mark.django_db

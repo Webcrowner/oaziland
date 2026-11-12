@@ -164,20 +164,33 @@ DISPUTE_RESPONSE_SLA_HOURS = 48
 DISPUTE_RESOLUTION_SLA_DAYS = 7
 
 
+class DisputeNotAllowedError(Exception):
+    """A dispute can only be opened while the payment is still held in escrow, and only once."""
+
+
 def open_dispute(*, escrow, raised_by, reason: str):
+    """Freezes a held payment until an admin decides. Refused once the money has been paid out or refunded:
+    otherwise a refund decision would hand back money the payee already received."""
+    from django.db import transaction
     from django.utils import timezone
-    from transactions.models import EscrowStatus
+    from transactions.models import EscrowStatus, PaymentEscrow
     from .models import DisputeCase
 
-    now = timezone.now()
-    escrow.status = EscrowStatus.DISPUTED
-    escrow.save(update_fields=["status"])
-
-    return DisputeCase.objects.create(
-        escrow=escrow, raised_by=raised_by, reason=reason, created_at=now,
-        response_due_at=now + timedelta(hours=DISPUTE_RESPONSE_SLA_HOURS),
-        resolution_due_at=now + timedelta(days=DISPUTE_RESOLUTION_SLA_DAYS),
-    )
+    with transaction.atomic():
+        locked = PaymentEscrow.objects.select_for_update().get(pk=escrow.pk)
+        if DisputeCase.objects.filter(escrow=locked).exists():
+            raise DisputeNotAllowedError("A dispute is already open on this payment.")
+        if locked.status != EscrowStatus.HELD:
+            raise DisputeNotAllowedError("This payment has already been settled, so it can no longer be disputed.")
+        now = timezone.now()
+        locked.status = EscrowStatus.DISPUTED
+        locked.save(update_fields=["status"])
+        escrow.status = locked.status
+        return DisputeCase.objects.create(
+            escrow=locked, raised_by=raised_by, reason=reason, created_at=now,
+            response_due_at=now + timedelta(hours=DISPUTE_RESPONSE_SLA_HOURS),
+            resolution_due_at=now + timedelta(days=DISPUTE_RESOLUTION_SLA_DAYS),
+        )
 
 
 def admin_respond_to_dispute(dispute):
@@ -226,6 +239,9 @@ def resolve_dispute(*, dispute, outcome: str, notes: str = "", payer_amount_xaf=
         else:
             result = settle_escrow(escrow=escrow, payer_amount_xaf=refund, reference=f"dispute #{str(dispute.pk)[:8]}")
             _notify_dispute_outcome(dispute, result)
+            if escrow.booking.booking_type == "TRAINING":
+                from careers.services import after_course_payment_settled
+                after_course_payment_settled(escrow.booking, refunded_in_full=result["payee_gross_xaf"] == 0)
         dispute.status = DisputeStatus.RESOLVED
         dispute.resolved_at = timezone.now()
         dispute.save(update_fields=["status", "resolved_at", "resolution_notes"])

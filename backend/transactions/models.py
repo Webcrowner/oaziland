@@ -20,6 +20,7 @@ class BookingType(models.TextChoices):
     SERVICE_REQUEST = "SERVICE_REQUEST", "Service Request (Technician)"
     MARKETPLACE_ITEM = "MARKETPLACE_ITEM", "Marketplace Item (Warehouse/Store/Business/Car)"
     RIDE = "RIDE", "Ride"
+    TRAINING = "TRAINING", "Training Course"
 
 
 class BookingStatus(models.TextChoices):

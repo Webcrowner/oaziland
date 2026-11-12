@@ -1624,6 +1624,15 @@ export async function getUserPublicIndex(userId: string): Promise<UserRoleIndexP
 // between the aggregated rating a profile already shows and any real
 // way for a visitor to actually contribute one.
 // ---------------------------------------------------------------------------
+export async function getRatingEligibility(subjectUserId: string, accessToken: string): Promise<{ can_rate: boolean; reason: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/ratings/?subject_user=${encodeURIComponent(subjectUserId)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not check rating eligibility");
+  return data;
+}
+
 export async function rateUser(subjectUserId: string, score: number, accessToken: string) {
   const res = await fetch(`${API_BASE_URL}/api/ratings/`, {
     method: "POST",
@@ -2157,12 +2166,275 @@ export interface TrainingProgram {
   description: string;
   category: string;
   provider_name: string;
+  provider_id: string;
   price_xaf: string | null;
   issues_certification: boolean;
+  /** e.g. "7.5"; null when the course doesn't state its length. */
+  duration_hours: string | null;
+  /** How long certificates stay valid; null = they never expire. */
+  certificate_validity_months: number | null;
   starts_at: string | null;
   ends_at: string | null;
   location: string;
   lesson_count: number;
+  /** Uploaded by an admin or the course's lecturer; empty when the card should use its category colours. */
+  cover_image_url: string;
+  /** Average learner rating (1-5, one decimal), or null before anyone has reviewed the course. */
+  rating_average: number | null;
+  rating_count: number;
+  learner_count: number;
+}
+
+export type CourseSyllabusLesson = { id: string; title: string; kind: LessonKind };
+/** The public course page: the card's details plus the syllabus (titles only, never lesson content). */
+export interface TrainingProgramDetail extends TrainingProgram {
+  syllabus: { id: string; title: string; lessons: CourseSyllabusLesson[] }[];
+}
+
+export async function getTraining(id: string): Promise<TrainingProgramDetail | null> {
+  const res = await fetch(`${API_BASE_URL}/api/trainings/${encodeURIComponent(id)}/`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Training fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface CourseReviewItem {
+  id: string;
+  score: number;
+  text: string;
+  author_name: string;
+  completed: boolean;
+  created_at: string;
+  updated_at: string;
+  is_mine: boolean;
+}
+export interface CourseReviews {
+  average: number | null;
+  count: number;
+  distribution: Record<"5" | "4" | "3" | "2" | "1", number>;
+  results: CourseReviewItem[];
+  my_review: CourseReviewItem | null;
+  can_review: boolean;
+  cannot_review_reason: "" | "sign_in" | "own_course" | "not_enrolled" | "not_started";
+}
+
+async function courseReviewsRequest(id: string, token: string | null, init: RequestInit = {}): Promise<CourseReviews> {
+  const res = await fetch(`${API_BASE_URL}/api/trainings/${id}/reviews/`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not load the reviews.");
+  return data;
+}
+export const getCourseReviews = (id: string, token: string | null) => courseReviewsRequest(id, token);
+export const saveCourseReview = (id: string, score: number, text: string, token: string) =>
+  courseReviewsRequest(id, token, { method: "POST", body: JSON.stringify({ score, text }) });
+export const deleteCourseReview = (id: string, token: string) => courseReviewsRequest(id, token, { method: "DELETE" });
+
+export interface DiscussionPost {
+  id: string;
+  title: string;
+  body: string;
+  author_name: string;
+  author_is_staff: boolean;
+  lesson: { id: string; title: string } | null;
+  created_at: string;
+  edited_at: string | null;
+  is_mine: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+}
+export interface DiscussionThreadSummary extends DiscussionPost {
+  reply_count: number;
+  last_activity_at: string;
+  answered_by_staff: boolean;
+}
+export interface DiscussionThread extends DiscussionPost {
+  last_activity_at: string;
+  replies: DiscussionPost[];
+}
+
+async function discussionRequest<T>(programId: string, path: string, token: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetchWithAutoRefresh(
+    `${API_BASE_URL}/api/trainings/${programId}/discussions/${path}`,
+    { ...init, headers: { ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers } },
+    token,
+  );
+  if (res.status === 204) return undefined as T;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Something went wrong. Please try again.");
+  return data as T;
+}
+export const listDiscussions = (programId: string, token: string, filters: { lesson?: string; q?: string } = {}) => {
+  const params = new URLSearchParams();
+  if (filters.lesson) params.set("lesson", filters.lesson);
+  if (filters.q?.trim()) params.set("q", filters.q.trim());
+  const query = params.toString();
+  return discussionRequest<{ results: DiscussionThreadSummary[]; is_staff: boolean }>(programId, query ? `?${query}` : "", token);
+};
+export const getDiscussion = (programId: string, threadId: string, token: string) =>
+  discussionRequest<DiscussionThread>(programId, `${threadId}/`, token);
+export const startDiscussion = (programId: string, input: { title: string; body: string; lesson?: string }, token: string) =>
+  discussionRequest<DiscussionThread>(programId, "", token, { method: "POST", body: JSON.stringify(input) });
+export const replyToDiscussion = (programId: string, threadId: string, body: string, token: string) =>
+  discussionRequest<DiscussionThread>(programId, `${threadId}/`, token, { method: "POST", body: JSON.stringify({ body }) });
+export const editDiscussionPost = (programId: string, postId: string, input: { body: string; title?: string }, token: string) =>
+  discussionRequest<DiscussionThread>(programId, `${postId}/`, token, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteDiscussionPost = (programId: string, postId: string, token: string) =>
+  discussionRequest<DiscussionThread | undefined>(programId, `${postId}/`, token, { method: "DELETE" });
+
+export interface CourseCertificate {
+  code: string;
+  learner_name: string;
+  course_id: string;
+  course_title: string;
+  category: string;
+  provider_name: string;
+  issued_at: string;
+  completed_at: string;
+  /** null = never expires */
+  expires_at: string | null;
+  is_expired: boolean;
+  hours: number | null;
+  /** Average of the learner's best quiz scores; null for a course without quizzes. */
+  grade_percent: number | null;
+  lesson_count: number;
+  orientation: CertificateOrientation;
+}
+/** The certificate exactly as the system draws it (from the admin's active template), for the verification page. */
+export const certificateImageUrl = (code: string, locale: string) =>
+  `${API_BASE_URL}/api/certificates/${encodeURIComponent(code)}/image/?lang=${locale === "fr" ? "fr" : "en"}`;
+
+// ---- Admin certificate designer (/api/admin/certificate-templates/). Positions are in design units: the page is
+// 1000 units wide and 707 (landscape) or 1414 (portrait) tall.
+export type CertificateOrientation = "LANDSCAPE" | "PORTRAIT";
+interface CertificateElementBase { id: string; x: number; y: number; w: number }
+export interface CertificateTextElement extends CertificateElementBase {
+  type: "text";
+  text: string;
+  text_fr: string;
+  font: "sans" | "serif";
+  bold: boolean;
+  size: number;
+  color: string;
+  align: "left" | "center" | "right";
+  single_line: boolean;
+}
+export interface CertificateLogoElement extends CertificateElementBase { type: "logo" }
+export interface CertificateSignatureElement extends CertificateElementBase { type: "signature" }
+export interface CertificateQrElement extends CertificateElementBase { type: "qr"; color: string }
+export interface CertificateLineElement extends CertificateElementBase { type: "line"; thickness: number; color: string }
+export interface CertificateRectElement extends CertificateElementBase { type: "rect"; h: number; thickness: number; color: string }
+export type CertificateElement =
+  | CertificateTextElement
+  | CertificateLogoElement
+  | CertificateSignatureElement
+  | CertificateQrElement
+  | CertificateLineElement
+  | CertificateRectElement;
+export interface CertificateTemplate {
+  id: string;
+  name: string;
+  orientation: CertificateOrientation;
+  background_color: string;
+  background_image_url: string;
+  logo_url: string;
+  signature_url: string;
+  layout: CertificateElement[];
+  is_active: boolean;
+  course_count: number;
+  updated_at: string;
+}
+export interface CourseCertificateChoice {
+  template_id: string | null;
+  default: CertificateTemplate | null; // null = the built-in design
+  builtin: { layout: CertificateElement[]; background_color: string };
+  options: CertificateTemplate[];
+  can_change: boolean;
+}
+export const getCourseCertificateTemplate = (programId: string, token: string) =>
+  courseRequest<CourseCertificateChoice>(`/manage/courses/${programId}/certificate-template/`, token);
+export const setCourseCertificateTemplate = (programId: string, templateId: string | null, token: string) =>
+  courseRequest<CourseCertificateChoice>(`/manage/courses/${programId}/certificate-template/`, token, {
+    method: "PUT", body: JSON.stringify({ template_id: templateId }),
+  });
+export interface CertificateTemplateList {
+  results: CertificateTemplate[];
+  builtin_active: boolean;
+  default_layout: CertificateElement[];
+  default_background_color: string;
+  placeholders: string[];
+}
+export type CertificateTemplateSettings = Partial<Pick<CertificateTemplate, "name" | "orientation" | "background_color" | "layout">>;
+const certTemplatePath = (id = "", action = "") =>
+  `/admin/certificate-templates/${id ? `${id}/` : ""}${action ? `${action}/` : ""}`;
+export const listCertificateTemplates = (token: string) => courseRequest<CertificateTemplateList>(certTemplatePath(), token);
+export const createCertificateTemplate = (name: string, startFrom: "default" | "empty", token: string) =>
+  courseRequest<CertificateTemplate>(certTemplatePath(), token, { method: "POST", body: JSON.stringify({ name, start_from: startFrom }) });
+export const updateCertificateTemplate = (id: string, settings: CertificateTemplateSettings, token: string) =>
+  courseRequest<CertificateTemplate>(certTemplatePath(id), token, { method: "PATCH", body: JSON.stringify(settings) });
+export const deleteCertificateTemplate = (id: string, token: string) =>
+  courseRequest<void>(certTemplatePath(id), token, { method: "DELETE" });
+export const activateCertificateTemplate = (id: string, token: string) =>
+  courseRequest<CertificateTemplate>(certTemplatePath(id, "activate"), token, { method: "POST" });
+export const duplicateCertificateTemplate = (id: string, token: string) =>
+  courseRequest<CertificateTemplate>(certTemplatePath(id, "duplicate"), token, { method: "POST" });
+export const switchToBuiltinCertificate = (token: string) =>
+  courseRequest<{ builtin_active: boolean }>(certTemplatePath("", "use-builtin"), token, { method: "POST" });
+export type CertificateFileKind = "background" | "logo" | "signature";
+export const uploadCertificateFile = (id: string, kind: CertificateFileKind, file: File, token: string) => {
+  const form = new FormData();
+  form.append("file", file);
+  return courseRequest<CertificateTemplate>(certTemplatePath(id, kind), token, { method: "POST", body: form });
+};
+export const removeCertificateFile = (id: string, kind: CertificateFileKind, token: string) =>
+  courseRequest<CertificateTemplate>(certTemplatePath(id, kind), token, { method: "DELETE" });
+/** The template drawn by the server with sample data — exactly as issued certificates will look. Returns a blob URL. */
+export async function previewCertificateTemplate(
+  id: string, settings: CertificateTemplateSettings, locale: string, token: string,
+): Promise<string> {
+  const res = await fetchWithAutoRefresh(
+    `${API_BASE_URL}/api${certTemplatePath(id, "preview")}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settings, locale }) },
+    token,
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Preview failed (${res.status})`);
+  }
+  return URL.createObjectURL(await res.blob());
+}
+/** Direct link to the certificate as a downloadable PDF (public, like the verification page). */
+export const certificatePdfUrl = (code: string, locale: string) =>
+  `${API_BASE_URL}/api/certificates/${encodeURIComponent(code)}/pdf/?lang=${locale === "fr" ? "fr" : "en"}`;
+
+export interface TrainerPage {
+  id: string;
+  name: string;
+  photo_url: string;
+  headline: string;
+  bio: string;
+  website: string;
+  stats: { courses: number; learners: number; rating_average: number | null; rating_count: number };
+  courses: TrainingProgram[];
+}
+export async function getTrainer(id: string): Promise<TrainerPage | null> {
+  const res = await fetch(`${API_BASE_URL}/api/trainers/${encodeURIComponent(id)}/`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Trainer fetch failed: ${res.status}`);
+  return res.json();
+}
+export interface MyTrainerProfile { id: string; headline: string; bio: string; website: string; is_trainer: boolean }
+export const getMyTrainerProfile = (token: string) => courseRequest<MyTrainerProfile>("/my-trainer-profile/", token);
+export const saveMyTrainerProfile = (input: { headline: string; bio: string; website: string }, token: string) =>
+  courseRequest<MyTrainerProfile>("/my-trainer-profile/save/", token, { method: "PUT", body: JSON.stringify(input) });
+
+export async function getCertificate(code: string): Promise<CourseCertificate | null> {
+  const res = await fetch(`${API_BASE_URL}/api/certificates/${encodeURIComponent(code)}/`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Certificate fetch failed: ${res.status}`);
+  return res.json();
 }
 
 export interface TrainingFilters {
@@ -2170,8 +2442,12 @@ export interface TrainingFilters {
   q?: string;
   free?: boolean;
   certificate?: boolean;
+  ordering?: TrainingOrdering;
   page?: number;
 }
+
+export const TRAINING_ORDERINGS = ["popular", "rating", "price_asc", "price_desc"] as const;
+export type TrainingOrdering = (typeof TRAINING_ORDERINGS)[number];
 
 export async function listTrainings(
   filters: TrainingFilters = {},
@@ -2181,6 +2457,7 @@ export async function listTrainings(
   if (filters.q) params.set("q", filters.q);
   if (filters.free) params.set("free", "true");
   if (filters.certificate) params.set("certificate", "true");
+  if (filters.ordering) params.set("ordering", filters.ordering);
   if (filters.page && filters.page > 1) params.set("page", String(filters.page));
   const query = params.toString();
   const res = await fetch(`${API_BASE_URL}/api/trainings/${query ? `?${query}` : ""}`, { cache: "no-store" });
@@ -2188,10 +2465,12 @@ export async function listTrainings(
   return res.json();
 }
 
-export async function enrollInTraining(programId: string, accessToken: string) {
+/** A paid course also needs the Mobile Money number to charge; the enrollment then waits as PAYMENT_PENDING (202). */
+export async function enrollInTraining(programId: string, accessToken: string, phoneNumber?: string) {
   const res = await fetch(`${API_BASE_URL}/api/trainings/${programId}/enroll/`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(phoneNumber ? { phone_number: phoneNumber } : {}),
   });
   return res;
 }
@@ -2199,11 +2478,16 @@ export async function enrollInTraining(programId: string, accessToken: string) {
 export interface TrainingEnrollmentItem {
   id: string;
   program: string;
-  status: "ENROLLED" | "IN_PROGRESS" | "COMPLETED" | "DROPPED";
+  program_detail?: TrainingProgram;
+  status: "PAYMENT_PENDING" | "ENROLLED" | "IN_PROGRESS" | "COMPLETED" | "DROPPED";
   progress?: { total: number; done: number; percent: number };
+  /** The course fee's payment: booking status, and escrow_status once paid (HELD until completion, then RELEASED). */
+  payment?: { status: string; amount_xaf: string; escrow_status: "HELD" | "RELEASED" | "REFUNDED" | "DISPUTED" | null } | null;
   enrolled_at: string;
   completed_at: string | null;
   certificate_issued_at: string | null;
+  /** Printed on the certificate and checkable by anyone at /certificates/<code>. */
+  certificate_code: string | null;
 }
 
 export async function getMyEnrollments(accessToken: string): Promise<{ count: number; results: TrainingEnrollmentItem[] }> {
@@ -2229,15 +2513,6 @@ export async function dropTraining(enrollmentId: string, accessToken: string): P
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error("Could not drop this training");
-  return res.json();
-}
-
-export async function completeTraining(enrollmentId: string, accessToken: string): Promise<TrainingEnrollmentItem> {
-  const res = await fetch(`${API_BASE_URL}/api/my-enrollments/${enrollmentId}/complete/`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) throw new Error("Could not mark this training as completed");
   return res.json();
 }
 
@@ -2274,7 +2549,17 @@ export interface CourseOutlineLesson {
   pass_mark_percent?: number;
   best_score_percent?: number | null;
   questions?: CourseOutlineQuestion[];
+  /** Attempts the learner can still make now (0 once passed or while waiting for retry_at). */
+  attempts_left?: number;
+  attempts_per_window?: number;
+  /** When the next attempt opens, if the learner has used all of theirs. */
+  retry_at?: string | null;
+  /** The passing attempt with its correct answers and explanations; null until the quiz is passed. */
+  review?: QuizReview | null;
 }
+
+export interface QuizGradedQuestion { question: string; correct: boolean; correct_choices?: string[]; explanation?: string }
+export interface QuizReview { score_percent: number; answers: Record<string, string[]>; results: QuizGradedQuestion[] }
 
 export interface CourseProgress {
   total: number;
@@ -2286,6 +2571,7 @@ export interface CourseOutline {
   program: { id: string; title: string };
   status: TrainingEnrollmentItem["status"];
   certificate_issued_at: string | null;
+  certificate_code: string | null;
   progress: CourseProgress;
   modules: { id: string; title: string; lessons: CourseOutlineLesson[] }[];
 }
@@ -2296,7 +2582,11 @@ export interface QuizResult {
   pass_mark_percent: number;
   status: TrainingEnrollmentItem["status"];
   progress: CourseProgress;
-  results: { question: string; correct: boolean; correct_choices: string[]; explanation: string }[];
+  /** correct_choices and explanation are only included when the quiz was passed. */
+  results: QuizGradedQuestion[];
+  attempts_left: number;
+  attempts_per_window: number;
+  retry_at: string | null;
 }
 
 async function courseRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
@@ -2389,11 +2679,47 @@ export interface ManageCourse {
   category: string;
   price_xaf: string | null;
   issues_certification: boolean;
+  duration_hours: string | null;
+  certificate_validity_months: number | null;
   is_published: boolean;
+  cover_image_url: string;
   modules: ManageModule[];
-  my_role: "ADMIN" | "LECTURER" | "SUPERVISOR" | null;
+  my_role: "ADMIN" | "OWNER" | "LECTURER" | "SUPERVISOR" | null;
   learner_count: number;
+  provider_name: string;
+  review_requested_at: string | null;
+  /** Whether this user may put the course live (trainers without publishing rights submit it for review). */
+  can_publish: boolean;
 }
+/** What the signed-in user may do in course management (course-creator access is granted by admins). */
+export interface CourseAccess { is_admin: boolean; can_create: boolean; can_publish: boolean; has_courses: boolean }
+export const getCourseAccess = (token: string) => courseRequest<CourseAccess>("/manage/courses/access/", token);
+export const requestCourseReview = (id: string, token: string) =>
+  courseRequest<ManageCourse>(`/manage/courses/${id}/request-review/`, token, { method: "POST" });
+
+export interface CourseCreatorPerson { id: string; name: string; username: string; phone: string; email: string }
+export interface CourseCreatorGrant {
+  id: number;
+  user: CourseCreatorPerson;
+  can_publish: boolean;
+  granted_by: string;
+  granted_at: string;
+  course_count: number;
+  published_count: number;
+}
+export interface CourseCreatorList {
+  results: CourseCreatorGrant[];
+  awaiting_review: { id: string; title: string; provider: CourseCreatorPerson; requested_at: string }[];
+}
+export const listCourseCreators = (token: string) => courseRequest<CourseCreatorList>("/admin/course-creators/", token);
+export const grantCourseCreator = (identifier: string, canPublish: boolean, token: string) =>
+  courseRequest<CourseCreatorGrant>("/admin/course-creators/", token, {
+    method: "POST", body: JSON.stringify({ identifier, can_publish: canPublish }),
+  });
+export const updateCourseCreator = (id: number, canPublish: boolean, token: string) =>
+  courseRequest<CourseCreatorGrant>(`/admin/course-creators/${id}/`, token, { method: "PATCH", body: JSON.stringify({ can_publish: canPublish }) });
+export const revokeCourseCreator = (id: number, token: string) =>
+  courseRequest<void>(`/admin/course-creators/${id}/`, token, { method: "DELETE" });
 export interface CourseStaffMember { id: number; user: string; user_name: string; username: string; phone: string; role: "LECTURER" | "SUPERVISOR" }
 export interface CourseLearnerRow {
   enrollment: string;
@@ -2419,13 +2745,35 @@ export const updateManagedCourse = (id: string, payload: Partial<ManageCourse>, 
   courseRequest<ManageCourse>(`/manage/courses/${id}/`, token, { method: "PATCH", body: JSON.stringify(payload) });
 export const deleteManagedCourse = (id: string, token: string) =>
   courseRequest<void>(`/manage/courses/${id}/`, token, { method: "DELETE" });
+/** Uploads a new cover image, or removes the current one when `file` is null. */
+export const setManagedCourseCover = (id: string, file: File | null, token: string) => {
+  if (!file) {
+    return courseRequest<ManageCourse>(`/manage/courses/${id}/`, token, { method: "PATCH", body: JSON.stringify({ remove_cover_image: true }) });
+  }
+  const form = new FormData();
+  form.append("cover_image", file);
+  return courseRequest<ManageCourse>(`/manage/courses/${id}/`, token, { method: "PATCH", body: form });
+};
 
 export const listCourseStaff = (id: string, token: string) => courseRequest<CourseStaffMember[]>(`/manage/courses/${id}/staff/`, token);
 export const assignCourseStaff = (id: string, identifier: string, role: "LECTURER" | "SUPERVISOR", token: string) =>
   courseRequest<CourseStaffMember>(`/manage/courses/${id}/staff/`, token, { method: "POST", body: JSON.stringify({ identifier, role }) });
 export const removeCourseStaff = (id: string, staffId: number, token: string) =>
   courseRequest<void>(`/manage/courses/${id}/staff/${staffId}/`, token, { method: "DELETE" });
+export interface CourseAnalytics {
+  learners: { total: number; awaiting_payment: number; enrolled: number; in_progress: number; completed: number; dropped: number; completion_percent: number; certificates: number };
+  lesson_funnel: { position: number; lesson_id: string; title: string; kind: LessonKind; completed: number; percent: number; drop_off_percent: number }[];
+  quizzes: { lesson_id: string; title: string; pass_mark_percent: number; learners: number; attempts: number; average_best_score: number | null; average_attempts: number | null; first_try_pass_percent: number; pass_percent: number }[];
+  rating: { average: number | null; count: number };
+  /** Only for admins and the course's provider. */
+  earnings: { sales: number; paid_by_learners_xaf: string; held_in_escrow_xaf: string; released_to_trainer_xaf: string; platform_fees_xaf: string; refunded_xaf: string } | null;
+}
+export const getCourseAnalytics = (id: string, token: string) => courseRequest<CourseAnalytics>(`/manage/courses/${id}/analytics/`, token);
 export const listCourseLearners = (id: string, token: string) => courseRequest<CourseLearnerRow[]>(`/manage/courses/${id}/learners/`, token);
+export const completeCourseLearner = (id: string, enrollmentId: string, token: string) =>
+  courseRequest<{ status: string; completed_at: string; certificate_issued_at: string | null }>(
+    `/manage/courses/${id}/learners/${enrollmentId}/complete/`, token, { method: "POST" },
+  );
 
 export const createCourseModule = (program: string, title: string, token: string) =>
   courseRequest<ManageModule>("/manage/modules/", token, { method: "POST", body: JSON.stringify({ program, title }) });
@@ -2759,6 +3107,7 @@ export interface AdminConsoleSummary {
   open_contact_messages?: number;
   ai_flags_pending?: number;
   pending_area_suggestions?: number;
+  courses_awaiting_review?: number;
   stuck_payments?: number;
   scheduled_account_deletions?: number;
   /** False for limited admins, who cannot grant the admin role or read the audit log. */

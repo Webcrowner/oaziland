@@ -1,6 +1,8 @@
 """Business rules for full (Coursera-style) courses: who may edit or
 supervise, lesson progress, quiz grading, and finishing a course."""
-from django.db.models import Q
+from datetime import timedelta
+
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from .models import (
@@ -8,6 +10,7 @@ from .models import (
     SubmissionStatus, TrainingEnrollmentStatus, TrainingProgram, QuizQuestion,
 )
 from .services import InvalidEnrollmentTransitionError, mark_training_completed
+from .course_media import media_url
 
 MAX_PDF_BYTES = 20 * 1024 * 1024
 MAX_VIDEO_BYTES = 500 * 1024 * 1024
@@ -18,6 +21,9 @@ class CourseError(Exception):
     pass
 
 
+OWNER = "OWNER"  # a trainer with course-creator access, on a course they created (they're its provider)
+
+
 def is_platform_admin(user) -> bool:
     return bool(
         user and user.is_authenticated
@@ -25,29 +31,66 @@ def is_platform_admin(user) -> bool:
     )
 
 
+def course_creator_access(user):
+    """The admin's grant letting this user create their own courses, or None."""
+    if not (user and user.is_authenticated):
+        return None
+    from .models import CourseCreatorAccess
+    return CourseCreatorAccess.objects.filter(user=user).first()
+
+
+def can_create_courses(user) -> bool:
+    return is_platform_admin(user) or course_creator_access(user) is not None
+
+
+def can_publish_own_courses(user) -> bool:
+    if is_platform_admin(user):
+        return True
+    access = course_creator_access(user)
+    return bool(access and access.can_publish)
+
+
 def manageable_programs(user):
     """Programs a user may see in the management area: admins see all,
-    everyone else only the ones they've been assigned to."""
+    everyone else the ones they created or have been assigned to."""
     if is_platform_admin(user):
         return TrainingProgram.objects.all()
-    return TrainingProgram.objects.filter(staff__user=user)
+    return TrainingProgram.objects.filter(Q(staff__user=user) | Q(provider=user)).distinct()
 
 
 def editable_programs(user):
     if is_platform_admin(user):
         return TrainingProgram.objects.all()
-    return TrainingProgram.objects.filter(staff__user=user, staff__role=CourseStaffRole.LECTURER)
+    return TrainingProgram.objects.filter(
+        Q(staff__user=user, staff__role=CourseStaffRole.LECTURER) | Q(provider=user)
+    ).distinct()
 
 
 def staff_role_for(user, program):
     if is_platform_admin(user):
         return "ADMIN"
+    if program.provider_id == getattr(user, "pk", None):
+        return OWNER
     row = CourseStaff.objects.filter(program=program, user=user).first()
     return row.role if row else None
 
 
 def can_edit_course(user, program) -> bool:
-    return staff_role_for(user, program) in ("ADMIN", CourseStaffRole.LECTURER)
+    return staff_role_for(user, program) in ("ADMIN", OWNER, CourseStaffRole.LECTURER)
+
+
+def may_publish(user, program) -> bool:
+    """Admins publish anything. Otherwise the course's provider decides: an admin-made course can be published by its
+    editors, a trainer's course only if that trainer was given publishing rights."""
+    if is_platform_admin(user):
+        return True
+    if not can_edit_course(user, program):
+        return False
+    return is_platform_admin(program.provider) or can_publish_own_courses(program.provider)
+
+
+def can_manage_team(user, program) -> bool:
+    return staff_role_for(user, program) in ("ADMIN", OWNER)
 
 
 def find_user(identifier: str):
@@ -73,6 +116,19 @@ def lessons_of(program):
     return Lesson.objects.filter(module__program=program)
 
 
+def empty_quizzes(program):
+    """Quizzes without any question. Learners can't pass them, so a course can't be published (or submitted for
+    review) while it has one, and a published course's quiz can't lose its last question."""
+    return lessons_of(program).filter(kind=LessonKind.QUIZ).exclude(Exists(QuizQuestion.objects.filter(lesson=OuterRef("pk"))))
+
+
+def require_no_empty_quizzes(program):
+    titles = list(empty_quizzes(program).order_by("module__position", "position", "title").values_list("title", flat=True))
+    if titles:
+        quoted = ", ".join(f"“{title}”" for title in titles)
+        raise CourseError(f"Add at least one question to every quiz first. Without questions: {quoted}.")
+
+
 def course_progress(enrollment) -> dict:
     total = lessons_of(enrollment.program).count()
     done = LessonProgress.objects.filter(enrollment=enrollment, lesson__module__program=enrollment.program).count()
@@ -84,6 +140,21 @@ def course_is_finished(enrollment) -> bool:
     never blocked; otherwise every lesson (and quiz) must be done."""
     progress = course_progress(enrollment)
     return progress["total"] == 0 or progress["done"] >= progress["total"]
+
+
+def final_grade_percent(enrollment):
+    """The average of the learner's best score on each of the course's quizzes, or None for a course without quizzes.
+    A quiz never attempted counts as 0."""
+    from django.db.models import Max
+
+    quizzes = list(lessons_of(enrollment.program).filter(kind=LessonKind.QUIZ).values_list("pk", flat=True))
+    if not quizzes:
+        return None
+    best = dict(
+        QuizAttempt.objects.filter(enrollment=enrollment, lesson_id__in=quizzes)
+        .values_list("lesson_id").annotate(best=Max("score_percent")).values_list("lesson_id", "best")
+    )
+    return round(sum(best.get(pk, 0) for pk in quizzes) / len(quizzes))
 
 
 def _require_active(enrollment):
@@ -202,7 +273,39 @@ def review_submission(submission, *, reviewer, decision: str, feedback: str = ""
     return submission
 
 
+QUIZ_ATTEMPTS_PER_WINDOW = 3
+QUIZ_ATTEMPT_WINDOW = timedelta(hours=8)
+
+
+class QuizLockedError(CourseError):
+    """A quiz that can't be taken right now: already passed, or out of attempts until retry_at."""
+    def __init__(self, message, retry_at=None):
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
+def quiz_attempt_status(enrollment, lesson, attempts=None) -> dict:
+    """Whether the learner has passed this quiz, how many attempts they have left right now and, when none, the
+    moment the next one opens. Learners get QUIZ_ATTEMPTS_PER_WINDOW attempts per QUIZ_ATTEMPT_WINDOW, so they can't
+    guess their way through by resubmitting; a passed quiz is closed (its answers have been shown)."""
+    if attempts is None:
+        attempts = list(QuizAttempt.objects.filter(enrollment=enrollment, lesson=lesson))
+    passed = any(a.passed for a in attempts)
+    window_start = timezone.now() - QUIZ_ATTEMPT_WINDOW
+    recent = sorted(a.submitted_at for a in attempts if a.submitted_at > window_start)
+    left = 0 if passed else max(QUIZ_ATTEMPTS_PER_WINDOW - len(recent), 0)
+    retry_at = recent[-QUIZ_ATTEMPTS_PER_WINDOW] + QUIZ_ATTEMPT_WINDOW if not passed and not left else None
+    return {"passed": passed, "attempts_left": left, "retry_at": retry_at, "attempts_per_window": QUIZ_ATTEMPTS_PER_WINDOW}
+
+
+def _graded(question, selected) -> dict:
+    correct = {str(c.id) for c in question.choices.all() if c.is_correct}
+    return {"question": str(question.id), "correct": bool(correct) and set(selected) == correct, "correct_choices": sorted(correct)}
+
+
 def submit_quiz(enrollment, lesson_id, answers: dict) -> dict:
+    """Grades an attempt. A failed attempt only says which questions were wrong; the correct answers and
+    explanations are revealed once the quiz is passed (see quiz_attempt_status for the attempt limit)."""
     _require_active(enrollment)
     lesson = _lesson_for(enrollment, lesson_id)
     if lesson.kind != LessonKind.QUIZ:
@@ -210,21 +313,17 @@ def submit_quiz(enrollment, lesson_id, answers: dict) -> dict:
     questions = list(QuizQuestion.objects.filter(lesson=lesson).prefetch_related("choices"))
     if not questions:
         raise CourseError("This quiz has no questions yet.")
+    attempt_status = quiz_attempt_status(enrollment, lesson)
+    if attempt_status["passed"]:
+        raise QuizLockedError("You've already passed this quiz.")
+    if not attempt_status["attempts_left"]:
+        raise QuizLockedError("You've used all your attempts for now.", retry_at=attempt_status["retry_at"])
 
-    results, correct_count = [], 0
+    results = []
     for question in questions:
-        selected = {str(c) for c in (answers.get(str(question.id)) or [])}
-        correct = {str(c.id) for c in question.choices.all() if c.is_correct}
-        is_correct = bool(correct) and selected == correct
-        correct_count += is_correct
-        results.append({
-            "question": str(question.id),
-            "correct": is_correct,
-            "correct_choices": sorted(correct),
-            "explanation": question.explanation,
-        })
+        results.append({**_graded(question, {str(c) for c in (answers.get(str(question.id)) or [])}), "explanation": question.explanation})
 
-    score = round(correct_count * 100 / len(questions))
+    score = round(sum(r["correct"] for r in results) * 100 / len(questions))
     passed = score >= lesson.pass_mark_percent
     QuizAttempt.objects.create(
         enrollment=enrollment, lesson=lesson, score_percent=score, passed=passed,
@@ -232,18 +331,32 @@ def submit_quiz(enrollment, lesson_id, answers: dict) -> dict:
     )
     if passed:
         _record_progress(enrollment, lesson)
-    return {"score_percent": score, "passed": passed, "pass_mark_percent": lesson.pass_mark_percent, "results": results}
+    else:
+        results = [{"question": r["question"], "correct": r["correct"]} for r in results]
+    return {
+        "score_percent": score, "passed": passed, "pass_mark_percent": lesson.pass_mark_percent, "results": results,
+        **{key: value for key, value in quiz_attempt_status(enrollment, lesson).items() if key != "passed"},
+    }
+
+
+def _quiz_review(attempt, questions) -> dict:
+    """A passed quiz, as the learner answered it on their best passing attempt, with the answers and explanations."""
+    return {
+        "score_percent": attempt.score_percent,
+        "answers": attempt.answers,
+        "results": [{**_graded(q, attempt.answers.get(str(q.id)) or []), "explanation": q.explanation} for q in questions],
+    }
 
 
 def learner_outline(enrollment, request) -> dict:
-    """Everything the course player needs. Correct answers are never
-    included here — they only come back after a quiz is submitted."""
+    """Everything the course player needs. Correct answers are only included for quizzes the learner has passed
+    (as a review of their passing attempt)."""
     done_ids = set(
         LessonProgress.objects.filter(enrollment=enrollment).values_list("lesson_id", flat=True)
     )
-    best = {}
+    attempts_by_lesson = {}
     for attempt in QuizAttempt.objects.filter(enrollment=enrollment):
-        best[attempt.lesson_id] = max(best.get(attempt.lesson_id, 0), attempt.score_percent)
+        attempts_by_lesson.setdefault(attempt.lesson_id, []).append(attempt)
 
     modules = []
     program = enrollment.program
@@ -254,8 +367,8 @@ def learner_outline(enrollment, request) -> dict:
             item = {
                 "id": str(lesson.id), "title": lesson.title, "kind": lesson.kind,
                 "content_text": lesson.content_text, "video_url": lesson.video_url,
-                                "video_file_url": request.build_absolute_uri(lesson.video_file.url) if lesson.video_file else "",
-                                "pdf_url": request.build_absolute_uri(lesson.pdf_file.url) if lesson.pdf_file else "",
+                "video_file_url": media_url(request, lesson, "video", enrollment.student),
+                "pdf_url": media_url(request, lesson, "pdf", enrollment.student),
                 "completed": lesson.id in done_ids,
             }
             if lesson.kind == LessonKind.ASSIGNMENT:
@@ -264,22 +377,28 @@ def learner_outline(enrollment, request) -> dict:
                     "status": sub.status, "feedback": sub.feedback, "submitted_at": sub.submitted_at,
                 }
             if lesson.kind == LessonKind.QUIZ:
+                attempts = attempts_by_lesson.get(lesson.id, [])
+                questions = list(lesson.questions.all())
                 item["pass_mark_percent"] = lesson.pass_mark_percent
-                item["best_score_percent"] = best.get(lesson.id)
+                item["best_score_percent"] = max((a.score_percent for a in attempts), default=None)
+                item.update({k: v for k, v in quiz_attempt_status(enrollment, lesson, attempts).items() if k != "passed"})
                 item["questions"] = [
                     {
                         "id": str(q.id), "text": q.text,
                         "multiple": sum(c.is_correct for c in q.choices.all()) > 1,
                         "choices": [{"id": str(c.id), "text": c.text} for c in q.choices.all()],
                     }
-                    for q in lesson.questions.all()
+                    for q in questions
                 ]
+                passing = max((a for a in attempts if a.passed), key=lambda a: a.score_percent, default=None)
+                item["review"] = _quiz_review(passing, questions) if passing else None
             lessons.append(item)
         modules.append({"id": str(module.id), "title": module.title, "lessons": lessons})
     return {
         "program": {"id": str(program.id), "title": program.title},
         "status": enrollment.status,
         "certificate_issued_at": enrollment.certificate_issued_at,
+        "certificate_code": enrollment.certificate_code,
         "progress": course_progress(enrollment),
         "modules": modules,
     }

@@ -17,6 +17,7 @@ import {
   IconBell,
   IconGift,
   IconSparkles,
+  IconGraduationCap,
 } from "@/components/Icons";
 
 interface AccountNavItem {
@@ -46,6 +47,7 @@ const ACCOUNT_NAV_GROUPS: AccountNavGroup[] = [
     title: "Activity",
     items: [
       { href: "/bookings", label: "Bookings & Escrow", icon: IconFileText },
+      { href: "/my-learning", label: "My Learning", icon: IconGraduationCap },
       { href: "/wallet", label: "Wallet & Transactions", icon: IconCreditCard },
       { href: "/ratings", label: "Ratings & Reviews", icon: IconStar },
       { href: "/marketplace/my-listings", label: "My Marketplace Listings", icon: IconFileText },

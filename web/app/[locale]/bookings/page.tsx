@@ -34,6 +34,7 @@ const TYPE_ICONS: Record<string, TypeIcon> = {
   SERVICE_REQUEST: IconWrench,
   MARKETPLACE_ITEM: IconShoppingBag,
   RIDE: IconCar,
+  TRAINING: IconGraduationCap,
 };
 
 const STATUS_PILL: Record<string, string> = {
@@ -319,9 +320,9 @@ export default function BookingsPage() {
                   </div>
                 ) : null}
 
-                {(!booking.dispute_status && booking.has_escrow && disputingId !== booking.id) || CANCELLABLE_STATUSES.includes(booking.status) ? (
+                {(!booking.dispute_status && booking.escrow_status === "HELD" && disputingId !== booking.id) || CANCELLABLE_STATUSES.includes(booking.status) ? (
                   <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
-                    {!booking.dispute_status && booking.has_escrow && disputingId !== booking.id && (
+                    {!booking.dispute_status && booking.escrow_status === "HELD" && disputingId !== booking.id && (
                       <button
                         onClick={() => setDisputingId(booking.id)}
                         className="rounded-xl border border-red-200 px-3.5 py-2 text-xs font-bold text-red-700 hover:bg-red-50 transition-colors cursor-pointer"

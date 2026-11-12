@@ -81,7 +81,15 @@ def test_tenant_law_training_enrollment_tracked_to_completion():
         price_xaf=Decimal("15000"), issues_certification=True,
     )
 
-    enrollment = enroll_in_training(program=program, student=student)
+    from careers.services import pay_for_training, confirm_training_payment
+    from payments.gateways import SandboxGateway
+    from transactions.locks import InMemoryLockClient
+    from transactions.services import confirm_payment
+    lock = InMemoryLockClient()
+    enrollment = pay_for_training(program=program, student=student, phone_number="+237670000003", lock_client=lock, payment_gateway=SandboxGateway())
+    assert enrollment.status == TrainingEnrollmentStatus.PAYMENT_PENDING
+    confirm_payment(lock_client=lock, booking=enrollment.booking, provider="MTN_MOMO", provider_reference="TEST-TENANT-LAW")
+    enrollment = confirm_training_payment(booking=enrollment.booking)
     assert enrollment.status == TrainingEnrollmentStatus.ENROLLED
     assert enrollment.certificate_issued_at is None
 
@@ -90,6 +98,7 @@ def test_tenant_law_training_enrollment_tracked_to_completion():
     assert enrollment.status == TrainingEnrollmentStatus.COMPLETED
     assert enrollment.completed_at is not None
     assert enrollment.certificate_issued_at is not None  # program issues certification
+    assert enrollment.booking.escrow.status == "RELEASED"  # the provider is paid once the course is completed
 
 
 @pytest.mark.django_db

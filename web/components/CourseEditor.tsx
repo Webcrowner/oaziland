@@ -3,20 +3,80 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
-  getManagedCourse, updateManagedCourse, deleteManagedCourse, createCourseModule, updateCourseModule, deleteCourseModule,
+  getManagedCourse, updateManagedCourse, deleteManagedCourse, requestCourseReview, setManagedCourseCover, createCourseModule, updateCourseModule, deleteCourseModule,
   createCourseLesson, updateCourseLesson, deleteCourseLesson, createCourseQuestion, updateCourseQuestion, deleteCourseQuestion,
-  listCourseStaff, assignCourseStaff, removeCourseStaff, listCourseLearners,
+  listCourseStaff, assignCourseStaff, removeCourseStaff, listCourseLearners, completeCourseLearner,
   listCourseSubmissions, openCourseSubmission, reviewCourseSubmission,
   type ManageCourse, type ManageLesson, type ManageQuestion, type ManageChoice, type LessonKind,
   type CourseStaffMember, type CourseLearnerRow, type LessonInput, type CourseSubmissionRow,
 } from "@/lib/api";
 import { TRAINING_CATEGORIES } from "@/lib/trainingCategories";
+import CourseAnalyticsPanel from "@/components/CourseAnalyticsPanel";
+import CourseCertificatePicker from "@/components/CourseCertificatePicker";
 
 const KINDS: LessonKind[] = ["TEXT", "VIDEO", "PDF", "QUIZ", "ASSIGNMENT"];
-type Tab = "content" | "settings" | "team" | "learners" | "submissions";
+type Tab = "content" | "settings" | "team" | "learners" | "submissions" | "analytics";
 
 function token() {
   return typeof window === "undefined" ? null : localStorage.getItem("access_token");
+}
+
+const COVER_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_COVER_BYTES = 10 * 1024 * 1024;
+
+/** The course's catalogue picture: preview, upload/replace and remove. */
+function CoverImageEditor({ course, onChange }: { course: ManageCourse; onChange: (file: File | null, confirmMessage?: string) => Promise<void> }) {
+  const t = useTranslations("CourseManage");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function change(file: File | null, confirmMessage?: string) {
+    setError("");
+    setBusy(true);
+    await onChange(file, confirmMessage);
+    setBusy(false);
+  }
+
+  function pick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!COVER_TYPES.includes(file.type)) return setError(t("coverTypeError"));
+    if (file.size > MAX_COVER_BYTES) return setError(t("coverSizeError"));
+    void change(file);
+  }
+
+  return (
+    <section className="mb-6 max-w-xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="mb-1 font-bold text-slate-900">{t("coverImage")}</h2>
+      <p className="mb-4 text-xs text-slate-500">{t("coverHint")}</p>
+      <div className="mb-4 aspect-[16/9] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+        {course.cover_image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- uploads from arbitrary storage hosts
+          <img src={course.cover_image_url} alt={t("coverImage")} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-slate-400">{t("noCover")}</div>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={`cursor-pointer rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#25396a] ${busy ? "pointer-events-none opacity-50" : ""}`}>
+          {busy ? t("uploading") : course.cover_image_url ? t("changeCover") : t("uploadCover")}
+          <input type="file" accept={COVER_TYPES.join(",")} onChange={pick} disabled={busy} className="sr-only" />
+        </label>
+        {course.cover_image_url && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void change(null, t("removeCoverConfirm"))}
+            className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {t("removeCover")}
+          </button>
+        )}
+      </div>
+      {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+    </section>
+  );
 }
 
 function SubmissionCard({ row, courseId, onDone }: { row: CourseSubmissionRow; courseId: string; onDone: () => void }) {
@@ -203,12 +263,13 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
   const [submissions, setSubmissions] = useState<CourseSubmissionRow[]>([]);
   const [editing, setEditing] = useState<string | null>(null); // "lesson:<id>" | "newlesson:<moduleId>" | "q:<id>" | "newq:<lessonId>"
   const [newModule, setNewModule] = useState("");
-  const [settings, setSettings] = useState({ title: "", description: "", category: "OTHER", price: "", cert: false, published: false });
+  const [settings, setSettings] = useState({ title: "", description: "", category: "OTHER", price: "", hours: "", validity: "", cert: false, published: false });
   const [notice, setNotice] = useState("");
   const [assign, setAssign] = useState({ identifier: "", role: "LECTURER" as "LECTURER" | "SUPERVISOR" });
 
-  const canEdit = course?.my_role === "ADMIN" || course?.my_role === "LECTURER";
+  const canEdit = course?.my_role === "ADMIN" || course?.my_role === "OWNER" || course?.my_role === "LECTURER";
   const isAdmin = course?.my_role === "ADMIN";
+  const canManageTeam = isAdmin || course?.my_role === "OWNER";
 
   const reload = useCallback(async () => {
     const tk = token();
@@ -217,7 +278,11 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
       const c = await getManagedCourse(courseId, tk);
       setCourse(c);
       if (c.my_role === "SUPERVISOR") setTab((current) => (current === "content" ? "learners" : current));
-      setSettings({ title: c.title, description: c.description, category: c.category, price: c.price_xaf ? String(Number(c.price_xaf)) : "", cert: c.issues_certification, published: c.is_published });
+      setSettings({
+        title: c.title, description: c.description, category: c.category, price: c.price_xaf ? String(Number(c.price_xaf)) : "",
+        hours: c.duration_hours ? String(Number(c.duration_hours)) : "", validity: c.certificate_validity_months ? String(c.certificate_validity_months) : "",
+        cert: c.issues_certification, published: c.is_published,
+      });
     } catch {
       setFailed(true);
     }
@@ -234,23 +299,25 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
   }, [tab, courseId, course?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Runs a mutation, reloads, and reports failures instead of swallowing them.
-  async function act(fn: (tk: string) => Promise<unknown>, confirmMessage?: string) {
-    if (confirmMessage && !window.confirm(confirmMessage)) return;
+  async function act(fn: (tk: string) => Promise<unknown>, confirmMessage?: string): Promise<boolean> {
+    if (confirmMessage && !window.confirm(confirmMessage)) return false;
     const tk = token();
-    if (!tk) return;
+    if (!tk) return false;
     setNotice("");
     try {
       await fn(tk);
       await reload();
+      return true;
     } catch (err) {
       setNotice(err instanceof Error ? err.message : t("actionFailed"));
+      return false;
     }
   }
 
   if (failed) return <p role="alert" className="text-red-600">{t("actionFailed")}</p>;
   if (!course) return <p className="text-gray-500">…</p>;
 
-  const tabs: Tab[] = canEdit ? ["content", "settings", "team", "learners", "submissions"] : ["learners", "submissions", "content", "team"];
+  const tabs: Tab[] = canEdit ? ["content", "settings", "team", "learners", "submissions", "analytics"] : ["learners", "submissions", "analytics", "content", "team"];
 
   return (
     <div className="course-editor">
@@ -295,6 +362,9 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
                       <div className="flex items-center gap-2 text-sm">
                         <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase">{t(`kind${l.kind}`)}</span>
                         <span className="flex-1">{l.title}</span>
+                        {l.kind === "QUIZ" && l.questions.length === 0 && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">{t("needsQuestions")}</span>
+                        )}
                         {l.kind === "PDF" && l.pdf_url && <a href={l.pdf_url} target="_blank" rel="noopener noreferrer" className="text-[var(--navy)] underline">PDF</a>}
                         {l.kind === "VIDEO" && (l.video_file_url || l.video_url) && <a href={l.video_file_url || l.video_url} target="_blank" rel="noopener noreferrer" className="text-[var(--navy)] underline">{t("watchVideo")}</a>}
                         {canEdit && <>
@@ -305,7 +375,7 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
                     )}
                     {l.kind === "QUIZ" && (
                       <div className="mt-2 space-y-2 border-l-2 pl-3">
-                        {l.questions.length === 0 && <p className="text-xs text-gray-500">{t("noQuestions")}</p>}
+                        {l.questions.length === 0 && <p role="note" className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">⚠ {course.is_published ? t("noQuestionsLive") : t("noQuestions")}</p>}
                         {l.questions.map((q, i) => editing === `q:${q.id}` ? (
                           <QuestionForm key={q.id} initial={q} onCancel={() => setEditing(null)} onSave={async (input) => { const tk = token(); if (!tk) return; await updateCourseQuestion(q.id, input, tk); setEditing(null); await reload(); }} />
                         ) : (
@@ -340,7 +410,7 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
             </section>
           ))}
           {canEdit && (
-            <form onSubmit={(e) => { e.preventDefault(); if (newModule.trim()) act((tk) => createCourseModule(course.id, newModule.trim(), tk)).then(() => setNewModule("")); }} className="flex gap-2">
+            <form onSubmit={(e) => { e.preventDefault(); if (newModule.trim()) act((tk) => createCourseModule(course.id, newModule.trim(), tk)).then((ok) => ok && setNewModule("")); }} className="flex gap-2">
               <input value={newModule} onChange={(e) => setNewModule(e.target.value)} placeholder={t("moduleTitle")} aria-label={t("moduleTitle")} className="flex-1 rounded border px-3 py-2 text-sm" />
               <button className="rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#25396a]">{t("addModule")}</button>
             </form>
@@ -349,8 +419,21 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
       )}
 
       {tab === "settings" && canEdit && (
+        <CoverImageEditor course={course} onChange={async (file, confirmMessage) => { await act((tk) => setManagedCourseCover(course.id, file, tk), confirmMessage); }} />
+      )}
+
+      {tab === "settings" && canEdit && (
         <form
-          onSubmit={(e) => { e.preventDefault(); act((tk) => updateManagedCourse(course.id, { title: settings.title, description: settings.description, category: settings.category, price_xaf: settings.price.trim() ? settings.price.trim() : null, issues_certification: settings.cert, is_published: settings.published }, tk)).then(() => setNotice("")); }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            act((tk) => updateManagedCourse(course.id, {
+              title: settings.title, description: settings.description, category: settings.category,
+              price_xaf: settings.price.trim() ? settings.price.trim() : null,
+              duration_hours: settings.hours.trim() ? settings.hours.trim() : null,
+              certificate_validity_months: settings.validity.trim() ? Number(settings.validity) : null,
+              issues_certification: settings.cert, is_published: settings.published,
+            }, tk));
+          }}
           className="grid max-w-xl gap-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
         >
           <input required value={settings.title} onChange={(e) => setSettings({ ...settings, title: e.target.value })} aria-label={t("courseTitle")} className="rounded border px-3 py-2 text-sm" />
@@ -359,13 +442,50 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
             {TRAINING_CATEGORIES.map((c) => <option key={c} value={c}>{tc(`categories.${c}`)}</option>)}
           </select>
           <input type="number" min="0" value={settings.price} onChange={(e) => setSettings({ ...settings, price: e.target.value })} placeholder={t("price")} aria-label={t("price")} className="rounded border px-3 py-2 text-sm" />
+          <label className="grid gap-1 text-sm">
+            <span className="font-semibold text-slate-700">{t("durationHours")}</span>
+            <input type="number" min="0.5" max="9999" step="0.5" value={settings.hours} onChange={(e) => setSettings({ ...settings, hours: e.target.value })} placeholder={t("durationHoursPlaceholder")} className="rounded border px-3 py-2 text-sm" />
+          </label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={settings.cert} onChange={(e) => setSettings({ ...settings, cert: e.target.checked })} />{t("issuesCertificate")}</label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={settings.published} onChange={(e) => setSettings({ ...settings, published: e.target.checked })} />{t("published")}</label>
+          {settings.cert && (
+            <label className="grid gap-1 text-sm">
+              <span className="font-semibold text-slate-700">{t("certificateValidity")}</span>
+              <input type="number" min="1" max="240" step="1" value={settings.validity} onChange={(e) => setSettings({ ...settings, validity: e.target.value })} placeholder={t("certificateValidityPlaceholder")} className="rounded border px-3 py-2 text-sm" />
+              <span className="text-xs text-slate-500">{t("certificateValidityHint")}</span>
+            </label>
+          )}
+          <label className={`flex items-center gap-2 text-sm ${!course.can_publish && !course.is_published ? "text-slate-400" : ""}`}>
+            <input type="checkbox" checked={settings.published} disabled={!course.can_publish && !course.is_published} onChange={(e) => setSettings({ ...settings, published: e.target.checked })} />
+            {t("published")}
+          </label>
+          {!course.can_publish && !course.is_published && (
+            <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+              {course.review_requested_at ? (
+                <p>⏳ {t("reviewPending")}</p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="flex-1">{t("reviewNeeded")}</p>
+                  <button type="button" onClick={() => act((tk) => requestCourseReview(course.id, tk))} className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-600">{t("submitForReview")}</button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <button className="rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#25396a]">{t("save")}</button>
-            {isAdmin && <button type="button" onClick={() => act((tk) => deleteManagedCourse(course.id, tk), t("deleteCourseConfirm")).then(() => router.push("/trainings/manage"))} className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50">{t("delete")}</button>}
+            {canManageTeam && <button type="button" onClick={() => act((tk) => deleteManagedCourse(course.id, tk), t("deleteCourseConfirm")).then((ok) => ok && router.push("/trainings/manage"))} className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50">{t("delete")}</button>}
           </div>
         </form>
+      )}
+
+      {tab === "settings" && canEdit && (
+        <CourseCertificatePicker
+          courseId={course.id}
+          courseTitle={course.title}
+          lessonCount={course.modules.reduce((sum, m) => sum + m.lessons.length, 0)}
+          durationHours={course.duration_hours}
+          validityMonths={course.certificate_validity_months}
+          issuesCertificate={course.issues_certification}
+        />
       )}
 
       {tab === "team" && (
@@ -376,11 +496,11 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
               <li key={s.id} className="flex items-center gap-2 rounded border bg-white p-2 text-sm">
                 <span className="flex-1">{s.user_name || s.username} <span className="text-gray-500">({s.phone})</span></span>
                 <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-semibold">{t(`role_${s.role}`)}</span>
-                {isAdmin && <button onClick={() => act(async (tk) => { await removeCourseStaff(course.id, s.id, tk); setStaff(await listCourseStaff(course.id, tk)); })} className="text-red-600">{t("remove")}</button>}
+                {canManageTeam && <button onClick={() => act(async (tk) => { await removeCourseStaff(course.id, s.id, tk); setStaff(await listCourseStaff(course.id, tk)); })} className="text-red-600">{t("remove")}</button>}
               </li>
             ))}
           </ul>
-          {isAdmin && (
+          {canManageTeam && (
             <form onSubmit={(e) => { e.preventDefault(); act(async (tk) => { await assignCourseStaff(course.id, assign.identifier, assign.role, tk); setAssign({ ...assign, identifier: "" }); setStaff(await listCourseStaff(course.id, tk)); }); }} className="flex flex-wrap gap-2">
               <input required value={assign.identifier} onChange={(e) => setAssign({ ...assign, identifier: e.target.value })} placeholder={t("identifier")} aria-label={t("identifier")} className="min-w-0 flex-1 rounded border px-3 py-2 text-sm" />
               <select value={assign.role} onChange={(e) => setAssign({ ...assign, role: e.target.value as "LECTURER" | "SUPERVISOR" })} aria-label="Role" className="rounded border px-3 py-2 text-sm">
@@ -408,6 +528,8 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
         )
       )}
 
+      {tab === "analytics" && <CourseAnalyticsPanel courseId={course.id} />}
+
       {tab === "learners" && (
         learners.length === 0 ? <p className="text-gray-600">{t("noLearners")}</p> : (
           <div className="overflow-x-auto rounded-lg border bg-white">
@@ -422,7 +544,21 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
                     <td className="p-2">{t(`status_${r.status}`)}</td>
                     <td className="p-2">{r.lessons_done}/{r.lessons_total} ({r.progress_percent}%)</td>
                     <td className="p-2">{r.quizzes.length === 0 ? "—" : r.quizzes.map((q) => <div key={q.lesson}>{q.lesson_title}: {q.best_score_percent}% {q.passed ? "✓" : "✗"} <span className="text-xs text-gray-500">({t("attempts", { count: q.attempts })})</span></div>)}</td>
-                    <td className="p-2">{r.certificate_issued_at ? t("yes") : t("no")}</td>
+                    <td className="p-2">
+                      {r.certificate_issued_at ? t("yes") : t("no")}
+                      {r.lessons_total === 0 && (r.status === "ENROLLED" || r.status === "IN_PROGRESS") && (
+                        <button
+                          type="button"
+                          onClick={() => act(
+                            (tk) => completeCourseLearner(course.id, r.enrollment, tk).then(() => listCourseLearners(course.id, tk).then(setLearners)),
+                            t("confirmCompletionPrompt", { name: r.student_name || r.username }),
+                          )}
+                          className="mt-1 block rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+                        >
+                          {t("confirmCompletion")}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

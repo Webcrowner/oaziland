@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useRouter, Link } from "@/i18n/navigation";
 import { loginUser } from "@/lib/api";
+import { loginHref, safeNextPath } from "@/lib/authRedirect";
 import Button from "@/components/ui/Button";
 import {
   IconUser,
@@ -26,6 +27,12 @@ const ROLE_HOME: Record<string, string> = {
 export default function LoginPage() {
   const t = useTranslations("LoginPage");
   const router = useRouter();
+  // Where to return after signing in (e.g. the course the learner was on), kept when they go to create an account.
+  const [nextPath, setNextPath] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    void Promise.resolve().then(() => setNextPath(safeNextPath(params.get("next") || params.get("redirect"))));
+  }, []);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -42,9 +49,12 @@ export default function LoginPage() {
       localStorage.setItem("refresh_token", tokens.refresh);
       // If there's an explicit return URL (e.g. ?next=/dashboard or ?redirect=...), honor it
       const params = new URLSearchParams(window.location.search);
-      const nextUrl = params.get("next") || params.get("redirect");
+      const nextUrl = safeNextPath(params.get("next") || params.get("redirect"));
 
-      if (nextUrl && nextUrl.startsWith("/")) {
+      if (nextUrl) {
+        // A new account coming back to what they were doing (e.g. enrolling in a course) goes straight there.
+        sessionStorage.removeItem("oaziland_just_registered");
+        sessionStorage.removeItem("oaziland_signup_role");
         router.push(nextUrl);
       } else if (sessionStorage.getItem("oaziland_just_registered")) {
         sessionStorage.removeItem("oaziland_just_registered");
@@ -167,7 +177,7 @@ export default function LoginPage() {
           <p className="text-xs text-slate-500 mt-5 text-center">
             {t("noAccountYet")}{" "}
             <Link
-              href="/register"
+              href={nextPath ? loginHref(nextPath, "/register") : "/register"}
               className="text-amber-600 font-bold hover:text-amber-700 transition-colors"
             >
               {t("createAccount")} &rarr;

@@ -150,6 +150,16 @@ router.register(r"wanted-listings", WantedListingViewSet, basename="wanted-listi
 router.register(r"service-categories", PartnerServiceCategoryViewSet, basename="service-category")
 router.register(r"trainings", TrainingProgramViewSet, basename="training")
 router.register(r"my-enrollments", MyEnrollmentViewSet, basename="my-enrollment")
+from careers.views import CertificateView  # noqa: E402
+from careers.course_media import course_media_view  # noqa: E402
+router.register(r"certificates", CertificateView, basename="certificate")
+from careers.views import TrainerPublicView, MyTrainerProfileView  # noqa: E402
+router.register(r"trainers", TrainerPublicView, basename="trainer")
+router.register(r"my-trainer-profile", MyTrainerProfileView, basename="my-trainer-profile")
+from careers.certificate_template_views import CertificateTemplateViewSet  # noqa: E402
+router.register(r"admin/certificate-templates", CertificateTemplateViewSet, basename="admin-certificate-template")
+from careers.course_creator_views import CourseCreatorAccessViewSet  # noqa: E402
+router.register(r"admin/course-creators", CourseCreatorAccessViewSet, basename="admin-course-creator")
 from careers.course_views import ManageCourseViewSet, ModuleEditorViewSet, LessonEditorViewSet, QuestionEditorViewSet  # noqa: E402
 router.register(r"manage/courses", ManageCourseViewSet, basename="manage-course")
 router.register(r"manage/modules", ModuleEditorViewSet, basename="manage-module")
@@ -243,6 +253,7 @@ urlpatterns = [
     path('api/my-landlord-portfolio/', MyLandlordPortfolioView.as_view(), name='my-landlord-portfolio'),
     path('api/listing-conditions/', ListingConditionView.as_view(), name='listing-conditions'),
     path('api/ratings/', RateUserView.as_view(), name='rate-user'),
+    path('api/course-media/<str:token>/', course_media_view, name='course-media'),
     path('api/users/<uuid:user_id>/follow/', FollowView.as_view(), name='user-follow'),
     path('api/users/<uuid:user_id>/block/', BlockUserView.as_view(), name='user-block'),
     path('api/my-blocked-users/', MyBlockedUsersView.as_view(), name='my-blocked-users'),

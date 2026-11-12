@@ -183,5 +183,7 @@ def payment_webhook_view(request):
 
     from marketplace.services import confirm_marketplace_order_payment
     confirm_marketplace_order_payment(booking=booking)
+    from careers.services import confirm_training_payment
+    confirm_training_payment(booking=booking)
 
     return Response({"detail": "Payment confirmed."}, status=status.HTTP_200_OK)

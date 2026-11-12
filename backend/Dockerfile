@@ -22,7 +22,7 @@ WORKDIR /app
 # (psycopg2, etc.) — installed and then the apt cache is removed in
 # the same layer to keep the final image smaller.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libpq-dev curl \
+    && apt-get install -y --no-install-recommends gcc libpq-dev curl fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Copying requirements BEFORE the rest of the code is a deliberate

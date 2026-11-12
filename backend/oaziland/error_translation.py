@@ -2,9 +2,12 @@
 
 Messages are written in English at their raise sites; this middleware swaps in the
 French text when the request's Accept-Language starts with "fr". Only exact matches
-in error responses (status >= 400) are touched, so user content is never rewritten.
+(FRENCH_ERRORS) or whole-message patterns (FRENCH_PATTERNS, for messages with a
+variable part) in error responses (status >= 400) are touched, so user content is
+never rewritten.
 """
 import json
+import re
 
 FRENCH_ERRORS = {
     # services: technician registration and job lifecycle
@@ -191,12 +194,145 @@ FRENCH_ERRORS = {
     "You have already reviewed this place.": "Vous avez déjà évalué cet établissement.",
     "Only students who have had a room here can review this hostel.": "Seuls les étudiants qui y ont eu une chambre peuvent évaluer cette résidence.",
     "Only organisers whose event here has taken place can review this venue.": "Seuls les organisateurs dont l'événement a eu lieu ici peuvent évaluer ce lieu.",
+    # careers: courses — enrolling and paying
+    "Pay for this course to open it.": "Payez cette formation pour l'ouvrir.",
+    "Payments are temporarily unavailable. Please try again later.": "Les paiements sont temporairement indisponibles. Veuillez réessayer plus tard.",
+    "You're no longer enrolled in this course.": "Vous n'êtes plus inscrit à cette formation.",
+    "This student is already enrolled in this program.": "Cet apprenant est déjà inscrit à cette formation.",
+    "You are already enrolled in this course.": "Vous êtes déjà inscrit à cette formation.",
+    "Enter the Mobile Money number to pay with.": "Saisissez le numéro Mobile Money à débiter.",
+    "A payment for this course was just started. Check your phone.": "Un paiement pour cette formation vient d'être lancé. Vérifiez votre téléphone.",
+    "A payment for this course is already waiting for your approval on your phone. Approve it, or try again in a few minutes.": "Un paiement pour cette formation attend déjà votre validation sur votre téléphone. Validez-le, ou réessayez dans quelques minutes.",
+    "The payment could not be started. Check the number and try again.": "Le paiement n'a pas pu être lancé. Vérifiez le numéro et réessayez.",
+    # careers: courses — lessons, quizzes and assignments
+    "This lesson is not part of the course.": "Cette leçon ne fait pas partie de la formation.",
+    "A quiz is completed by passing it.": "Un quiz est validé en le réussissant.",
+    "An assignment is completed when a reviewer approves your submission.": "Un devoir est validé lorsqu'un correcteur approuve votre travail.",
+    "This lesson is not an assignment.": "Cette leçon n'est pas un devoir.",
+    "This assignment has already been approved.": "Ce devoir a déjà été approuvé.",
+    "Attach your PDF as 'file'.": "Joignez votre fichier PDF.",
+    "PDF files can be at most 20 MB.": "Les fichiers PDF ne peuvent pas dépasser 20 Mo.",
+    "Upload a valid PDF file.": "Importez un fichier PDF valide.",
+    "This lesson is not a quiz.": "Cette leçon n'est pas un quiz.",
+    "This quiz has no questions yet.": "Ce quiz n'a pas encore de questions.",
+    "You've already passed this quiz.": "Vous avez déjà réussi ce quiz.",
+    "You've used all your attempts for now.": "Vous avez utilisé toutes vos tentatives pour le moment.",
+    "answers must be an object of question id to selected choice ids.": "Le format des réponses est invalide.",
+    "Finish every lesson and pass every quiz to complete this course.": "Terminez toutes les leçons et réussissez tous les quiz pour terminer cette formation.",
+    # careers: courses — reviews, discussions, certificates and trainers
+    "Sign in to review this course.": "Connectez-vous pour évaluer cette formation.",
+    "Enroll in this course to join its discussions.": "Inscrivez-vous à cette formation pour participer à ses discussions.",
+    "Only learners enrolled in this course can take part in its discussions.": "Seuls les apprenants inscrits à cette formation peuvent participer à ses discussions.",
+    "That lesson is not part of this course.": "Cette leçon ne fait pas partie de la formation.",
+    "Only the author can edit this post.": "Seul l'auteur peut modifier ce message.",
+    "Only the author or the course staff can delete this post.": "Seuls l'auteur ou l'équipe de la formation peuvent supprimer ce message.",
+    "No certificate with this code exists.": "Aucun certificat ne correspond à ce code.",
+    "Trainer not found.": "Formateur introuvable.",
+    "The headline must be 160 characters or fewer.": "Le titre du profil doit comporter 160 caractères au maximum.",
+    "Enter a full website address starting with https://": "Saisissez une adresse de site complète commençant par https://",
+    # careers: course management (admins, trainers, lecturers, supervisors)
+    "Only an administrator can do this.": "Seul un administrateur peut faire cela.",
+    "Only an administrator or the course's creator can change the course team.": "Seuls un administrateur ou le créateur de la formation peuvent modifier son équipe.",
+    "An administrator needs to give you course-creator access first.": "Un administrateur doit d'abord vous donner l'accès à la création de formations.",
+    "Only an administrator or the course lecturer can edit this course.": "Seuls un administrateur ou l'enseignant de la formation peuvent la modifier.",
+    "An administrator reviews and publishes this course. Submit it for review instead.": "Un administrateur relit et publie cette formation. Soumettez-la plutôt pour relecture.",
+    "Only an administrator or the course's creator can delete it.": "Seuls un administrateur ou le créateur de la formation peuvent la supprimer.",
+    "Learners have enrolled in this course, so only an administrator can delete it. Unpublish it instead.": "Des apprenants sont inscrits à cette formation : seul un administrateur peut la supprimer. Dépubliez-la plutôt.",
+    "Only the course's creator or lecturer can submit it for review.": "Seuls le créateur ou l'enseignant de la formation peuvent la soumettre pour relecture.",
+    "This course is already published.": "Cette formation est déjà publiée.",
+    "Add a description or some lessons before submitting the course.": "Ajoutez une description ou des leçons avant de soumettre la formation.",
+    "You can't edit this course.": "Vous ne pouvez pas modifier cette formation.",
+    "This learner paid for the course and finishing it pays you, so an administrator confirms their completion.": "Cet apprenant a payé la formation et sa validation vous rémunère : c'est donc un administrateur qui confirme qu'il l'a terminée.",
+    "This is the quiz's last question and the course is published, so learners would have a quiz they can't pass. Add the new question first, or unpublish the course.": "C'est la dernière question du quiz et la formation est publiée : les apprenants auraient un quiz impossible à réussir. Ajoutez d'abord la nouvelle question, ou dépubliez la formation.",
+    "Choose approve or request changes.": "Choisissez d'approuver ou de demander des modifications.",
+    "Tell the learner what needs to change.": "Indiquez à l'apprenant ce qui doit être modifié.",
+    "Questions can only be added to a quiz lesson.": "Les questions ne peuvent être ajoutées qu'à une leçon de type quiz.",
+    "A question needs at least two choices.": "Une question doit avoir au moins deux choix.",
+    "Mark at least one choice as correct.": "Indiquez au moins une bonne réponse.",
+    "Video files can be at most 500 MB.": "Les fichiers vidéo ne peuvent pas dépasser 500 Mo.",
+    "Upload a valid MP4, WebM, OGG or MOV video.": "Importez une vidéo MP4, WebM, OGG ou MOV valide.",
+    "The pass mark must be between 1 and 100.": "La note de réussite doit être comprise entre 1 et 100.",
+    "Cover images can be at most 10 MB.": "Les images de couverture ne peuvent pas dépasser 10 Mo.",
+    "Upload a JPEG, PNG or WebP image.": "Importez une image JPEG, PNG ou WebP.",
+    "No user found with that username, phone number or email.": "Aucun utilisateur ne correspond à ce nom d'utilisateur, ce numéro de téléphone ou cet e-mail.",
+    "Administrators can already create courses.": "Les administrateurs peuvent déjà créer des formations.",
+    "This certificate template doesn't exist.": "Ce modèle de certificat n'existe pas.",
+    # careers: the certificate designer (admins)
+    "Give the template a name.": "Donnez un nom au modèle.",
+    "Choose landscape or portrait.": "Choisissez paysage ou portrait.",
+    "Choose a file to upload.": "Choisissez un fichier à importer.",
+    "The layout must be a list of elements.": "La mise en page doit être une liste d'éléments.",
+    "Unknown element type.": "Type d'élément inconnu.",
+    "The file is too large (15 MB maximum).": "Le fichier est trop volumineux (15 Mo maximum).",
+    "This PDF could not be read. Export it again or upload it as a PNG or JPG image.": "Ce PDF n'a pas pu être lu. Exportez-le à nouveau ou importez-le en image PNG ou JPG.",
+    "Upload the blank certificate as a PDF, PNG or JPG file.": "Importez le certificat vierge au format PDF, PNG ou JPG.",
+    "Upload the logo as a PNG (ideally with a transparent background) or JPG image.": "Importez le logo en image PNG (idéalement sur fond transparent) ou JPG.",
+    "Upload the signature as a PNG (with a transparent background) or JPG image.": "Importez la signature en image PNG (sur fond transparent) ou JPG.",
+    "The signature is empty.": "La signature est vide.",
+    # careers: jobs
+    "You have already applied to this job posting.": "Vous avez déjà postulé à cette offre.",
+    "Only the job's poster can view its applications.": "Seul l'auteur de l'offre peut voir ses candidatures.",
+    "Only the job's poster can update an application's status.": "Seul l'auteur de l'offre peut modifier le statut d'une candidature.",
+    "That application was not found on this job posting.": "Cette candidature est introuvable pour cette offre.",
 }
+
+# Messages with a variable part (a status, a price, quiz titles, a limit): (pattern, French template). Groups are
+# re-inserted as they are, except the ones the template translates through _VALUE_FR.
+_VALUE_FR = {
+    # enrollment statuses (TrainingEnrollmentStatus labels, lower-cased)
+    "awaiting payment": "en attente de paiement", "enrolled": "active", "in progress": "en cours",
+    "completed": "terminée", "dropped": "abandonnée",
+    # actions on an enrollment (careers.services._require_status)
+    "start": "commencer", "complete": "terminer",
+    # what a discussion post is called (careers.course_discussions._clean)
+    "title": "titre", "question": "question", "reply": "réponse", "message": "message",
+}
+_FEMININE = {"question", "reply"}
+
+
+def _fr(value):
+    return _VALUE_FR.get(value, value)
+
+
+def _discussion_noun(label, definite=False):
+    noun = _fr(label)
+    if definite:
+        return ("La " if label in _FEMININE else "Le ") + noun
+    return ("une " if label in _FEMININE else "un ") + noun
+
+
+FRENCH_PATTERNS = [
+    (re.compile(r"Cannot make progress on an enrollment that is (.+)\."),
+     lambda m: f"Impossible d'avancer : cette inscription est {_fr(m[1])}."),
+    (re.compile(r"Cannot (start|complete) an enrollment that is (.+)\."),
+     lambda m: f"Impossible de {_fr(m[1])} : cette inscription est {_fr(m[2])}."),
+    (re.compile(r"This course costs (\d+) XAF\. Pay for it to enroll\."),
+     lambda m: f"Cette formation coûte {m[1]} XAF. Payez-la pour vous inscrire."),
+    (re.compile(r"Add at least one question to every quiz first\. Without questions: (.+)\."),
+     lambda m: f"Ajoutez d'abord au moins une question à chaque quiz. Sans question : {m[1]}."),
+    (re.compile(r"Write a (title|question|reply|message)\."),
+     lambda m: f"Écrivez {_discussion_noun(m[1])}."),
+    (re.compile(r"The (title|question|reply|message) must be (\d+) characters or fewer\."),
+     lambda m: f"{_discussion_noun(m[1], definite=True)} doit comporter {m[2]} caractères au maximum."),
+    (re.compile(r"The bio must be (\d+) characters or fewer\."),
+     lambda m: f"La biographie doit comporter {m[1]} caractères au maximum."),
+    (re.compile(r"'(.+)' must be a number\."), lambda m: f"« {m[1]} » doit être un nombre."),
+    (re.compile(r"'(.+)' is not a colour like #1B2A4A\."), lambda m: f"« {m[1]} » n'est pas une couleur au format #1B2A4A."),
+    (re.compile(r"A certificate can have at most (\d+) elements\."), lambda m: f"Un certificat peut contenir au maximum {m[1]} éléments."),
+    (re.compile(r"Unknown font '(.+)'\."), lambda m: f"Police inconnue : « {m[1]} »."),
+    (re.compile(r"Unknown alignment '(.+)'\."), lambda m: f"Alignement inconnu : « {m[1]} »."),
+]
 
 
 def _translate(value):
     if isinstance(value, str):
-        return FRENCH_ERRORS.get(value, value)
+        if value in FRENCH_ERRORS:
+            return FRENCH_ERRORS[value]
+        for pattern, french in FRENCH_PATTERNS:
+            match = pattern.fullmatch(value)
+            if match:
+                return french(match)
+        return value
     if isinstance(value, list):
         return [_translate(item) for item in value]
     if isinstance(value, dict):

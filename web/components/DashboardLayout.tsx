@@ -1,6 +1,8 @@
 "use client";
 import { ReactNode } from "react";
 import { Link } from "@/i18n/navigation";
+import SidebarFrame from "@/components/SidebarFrame";
+import NavIconImage, { NAV_ICON_BY_HREF } from "@/components/navIcons";
 import {
   IconDashboard,
   IconBuilding,
@@ -14,8 +16,6 @@ import {
   IconFileText,
   IconStar,
   IconUser,
-  IconChevronRight,
-  IconArrowUpRight,
 } from "@/components/Icons";
 
 export interface NavItem {
@@ -230,173 +230,124 @@ export default function DashboardLayout({
   const RoleIcon = roleConfig.roleIcon;
   const groupsToRender = navGroups || roleConfig.defaultGroups;
 
-  return (
-    <div className="min-h-screen bg-slate-50/70 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Top Header Bar */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
-          <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-200">
-                <RoleIcon size={12} className="text-amber-700" />
-                <span>{roleConfig.roleLabel}</span>
-              </span>
-              {badge && (
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-800">
-                  {badge}
-                </span>
-              )}
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-              {title}
-            </h1>
-            {subtitle && <p className="text-xs sm:text-sm text-slate-500 mt-1">{subtitle}</p>}
+  const sidebar = (
+    <div className="flex flex-col gap-4">
+      <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800/80 text-white relative overflow-hidden">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 flex items-center justify-center font-black shadow-md shadow-amber-500/25 shrink-0">
+            <RoleIcon size={20} />
           </div>
-
-          {action && <div className="self-start md:self-auto">{action}</div>}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black tracking-tight text-white truncate">{roleConfig.roleLabel}</p>
+            <p className="text-xs text-slate-400 truncate mt-0.5">Verified Workspace</p>
+          </div>
         </div>
+      </div>
 
-        {/* Mobile Horizontal Switcher Bar */}
-        <div className="lg:hidden mb-6 overflow-x-auto pb-2 scrollbar-none flex gap-2">
+      <nav className="flex flex-col gap-4">
+        {groupsToRender.map((group) => (
+          <div key={group.title} className="space-y-1">
+            <div className="px-3 py-1">
+              <span className="text-xs font-extrabold uppercase tracking-widest text-slate-500">{group.title}</span>
+            </div>
+            <div className="space-y-1">
+              {group.items.map((item) => {
+                const Icon = item.icon || IconDashboard;
+                const iconSrc = NAV_ICON_BY_HREF[item.href];
+                const isActive = activeHref === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`group relative w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl text-sm font-bold transition-all duration-150 text-left ${
+                      isActive
+                        ? "bg-slate-850 text-white border border-slate-700/70 shadow-lg shadow-black/30"
+                        : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
+                    }`}
+                  >
+                    {isActive && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-amber-400" />}
+                    <div
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                        isActive
+                          ? "bg-amber-400/15 text-amber-300"
+                          : "bg-slate-900 text-slate-400 group-hover:bg-slate-800 group-hover:text-slate-200"
+                      }`}
+                    >
+                      {iconSrc ? <NavIconImage src={iconSrc} size={32} /> : <Icon size={32} />}
+                    </div>
+                    <span className="flex-1 truncate tracking-tight">{item.label}</span>
+                    {item.badge !== undefined && (
+                      <span
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${
+                          isActive
+                            ? "bg-amber-400 text-slate-950"
+                            : item.isUrgent
+                            ? "bg-rose-950/80 text-rose-300 border border-rose-800/80"
+                            : "bg-amber-950/80 text-amber-300 border border-amber-800/80"
+                        }`}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      <div className="pt-2 border-t border-slate-800 flex flex-col gap-2">
+        <div className="px-3 pt-1">
+          <span className="text-xs font-extrabold uppercase tracking-widest text-slate-500">Switch Persona Hub</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1 px-1">
           {ALL_ROLES_SHORTCUTS.map((item) => {
-            const isCurrentRole = item.role === currentRole;
             const Icon = item.icon;
+            const isCurrentRole = item.role === currentRole;
             return (
               <Link
                 key={item.role}
                 href={item.href}
-                className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 border ${
-                  isCurrentRole
-                    ? "bg-slate-950 text-white border-slate-900 shadow-sm"
-                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                className={`flex items-center gap-1.5 text-xs font-bold px-2 py-1.5 rounded-lg transition-colors truncate ${
+                  isCurrentRole ? "bg-amber-400/15 text-amber-300" : "text-slate-400 hover:text-white hover:bg-slate-900"
                 }`}
               >
-                <Icon size={13} className={isCurrentRole ? "text-amber-400" : "text-slate-400"} />
-                <span>{item.label}</span>
+                <Icon size={13} className="shrink-0" />
+                <span className="truncate">{item.label}</span>
               </Link>
             );
           })}
         </div>
-
-        {/* Layout Grid: Dark Professional Sidebar + Main Area */}
-        <div className="lg:flex lg:gap-8 lg:items-start">
-          {/* Dark Sidebar */}
-          <aside className="hidden lg:block w-72 xl:w-80 shrink-0 sticky top-24 self-start">
-            <div className="bg-slate-950 border border-slate-800/90 rounded-3xl p-3.5 shadow-2xl shadow-slate-950/60 flex flex-col gap-4 text-slate-300">
-              {/* Identity Card */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800/80 text-white relative overflow-hidden">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 flex items-center justify-center font-black shadow-md shadow-amber-500/25 shrink-0">
-                    <RoleIcon size={20} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-black tracking-tight text-white truncate">
-                      {roleConfig.roleLabel}
-                    </p>
-                    <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                      Verified Workspace
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Navigation Groups */}
-              <nav className="flex flex-col gap-4">
-                {groupsToRender.map((group) => (
-                  <div key={group.title} className="space-y-1">
-                    <div className="px-3 py-1">
-                      <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">
-                        {group.title}
-                      </span>
-                    </div>
-                    <div className="space-y-1">
-                      {group.items.map((item) => {
-                        const Icon = item.icon || IconDashboard;
-                        const isActive = activeHref === item.href;
-                        return (
-                          <Link
-                            key={item.href}
-                            href={item.href}
-                            className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-bold transition-all duration-150 text-left ${
-                              isActive
-                                ? "bg-slate-850 text-white border border-slate-700/70 shadow-lg shadow-black/30"
-                                : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
-                            }`}
-                          >
-                            {isActive && (
-                              <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-amber-400" />
-                            )}
-                            <div
-                              className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                                isActive
-                                  ? "bg-amber-400/15 text-amber-300"
-                                  : "bg-slate-900 text-slate-400 group-hover:bg-slate-800 group-hover:text-slate-200"
-                              }`}
-                            >
-                              <Icon size={16} />
-                            </div>
-                            <span className="flex-1 truncate tracking-tight">{item.label}</span>
-                            {item.badge !== undefined && (
-                              <span
-                                className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${
-                                  isActive
-                                    ? "bg-amber-400 text-slate-950"
-                                    : item.isUrgent
-                                    ? "bg-rose-950/80 text-rose-300 border border-rose-800/80"
-                                    : "bg-amber-950/80 text-amber-300 border border-amber-800/80"
-                                }`}
-                              >
-                                {item.badge}
-                              </span>
-                            )}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </nav>
-
-              {/* Hub Switching & Account shortcuts */}
-              <div className="pt-2 border-t border-slate-850 flex flex-col gap-2">
-                <div className="px-3 pt-1">
-                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500">
-                    Switch Persona Hub
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-1 px-1">
-                  {ALL_ROLES_SHORTCUTS.map((item) => (
-                    <Link
-                      key={item.role}
-                      href={item.href}
-                      className={`text-[11px] font-bold px-2 py-1.5 rounded-lg transition-colors truncate ${
-                        item.role === currentRole
-                          ? "bg-amber-400/15 text-amber-300"
-                          : "text-slate-400 hover:text-white hover:bg-slate-900"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </div>
-
-                <div className="pt-2 border-t border-slate-850/80 flex items-center justify-between px-2 text-[11px]">
-                  <Link href="/account" className="text-slate-400 hover:text-white font-bold">
-                    My Account
-                  </Link>
-                  <Link href="/" className="text-slate-400 hover:text-white font-bold flex items-center gap-1">
-                    <span>Portal Home</span>
-                    <IconArrowUpRight size={12} />
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          {/* Main Content Area */}
-          <div className="flex-1 min-w-0">{children}</div>
-        </div>
       </div>
     </div>
+  );
+
+  return (
+    <SidebarFrame sidebar={sidebar}>
+      <div className="py-6 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+            <div>
+              <div className="flex items-center gap-2.5 mb-1">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-200">
+                  <RoleIcon size={12} className="text-amber-700" />
+                  <span>{roleConfig.roleLabel}</span>
+                </span>
+                {badge && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-800">{badge}</span>
+                )}
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">{title}</h1>
+              {subtitle && <p className="text-xs sm:text-sm text-slate-500 mt-1">{subtitle}</p>}
+            </div>
+
+            {action && <div className="self-start md:self-auto">{action}</div>}
+          </div>
+
+          {children}
+        </div>
+      </div>
+    </SidebarFrame>
   );
 }

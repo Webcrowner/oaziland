@@ -29,6 +29,7 @@ def _fee_category_for_booking_type(booking_type: str):
     from monetization.models import TransactionCategory
     return {
         BookingType.SERVICE_REQUEST: TransactionCategory.SERVICE_PAYMENT,
+        BookingType.TRAINING: TransactionCategory.SERVICE_PAYMENT,
         BookingType.MARKETPLACE_ITEM: TransactionCategory.MARKETPLACE_SALE,
         BookingType.RIDE: TransactionCategory.RIDE_FARE,
     }.get(booking_type, TransactionCategory.PROPERTY_BOOKING)
@@ -278,17 +279,22 @@ def cancel_booking(*, lock_client, booking: Booking):
     return booking
 
 
-def resolve_target_owner(booking: Booking):
-    """Generic bookings (e.g. guest houses, direct property rentals, services, rides)
-    settle through the shared /api/bookings/ endpoint or vertical actions —
-    this resolves 'who gets paid' (payee user) across all target types."""
+def resolve_target(booking: Booking):
+    """The Listing/RoomType/VenueSpace/... a booking points at, or None if it no longer exists."""
     from django.apps import apps
     try:
         app_label, model_name = booking.target_content_type.split(".")
         model = apps.get_model(app_label, model_name)
-        target = model.objects.filter(pk=booking.target_id).first()
+        return model.objects.filter(pk=booking.target_id).first()
     except (LookupError, ValueError):
         return None
+
+
+def resolve_target_owner(booking: Booking):
+    """Generic bookings (e.g. guest houses, direct property rentals, services, rides)
+    settle through the shared /api/bookings/ endpoint or vertical actions —
+    this resolves 'who gets paid' (payee user) across all target types."""
+    target = resolve_target(booking)
     if target is None:
         return None
     if hasattr(target, "lister_user"):

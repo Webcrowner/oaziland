@@ -3,12 +3,14 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter, usePathname } from "@/i18n/navigation";
 import { TRAINING_CATEGORIES } from "@/lib/trainingCategories";
+import { TRAINING_ORDERINGS } from "@/lib/api";
 
 export interface TrainingFilterValues {
   q: string;
   category: string;
   free: boolean;
   certificate: boolean;
+  ordering: string;
 }
 
 /** Filters live in the URL (so results stay server-rendered, shareable
@@ -26,11 +28,12 @@ export default function TrainingFilters({ initial }: { initial: TrainingFilterVa
     if (values.category) params.set("category", values.category);
     if (values.free) params.set("free", "true");
     if (values.certificate) params.set("certificate", "true");
+    if (values.ordering) params.set("ordering", values.ordering);
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
   }
 
-  const hasFilters = Boolean(initial.q || initial.category || initial.free || initial.certificate);
+  const hasFilters = Boolean(initial.q || initial.category || initial.free || initial.certificate || initial.ordering);
 
   return (
     <form
@@ -74,6 +77,17 @@ export default function TrainingFilters({ initial }: { initial: TrainingFilterVa
         <label className="flex cursor-pointer items-center gap-2">
           <input type="checkbox" checked={initial.certificate} onChange={(e) => apply({ certificate: e.target.checked })} className="h-4 w-4 accent-[var(--navy)]" />
           {t("certificateOnly")}
+        </label>
+        <label className="ml-auto flex items-center gap-2">
+          <span className="text-slate-500">{t("sortBy")}</span>
+          <select
+            value={initial.ordering}
+            onChange={(e) => apply({ ordering: e.target.value })}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          >
+            <option value="">{t("sort_title")}</option>
+            {TRAINING_ORDERINGS.map((ordering) => <option key={ordering} value={ordering}>{t(`sort_${ordering}`)}</option>)}
+          </select>
         </label>
         {hasFilters && (
           <button type="button" onClick={() => router.push(pathname)} className="text-[var(--navy)] underline">

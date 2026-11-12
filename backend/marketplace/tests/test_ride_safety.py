@@ -186,11 +186,11 @@ def test_a_driver_can_only_be_rated_after_a_completed_ride_with_them():
 
 
 @pytest.mark.django_db
-def test_people_who_are_not_drivers_can_still_be_rated_by_anyone():
+def test_people_who_are_not_drivers_cannot_be_rated_by_strangers_either():
     agent = User.objects.create(username="rs_agent10", phone="+237699300101")
     anyone = _verify(User.objects.create(username="rs_anyone10", phone="+237699300102"))
     response = _auth_client(anyone).post("/api/ratings/", {"subject_user": str(agent.id), "score": 4}, format="json")
-    assert response.status_code == 201
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db

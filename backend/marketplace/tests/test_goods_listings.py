@@ -9,7 +9,7 @@ from marketplace.tests.test_marketplace_api import _verify, _auth_client, quarte
 
 def _post(client, quarter, **extra):
     payload = {"title": "Samsung Galaxy A54", "price_xaf": "150000", "quarter": str(quarter.id), "item_category": "PHONES", "condition": "NEW", **extra}
-    return client.post("/api/goods/", payload)
+    return client.post("/api/goods/", payload, format="json")
 
 
 @pytest.fixture

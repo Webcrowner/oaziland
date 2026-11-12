@@ -822,36 +822,93 @@ class AlreadyReviewedError(Exception):
     pass
 
 
+def _booking_counterparties(booking) -> set:
+    """Everyone on the other side of a booking from its requester: whoever gets paid, plus the agent who
+    listed the property when it's a property listing."""
+    from transactions.services import resolve_target, resolve_target_owner
+
+    parties = {getattr(resolve_target_owner(booking), "pk", None)}
+    target = resolve_target(booking) if booking.target_content_type == "property.Listing" else None
+    if target is not None:
+        parties.add(target.listed_by_id)
+    parties.discard(None)
+    return parties
+
+
+def _completed_booking_with(requester, counterparty) -> bool:
+    from transactions.models import Booking, BookingStatus
+
+    bookings = Booking.objects.filter(requester=requester, status=BookingStatus.COMPLETED)
+    return any(counterparty.pk in _booking_counterparties(booking) for booking in bookings.iterator())
+
+
 def _author_may_rate(author, subject_user) -> bool:
-    """Drivers and passengers can only rate each other after completing a ride together, and marketplace sellers and
-    buyers can only rate each other after completing an order together. Other people (agents, landlords, owners) stay
-    open to any signed-in user."""
-    if subject_user is None:
-        return True
+    """A person can only be rated by someone who has actually done business with them: a completed ride,
+    marketplace purchase or rental, technician job, property/hotel/guest-house/venue booking, or hostel stay —
+    in either direction, so both sides of the deal can rate each other."""
     from django.db.models import Q
-    from marketplace.models import RideBooking, RideStatus, MarketplaceListingBase, MarketplaceOrder, MarketplaceOrderStatus
+    from marketplace.models import RideBooking, RideStatus, MarketplaceOrder, MarketplaceOrderStatus
     from services.models import ServiceRequest, ServiceRequestStatus
+    from student_hostels.models import RoomAllocation, RoomAllocationStatus
 
-    completed_rides = RideBooking.objects.filter(status=RideStatus.COMPLETED)
-    if completed_rides.filter(Q(driver=author, rider=subject_user) | Q(driver=subject_user, rider=author)).exists():
+    if RideBooking.objects.filter(status=RideStatus.COMPLETED).filter(
+        Q(driver=author, rider=subject_user) | Q(driver=subject_user, rider=author)
+    ).exists():
         return True
-
-    completed_orders = MarketplaceOrder.objects.filter(status=MarketplaceOrderStatus.COMPLETED)
-    if completed_orders.filter(
+    if MarketplaceOrder.objects.filter(status=MarketplaceOrderStatus.COMPLETED).filter(
         Q(buyer=author, listing__lister_user=subject_user) | Q(buyer=subject_user, listing__lister_user=author)
     ).exists():
         return True
-
-    if ServiceRequest.objects.filter(
-        status=ServiceRequestStatus.COMPLETED, requester=author, technician=subject_user
+    if ServiceRequest.objects.filter(status=ServiceRequestStatus.COMPLETED).filter(
+        Q(requester=author, technician=subject_user) | Q(requester=subject_user, technician=author)
     ).exists():
         return True
+    if RoomAllocation.objects.filter(status__in=[RoomAllocationStatus.ACTIVE, RoomAllocationStatus.ENDED]).filter(
+        Q(student=author, unit__building__owner=subject_user) | Q(student=subject_user, unit__building__owner=author)
+    ).exists():
+        return True
+    return _completed_booking_with(author, subject_user) or _completed_booking_with(subject_user, author)
 
-    if hasattr(subject_user, "driver_profile") or RideBooking.objects.filter(rider=subject_user).exists():
-        return False
-    if MarketplaceListingBase.objects.filter(lister_user=subject_user).exists() or MarketplaceOrder.objects.filter(buyer=subject_user).exists():
-        return False
-    return True
+
+def _author_may_rate_property(author, property_id) -> bool:
+    """A property can only be rated by someone who completed a booking of it (or of a listing/room/space in it),
+    or who has had a hostel room in it."""
+    from transactions.models import Booking, BookingStatus
+    from transactions.services import resolve_target
+    from student_hostels.models import RoomAllocation, RoomAllocationStatus
+
+    property_id = str(property_id)
+    if RoomAllocation.objects.filter(
+        student=author, unit__building_id=property_id,
+        status__in=[RoomAllocationStatus.ACTIVE, RoomAllocationStatus.ENDED],
+    ).exists():
+        return True
+    for booking in Booking.objects.filter(requester=author, status=BookingStatus.COMPLETED).iterator():
+        if str(booking.target_id) == property_id:
+            return True
+        target = resolve_target(booking)
+        related = {getattr(target, field, None) for field in ("property_asset_id", "unit_id", "building_id", "hotel_id", "venue_id")}
+        if property_id in {str(value) for value in related if value is not None}:
+            return True
+    return False
+
+
+RATING_NOT_EARNED_MESSAGE = (
+    "You can only rate someone after completing a purchase, rental, booking, ride or job with them."
+)
+PROPERTY_RATING_NOT_EARNED_MESSAGE = "You can only rate a property after completing a booking or stay there."
+
+
+def why_cannot_rate(*, author, subject_user=None, subject_property_id=None) -> str | None:
+    """None when author may rate the subject now, else the reason they can't."""
+    if subject_user is not None:
+        if subject_user.pk == author.pk:
+            return "You cannot rate yourself."
+        if not _author_may_rate(author, subject_user):
+            return RATING_NOT_EARNED_MESSAGE
+    if subject_property_id is not None and not _author_may_rate_property(author, subject_property_id):
+        return PROPERTY_RATING_NOT_EARNED_MESSAGE
+    return None
 
 
 def create_or_update_rating(*, author, score, subject_user=None, subject_property_id=None):
@@ -864,8 +921,10 @@ def create_or_update_rating(*, author, score, subject_user=None, subject_propert
     (unlike re-applying to the same job)."""
     if subject_user is not None and subject_user.id == author.id:
         raise CannotRateSelfError("You cannot rate yourself.")
-    if not _author_may_rate(author, subject_user):
-        raise RatingNotEarnedError("You can only rate this person after completing a ride or order with them.")
+    if subject_user is not None and not _author_may_rate(author, subject_user):
+        raise RatingNotEarnedError(RATING_NOT_EARNED_MESSAGE)
+    if subject_property_id is not None and not _author_may_rate_property(author, subject_property_id):
+        raise RatingNotEarnedError(PROPERTY_RATING_NOT_EARNED_MESSAGE)
 
     from .models import Rating
     rating, _ = Rating.objects.update_or_create(

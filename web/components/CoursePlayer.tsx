@@ -1,6 +1,6 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
   getMyEnrollments, getCourseOutline, completeCourseLesson, submitCourseQuiz, submitCourseAssignment, openMySubmission,
@@ -8,22 +8,51 @@ import {
 } from "@/lib/api";
 
 import LessonVideo from "@/components/LessonVideo";
+import CourseDiscussions from "@/components/CourseDiscussions";
+import { loginHref } from "@/lib/authRedirect";
 
 export default function CoursePlayer({ programId }: { programId: string }) {
   const t = useTranslations("CoursePlayer");
-  const [state, setState] = useState<"loading" | "signin" | "notenrolled" | "error" | "ready">("loading");
+  const locale = useLocale();
+  const [state, setState] = useState<"loading" | "signin" | "notenrolled" | "unpaid" | "error" | "ready">("loading");
   const [enrollment, setEnrollment] = useState<TrainingEnrollmentItem | null>(null);
   const [outline, setOutline] = useState<CourseOutline | null>(null);
   const [lessonId, setLessonId] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [result, setResult] = useState<QuizResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState("");
   const [pdf, setPdf] = useState<File | null>(null);
   const [pdfError, setPdfError] = useState("");
+  const [quizError, setQuizError] = useState("");
+  const articleRef = useRef<HTMLElement>(null);
+  const completedRef = useRef<HTMLDivElement>(null);
+  const lastStatus = useRef<string | null>(null);
+
+  /** The server's own explanation (e.g. "This assignment has already been approved."); a plain message when the
+   * connection failed or the server gave no reason. */
+  const friendlyError = useCallback((err: unknown) => {
+    if (err instanceof TypeError) return t("connectionFailed"); // fetch() couldn't reach the server
+    const message = err instanceof Error ? err.message : "";
+    return !message || /^(Request failed|Could not open the file) \(\d+\)$/.test(message) ? t("actionFailed") : message;
+  }, [t]);
 
   const lessons = useMemo(() => outline?.modules.flatMap((m) => m.lessons) ?? [], [outline]);
   const lesson: CourseOutlineLesson | undefined = lessons.find((l) => l.id === lessonId) ?? lessons[0];
+
+  // Finishing the last lesson completes the course: bring the congratulations (and certificate) into view, since the
+  // learner is usually at the bottom of the lesson. Opening an already-finished course doesn't scroll.
+  const status = outline?.status ?? null;
+  useEffect(() => {
+    const previous = lastStatus.current;
+    lastStatus.current = status;
+    if (previous && previous !== "COMPLETED" && status === "COMPLETED") {
+      window.requestAnimationFrame(() => {
+        completedRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        completedRef.current?.focus({ preventScroll: true });
+      });
+    }
+  }, [status]);
 
   const refresh = useCallback(async (enrollmentId: string, token: string, pickFirstOpen = false) => {
     const data = await getCourseOutline(enrollmentId, token);
@@ -45,6 +74,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
       .then(async (data) => {
         const mine = data.results.find((e) => e.program === programId && e.status !== "DROPPED");
         if (!mine) return setState("notenrolled");
+        if (mine.status === "PAYMENT_PENDING") return setState("unpaid");
         setEnrollment(mine);
         await refresh(mine.id, token, true);
         setState("ready");
@@ -52,13 +82,16 @@ export default function CoursePlayer({ programId }: { programId: string }) {
       .catch(() => setState("error"));
   }, [programId, refresh]);
 
-  function select(id: string) {
+  function select(id: string, scroll = false) {
     setLessonId(id);
     setAnswers({});
     setResult(null);
-    setError(false);
+    setError("");
     setPdf(null);
     setPdfError("");
+    setQuizError("");
+    // From the Previous/Next buttons at the bottom: bring the new lesson's title into view.
+    if (scroll) window.requestAnimationFrame(() => articleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
   async function submitAssignment() {
@@ -72,7 +105,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
       setPdf(null);
       await refresh(enrollment.id, token);
     } catch (err) {
-      setPdfError(err instanceof Error ? err.message : t("actionFailed"));
+      setPdfError(friendlyError(err));
     } finally {
       setBusy(false);
     }
@@ -83,8 +116,8 @@ export default function CoursePlayer({ programId }: { programId: string }) {
     if (!token || !enrollment || !lesson) return;
     try {
       await openMySubmission(enrollment.id, lesson.id, token);
-    } catch {
-      setError(true);
+    } catch (err) {
+      setError(friendlyError(err));
     }
   }
 
@@ -92,15 +125,15 @@ export default function CoursePlayer({ programId }: { programId: string }) {
     const token = localStorage.getItem("access_token");
     if (!token || !enrollment || !lesson) return;
     setBusy(true);
-    setError(false);
+    setError("");
     try {
       await completeCourseLesson(enrollment.id, lesson.id, token);
       const data = await refresh(enrollment.id, token);
       const all = data.modules.flatMap((m) => m.lessons);
       const next = all[all.findIndex((l) => l.id === lesson.id) + 1];
-      if (advance && next) select(next.id);
-    } catch {
-      setError(true);
+      if (advance && next && data.status !== "COMPLETED") select(next.id, true);
+    } catch (err) {
+      setError(friendlyError(err));
     } finally {
       setBusy(false);
     }
@@ -111,19 +144,25 @@ export default function CoursePlayer({ programId }: { programId: string }) {
     if (lesson && !lesson.completed && !busy && !finished) void markComplete(false);
   }
 
-  const nextLesson = lesson ? lessons[lessons.findIndex((l) => l.id === lesson.id) + 1] : undefined;
+  const lessonIndex = lesson ? lessons.findIndex((l) => l.id === lesson.id) : -1;
+  const nextLesson = lessonIndex >= 0 ? lessons[lessonIndex + 1] : undefined;
+  const previousLesson = lessonIndex > 0 ? lessons[lessonIndex - 1] : undefined;
+  // Next is the main action once this lesson is done (or, for an assignment, handed in and waiting for review).
+  const lessonDone = Boolean(lesson?.completed || (lesson?.kind === "ASSIGNMENT" && lesson.submission));
 
   async function submitQuiz() {
     const token = localStorage.getItem("access_token");
     if (!token || !enrollment || !lesson) return;
     setBusy(true);
-    setError(false);
+    setError("");
+    setQuizError("");
     try {
       setResult(await submitCourseQuiz(enrollment.id, lesson.id, answers, token));
-      await refresh(enrollment.id, token);
-    } catch {
-      setError(true);
+    } catch (err) {
+      // e.g. out of attempts: the server explains, and the refreshed outline shows when the quiz reopens.
+      setQuizError(friendlyError(err));
     } finally {
+      await refresh(enrollment.id, token).catch(() => undefined);
       setBusy(false);
     }
   }
@@ -137,13 +176,22 @@ export default function CoursePlayer({ programId }: { programId: string }) {
   }
 
   if (state === "loading") return <p className="py-16 text-center text-slate-500">{t("loading")}</p>;
-  if (state === "signin") return <p className="py-16 text-center text-slate-700">{t("signIn")}</p>;
-  if (state === "error") return <p role="alert" className="py-16 text-center text-red-600">{t("loadFailed")}</p>;
-  if (state === "notenrolled") {
+  if (state === "signin") {
     return (
       <div className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <p className="mb-4 text-slate-700">{t("notEnrolled")}</p>
-        <Link href="/trainings" className="inline-block rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#25396a]">{t("goToCatalog")}</Link>
+        <p className="mb-4 text-slate-700">{t("signIn")}</p>
+        <Link href={loginHref(`/trainings/${programId}/learn`)} className="inline-block rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#25396a]">
+          {t("signInButton")}
+        </Link>
+      </div>
+    );
+  }
+  if (state === "error") return <p role="alert" className="py-16 text-center text-red-600">{t("loadFailed")}</p>;
+  if (state === "notenrolled" || state === "unpaid") {
+    return (
+      <div className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <p className="mb-4 text-slate-700">{state === "unpaid" ? t("notPaid") : t("notEnrolled")}</p>
+        <Link href={`/trainings/${programId}`} className="inline-block rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#25396a]">{t("goToCoursePage")}</Link>
       </div>
     );
   }
@@ -151,13 +199,28 @@ export default function CoursePlayer({ programId }: { programId: string }) {
 
   const finished = outline.status === "COMPLETED";
   const quizReady = lesson?.questions?.length && lesson.questions.every((q) => (answers[q.id] ?? []).length > 0);
+  // A passed quiz shows the learner's passing attempt with the answers; otherwise the latest graded attempt (if any).
+  const review = lesson?.kind === "QUIZ" && !result ? lesson.review ?? null : null;
+  const graded = result ?? review;
+  const shownAnswers = review ? review.answers : answers;
+  const attemptsLeft = lesson?.attempts_left ?? 0;
+  const retryAt = lesson?.retry_at ? new Date(lesson.retry_at).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) : "";
   const videoLink = lesson?.kind === "VIDEO" ? lesson.video_file_url || lesson.video_url : "";
 
   return (
     <div>
-      <section className="hero-gradient mb-6 overflow-hidden rounded-2xl p-6 text-white md:p-8">
-        <Link href="/trainings" className="text-sm font-medium text-amber-300 hover:underline">{t("back")}</Link>
+      <section className="hero-gradient relative mb-6 overflow-hidden rounded-2xl p-6 text-white md:p-8">
+        {enrollment?.program_detail?.cover_image_url && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element -- uploads from arbitrary storage hosts */}
+            <img src={enrollment.program_detail.cover_image_url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+            <span className="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-950/75 to-slate-950/40" aria-hidden />
+          </>
+        )}
+        <div className="relative">
+        <Link href="/my-learning" className="text-sm font-medium text-amber-300 hover:underline">{t("back")}</Link>
         <h1 className="mt-3 font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight md:text-3xl">{outline.program.title}</h1>
+        {outline.progress.total > 0 && (
         <div className="mt-5 max-w-xl">
           <div className="mb-1.5 flex items-baseline justify-between text-xs text-slate-300">
             <span>{t("progress", { done: outline.progress.done, total: outline.progress.total })}</span>
@@ -167,17 +230,43 @@ export default function CoursePlayer({ programId }: { programId: string }) {
             <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500" style={{ width: `${outline.progress.percent}%` }} />
           </div>
         </div>
+        )}
+        </div>
       </section>
 
       {finished && (
-        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-900">
+        <div ref={completedRef} tabIndex={-1} role="status" className="mb-6 scroll-mt-24 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-900 outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
           <p className="font-bold">{t("courseCompleted")}</p>
-          {outline.certificate_issued_at && <p className="mt-1 text-sm">🏅 {t("certificateIssued")}</p>}
+          {outline.certificate_code ? (
+            <Link href={`/certificates/${outline.certificate_code}`} className="mt-2 inline-block rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white hover:bg-amber-600">
+              🏅 {t("viewCertificate")}
+            </Link>
+          ) : (
+            outline.certificate_issued_at && <p className="mt-1 text-sm">🏅 {t("certificateIssued")}</p>
+          )}
+          <Link href={`/trainings/${programId}#reviews`} className="ml-3 mt-2 inline-block text-sm font-semibold text-emerald-900 underline">★ {t("rateCourse")}</Link>
         </div>
       )}
 
       {lessons.length === 0 ? (
-        <p className="text-slate-600">{t("noLessons")}</p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          {enrollment?.program_detail?.description && (
+            <p className="whitespace-pre-line text-slate-700">{enrollment.program_detail.description}</p>
+          )}
+          <ul className="mt-4 space-y-1.5 text-sm text-slate-600">
+            {enrollment?.program_detail?.provider_name && <li>👤 {t("trainer", { name: enrollment.program_detail.provider_name })}</li>}
+            {enrollment?.program_detail?.starts_at && (
+              <li>📅 {new Date(enrollment.program_detail.starts_at).toLocaleString(locale, { dateStyle: "full", timeStyle: "short" })}</li>
+            )}
+            {enrollment?.program_detail?.location && <li>📍 {enrollment.program_detail.location}</li>}
+          </ul>
+          {!finished && (
+            <p className="mt-5 rounded-xl bg-sky-50 p-4 text-sm text-sky-900">
+              {t("trainerConfirms")}
+              {enrollment?.program_detail?.issues_certification && ` ${t("certificateAfterConfirmation")}`}
+            </p>
+          )}
+        </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-[19rem_1fr]">
           <nav className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm md:sticky md:top-4 md:max-h-[calc(100vh-2rem)] md:self-start md:overflow-y-auto">
@@ -212,7 +301,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
           </nav>
 
           {lesson && (
-            <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+            <article ref={articleRef} className="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
               <p className="text-xs font-bold uppercase tracking-wider text-amber-700">{t(`kind${lesson.kind}`)}</p>
               <h2 className="mb-5 mt-1 font-[family-name:var(--font-display)] text-2xl font-bold text-slate-900">{lesson.title}</h2>
 
@@ -240,61 +329,88 @@ export default function CoursePlayer({ programId }: { programId: string }) {
                 </>
               )}
 
-              {lesson.kind === "QUIZ" && (
+              {lesson.kind === "QUIZ" && !lesson.questions?.length && (
+                <p role="status" className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">⏳ {t("quizBeingPrepared")}</p>
+              )}
+
+              {lesson.kind === "QUIZ" && !!lesson.questions?.length && (
                 <div>
                   <p className="mb-5 inline-block rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">
                     {t("passMark", { mark: lesson.pass_mark_percent ?? 0 })}
                     {lesson.best_score_percent != null && ` · ${t("bestScore", { score: lesson.best_score_percent })}`}
+                    {!lesson.review && ` · ${t("attemptsRule", { count: lesson.attempts_per_window ?? 3 })}`}
                   </p>
+                  {review && (
+                    <div role="status" className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                      <p className="text-lg font-bold">{t("score", { score: review.score_percent })}</p>
+                      <p>{t("quizReview")}</p>
+                    </div>
+                  )}
                   {result && (
                     <div role="status" className={`mb-5 rounded-xl border p-4 text-sm ${result.passed ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
                       <p className="text-lg font-bold">{t("score", { score: result.score_percent })}</p>
-                      <p>{result.passed ? t("passed") : t("failed")}</p>
+                      <p>{result.passed ? t("passed") : t("failedHidden")}</p>
+                      {!result.passed && (
+                        <p className="mt-1 font-semibold">
+                          {result.attempts_left > 0
+                            ? t("attemptsLeft", { count: result.attempts_left })
+                            : t("noAttemptsLeft", { date: retryAt })}
+                        </p>
+                      )}
                     </div>
+                  )}
+                  {!result && !review && attemptsLeft === 0 && retryAt && (
+                    <p role="status" className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+                      ⏳ {t("noAttemptsLeft", { date: retryAt })}
+                    </p>
                   )}
                   <ol className="space-y-6">
                     {(lesson.questions ?? []).map((q, index) => {
-                      const graded = result?.results.find((r) => r.question === q.id);
+                      const gradedQuestion = graded?.results.find((r) => r.question === q.id);
                       return (
                         <li key={q.id} className="rounded-xl border border-slate-200 p-4">
-                          <fieldset disabled={!!result}>
+                          <fieldset disabled={!!graded || attemptsLeft === 0}>
                             <legend className="mb-1 font-semibold text-slate-900">{index + 1}. {q.text}</legend>
                             <p className="mb-3 text-xs text-slate-500">{q.multiple ? t("chooseAll") : t("chooseOne")}</p>
                             {q.choices.map((c) => {
-                              const checked = (answers[q.id] ?? []).includes(c.id);
-                              const isRight = graded?.correct_choices.includes(c.id);
+                              const checked = (shownAnswers[q.id] ?? []).includes(c.id);
+                              const isRight = gradedQuestion?.correct_choices?.includes(c.id);
+                              const revealed = Boolean(gradedQuestion?.correct_choices);
                               return (
-                                <label key={c.id} className={`mb-2 flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition ${graded ? (isRight ? "border-emerald-300 bg-emerald-50" : checked ? "border-red-300 bg-red-50" : "border-slate-200") : checked ? "border-[var(--navy)] bg-[var(--navy)]/[0.05]" : "border-slate-200 hover:bg-slate-50"}`}>
+                                <label key={c.id} className={`mb-2 flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition ${revealed ? (isRight ? "border-emerald-300 bg-emerald-50" : checked ? "border-red-300 bg-red-50" : "border-slate-200") : checked ? "border-[var(--navy)] bg-[var(--navy)]/[0.05]" : "border-slate-200 hover:bg-slate-50"}`}>
                                   <input type={q.multiple ? "checkbox" : "radio"} name={q.id} checked={checked} onChange={() => toggle(q.id, c.id, q.multiple)} className="h-4 w-4 accent-[var(--navy)]" />
                                   {c.text}
                                 </label>
                               );
                             })}
                           </fieldset>
-                          {graded && (
-                            <p className={`mt-2 text-sm ${graded.correct ? "text-emerald-700" : "text-red-600"}`}>
-                              {graded.correct ? `✓ ${t("correct")}` : `✗ ${t("incorrect")}`}
-                              {graded.explanation && <span className="text-slate-700"> — {graded.explanation}</span>}
+                          {gradedQuestion && (
+                            <p className={`mt-2 text-sm ${gradedQuestion.correct ? "text-emerald-700" : "text-red-600"}`}>
+                              {gradedQuestion.correct ? `✓ ${t("correct")}` : `✗ ${t("incorrect")}`}
+                              {gradedQuestion.explanation && <span className="text-slate-700"> — {gradedQuestion.explanation}</span>}
                             </p>
                           )}
                         </li>
                       );
                     })}
                   </ol>
-                  <div className="mt-6 flex items-center gap-3">
+                  <div className="mt-6 flex flex-wrap items-center gap-3">
                     {result ? (
-                      !result.passed && (
+                      !result.passed && result.attempts_left > 0 && (
                         <button onClick={() => { setResult(null); setAnswers({}); }} className="rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#25396a]">
                           {t("tryAgain")}
                         </button>
                       )
                     ) : (
-                      <button onClick={submitQuiz} disabled={busy || !quizReady} className="rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#25396a] disabled:opacity-50">
-                        {t("submitQuiz")}
-                      </button>
+                      !review && attemptsLeft > 0 && (
+                        <button onClick={submitQuiz} disabled={busy || !quizReady} className="rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#25396a] disabled:opacity-50">
+                          {t("submitQuiz")}
+                        </button>
+                      )
                     )}
-                    {!result && !quizReady && <span className="text-xs text-slate-500">{t("answerAll")}</span>}
+                    {!graded && attemptsLeft > 0 && !quizReady && <span className="text-xs text-slate-500">{t("answerAll")}</span>}
                   </div>
+                  {quizError && <p role="alert" className="mt-3 text-sm text-red-600">{quizError}</p>}
                 </div>
               )}
 
@@ -329,14 +445,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
               {lesson.kind !== "QUIZ" && lesson.kind !== "ASSIGNMENT" && (
                 <div className="mt-8 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-6">
                   {lesson.completed ? (
-                    <>
-                      <p className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700">✓ {t("lessonDone")}</p>
-                      {nextLesson && (
-                        <button onClick={() => select(nextLesson.id)} className="rounded-xl bg-[var(--navy)] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#25396a]">
-                          {t("nextLesson")}
-                        </button>
-                      )}
-                    </>
+                    <p className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700">✓ {t("lessonDone")}</p>
                   ) : (
                     !finished && (
                       <button onClick={() => markComplete()} disabled={busy} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50">
@@ -346,11 +455,33 @@ export default function CoursePlayer({ programId }: { programId: string }) {
                   )}
                 </div>
               )}
-              {error && <p role="alert" className="mt-3 text-sm text-red-600">{t("actionFailed")}</p>}
+              {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+
+              {(previousLesson || nextLesson) && (
+                <nav aria-label={t("lessonNavigation")} className="mt-8 flex flex-wrap items-stretch justify-between gap-3 border-t border-slate-100 pt-6">
+                  {previousLesson ? (
+                    <button onClick={() => select(previousLesson.id, true)} className="flex max-w-[48%] flex-col items-start rounded-xl border border-slate-300 px-4 py-2.5 text-left text-sm transition hover:bg-slate-50">
+                      <span className="font-bold text-slate-700">{t("previousLesson")}</span>
+                      <span className="line-clamp-1 text-xs text-slate-500">{previousLesson.title}</span>
+                    </button>
+                  ) : <span />}
+                  {nextLesson && (
+                    <button
+                      onClick={() => select(nextLesson.id, true)}
+                      className={`ml-auto flex max-w-[48%] flex-col items-end rounded-xl px-4 py-2.5 text-right text-sm transition ${lessonDone ? "bg-[var(--navy)] text-white hover:bg-[#25396a]" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+                    >
+                      <span className="font-bold">{t("nextLesson")}</span>
+                      <span className={`line-clamp-1 text-xs ${lessonDone ? "text-slate-200" : "text-slate-500"}`}>{nextLesson.title}</span>
+                    </button>
+                  )}
+                </nav>
+              )}
             </article>
           )}
         </div>
       )}
+
+      <CourseDiscussions programId={programId} lessons={lessons} currentLesson={lesson} />
     </div>
   );
 }
