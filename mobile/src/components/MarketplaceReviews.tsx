@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { getMarketplaceListingReviews, type BrowsableCategory, type MarketplaceReviewSummary } from "../lib/api";
 import { distributionPercents, starString } from "../lib/marketplaceReviews";
+import { useI18n } from "../i18n";
 
 /** Written reviews from buyers who completed a purchase of this listing; nothing is shown until there is one. */
 export default function MarketplaceReviews({ category, listingId }: { category: BrowsableCategory; listingId: string }) {
+  const { t, locale } = useI18n();
   const [summary, setSummary] = useState<MarketplaceReviewSummary | null>(null);
 
   useEffect(() => {
@@ -16,12 +18,12 @@ export default function MarketplaceReviews({ category, listingId }: { category: 
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>Reviews</Text>
+      <Text style={styles.title}>{t("mkt.reviews.title")}</Text>
       <View style={styles.summaryRow}>
         <Text style={styles.average}>{summary.average ?? "–"}</Text>
         <View>
           <Text style={styles.stars}>{starString(summary.average ?? 0)}</Text>
-          <Text style={styles.muted}>{summary.count} {summary.count === 1 ? "review" : "reviews"}</Text>
+          <Text style={styles.muted}>{t(summary.count === 1 ? "mkt.reviews.countOne" : "mkt.reviews.countMany", { count: summary.count })}</Text>
         </View>
       </View>
       {[5, 4, 3, 2, 1].map((score) => (
@@ -37,9 +39,9 @@ export default function MarketplaceReviews({ category, listingId }: { category: 
             <Text style={styles.author}>{review.author_name}</Text>
             <Text style={styles.stars}>{starString(review.score)}</Text>
           </View>
-          <Text style={styles.muted}>{new Date(review.created_at).toLocaleDateString()}</Text>
+          <Text style={styles.muted}>{new Date(review.created_at).toLocaleDateString(locale)}</Text>
           {review.text ? <Text style={styles.text}>{review.text}</Text> : null}
-          {review.verified_purchase && <Text style={styles.verified}>✓ Verified purchase</Text>}
+          {review.verified_purchase && <Text style={styles.verified}>✓ {t("mkt.reviews.verified")}</Text>}
         </View>
       ))}
     </View>

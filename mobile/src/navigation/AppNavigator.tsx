@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useI18n } from "../i18n";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import * as Notifications from "expo-notifications";
 import { registerDeviceForPush } from "../lib/pushNotifications";
@@ -155,6 +156,7 @@ function openFromPush(response: Notifications.NotificationResponse | null) {
  * what "adapted for mobile" actually means here.
  */
 export default function AppNavigator() {
+  const { t } = useI18n();
   useEffect(() => {
     // Taps while the app runs; the tap that launched it from closed is handled once navigation is ready.
     const subscription = Notifications.addNotificationResponseReceivedListener(openFromPush);
@@ -199,22 +201,22 @@ export default function AppNavigator() {
         <Stack.Screen name="CreateVideo" component={CreateVideoScreen} options={{ title: "Post a video" }} />
         <Stack.Screen name="AdminConsole" component={AdminConsoleScreen} options={{ title: "Admin Console" }} />
         <Stack.Screen name="AgentDashboard" component={AgentDashboardScreen} options={{ title: "My Dashboard" }} />
-        <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: "Marketplace" }} />
-        <Stack.Screen name="MarketplaceListingDetail" component={MarketplaceListingDetailScreen} options={{ title: "Listing" }} />
-        <Stack.Screen name="MarketplaceOrders" component={MarketplaceOrdersScreen} options={{ title: "Marketplace Orders" }} />
-        <Stack.Screen name="MarketplaceOffers" component={MarketplaceOffersScreen} options={{ title: "My Offers" }} />
-        <Stack.Screen name="MarketplaceVariants" component={MarketplaceVariantsScreen} options={{ title: "Options" }} />
-        <Stack.Screen name="MarketplaceSellerDashboard" component={MarketplaceSellerDashboardScreen} options={{ title: "Seller Dashboard" }} />
-        <Stack.Screen name="MyMarketplaceListings" component={MyMarketplaceListingsScreen} options={{ title: "My Listings" }} />
-        <Stack.Screen name="MarketplaceCart" component={MarketplaceCartScreen} options={{ title: "My Cart" }} />
-        <Stack.Screen name="MarketplaceDeals" component={MarketplaceDealsScreen} options={{ title: "Flash deals" }} />
-        <Stack.Screen name="MarketplaceShop" component={MarketplaceShopScreen} options={{ title: "Shop" }} />
-        <Stack.Screen name="MarketplaceShopSettings" component={MarketplaceShopSettingsScreen} options={{ title: "Shop Settings" }} />
-        <Stack.Screen name="Warehouses" component={WarehousesScreen} options={{ title: "Warehouses" }} />
-        <Stack.Screen name="Stores" component={StoresScreen} options={{ title: "Stores" }} />
-        <Stack.Screen name="Businesses" component={BusinessesScreen} options={{ title: "Businesses" }} />
-        <Stack.Screen name="Cars" component={CarsScreen} options={{ title: "Cars" }} />
-        <Stack.Screen name="Goods" component={GoodsScreen} options={{ title: "Goods" }} />
+        <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: t("mkt.nav.marketplace") }} />
+        <Stack.Screen name="MarketplaceListingDetail" component={MarketplaceListingDetailScreen} options={{ title: t("mkt.nav.listing") }} />
+        <Stack.Screen name="MarketplaceOrders" component={MarketplaceOrdersScreen} options={{ title: t("mkt.nav.orders") }} />
+        <Stack.Screen name="MarketplaceOffers" component={MarketplaceOffersScreen} options={{ title: t("mkt.nav.offers") }} />
+        <Stack.Screen name="MarketplaceVariants" component={MarketplaceVariantsScreen} options={{ title: t("mkt.nav.options") }} />
+        <Stack.Screen name="MarketplaceSellerDashboard" component={MarketplaceSellerDashboardScreen} options={{ title: t("mkt.hub.dashboard") }} />
+        <Stack.Screen name="MyMarketplaceListings" component={MyMarketplaceListingsScreen} options={{ title: t("mkt.hub.listings") }} />
+        <Stack.Screen name="MarketplaceCart" component={MarketplaceCartScreen} options={{ title: t("mkt.nav.cart") }} />
+        <Stack.Screen name="MarketplaceDeals" component={MarketplaceDealsScreen} options={{ title: t("mkt.hub.deals") }} />
+        <Stack.Screen name="MarketplaceShop" component={MarketplaceShopScreen} options={{ title: t("mkt.nav.shop") }} />
+        <Stack.Screen name="MarketplaceShopSettings" component={MarketplaceShopSettingsScreen} options={{ title: t("mkt.nav.shopSettings") }} />
+        <Stack.Screen name="Warehouses" component={WarehousesScreen} options={{ title: t("mkt.hub.catWarehouses") }} />
+        <Stack.Screen name="Stores" component={StoresScreen} options={{ title: t("mkt.hub.catStores") }} />
+        <Stack.Screen name="Businesses" component={BusinessesScreen} options={{ title: t("mkt.hub.catBusinesses") }} />
+        <Stack.Screen name="Cars" component={CarsScreen} options={{ title: t("mkt.hub.catCars") }} />
+        <Stack.Screen name="Goods" component={GoodsScreen} options={{ title: t("mkt.hub.catGoods") }} />
         <Stack.Screen name="OaziGo" component={OaziGoScreen} options={{ title: "OaziGo" }} />
         <Stack.Screen name="TasklnService" component={TasklnServiceScreen} options={{ title: "Taskln Service" }} />
         <Stack.Screen name="PropertyManagement" component={PropertyManagementScreen} options={{ title: "Property Management" }} />

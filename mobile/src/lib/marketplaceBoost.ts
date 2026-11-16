@@ -1,4 +1,5 @@
 import type { BoostOption, BoostUnit } from "./api";
+import { translateEnglish, type Translate } from "../i18n/translate";
 
 export const BOOST_UNIT_LABELS: Record<BoostUnit, { one: string; many: string }> = {
   DAILY: { one: "day", many: "days" },
@@ -15,9 +16,8 @@ export function clampBoostQuantity(value: number, max: number): number {
   return Math.min(Math.max(1, max), Math.max(1, whole));
 }
 
-export function boostLengthLabel(unit: BoostUnit, quantity: number): string {
-  const label = BOOST_UNIT_LABELS[unit];
-  return `${quantity} ${quantity === 1 ? label.one : label.many}`;
+export function boostLengthLabel(unit: BoostUnit, quantity: number, t: Translate = translateEnglish): string {
+  return t(unit === "DAILY" ? (quantity === 1 ? "mkt.boost.daysOne" : "mkt.boost.daysMany") : (quantity === 1 ? "mkt.boost.monthsOne" : "mkt.boost.monthsMany"), { count: quantity });
 }
 
 export function boostOption(options: BoostOption[], unit: BoostUnit): BoostOption | undefined {
@@ -25,12 +25,14 @@ export function boostOption(options: BoostOption[], unit: BoostUnit): BoostOptio
 }
 
 /** "Expires <date>" for a live listing, "Expired" once it has lapsed; nothing when the date is unknown. */
-export function expiryLabel(expiresAt: string | undefined, isExpired: boolean | undefined): string {
-  if (isExpired) return "Expired";
-  return expiresAt ? `Expires ${new Date(expiresAt).toLocaleDateString()}` : "";
+export function expiryLabel(expiresAt: string | undefined, isExpired: boolean | undefined, t: Translate = translateEnglish, locale?: string): string {
+  if (isExpired) return t("mkt.boost.expired");
+  return expiresAt ? t("mkt.boost.expires", { date: new Date(expiresAt).toLocaleDateString(locale) }) : "";
 }
 
-export function statsLabel(stats: { views: number; saves: number; chats: number }): string {
-  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-  return `👁 ${count(stats.views, "view", "views")} · ♥ ${count(stats.saves, "save", "saves")} · 💬 ${count(stats.chats, "chat", "chats")}`;
+export function statsLabel(stats: { views: number; saves: number; chats: number }, t: Translate = translateEnglish): string {
+  const views = t(stats.views === 1 ? "mkt.boost.viewsOne" : "mkt.boost.viewsMany", { count: stats.views });
+  const saves = t(stats.saves === 1 ? "mkt.boost.savesOne" : "mkt.boost.savesMany", { count: stats.saves });
+  const chats = t(stats.chats === 1 ? "mkt.boost.chatsOne" : "mkt.boost.chatsMany", { count: stats.chats });
+  return `👁 ${views} · ♥ ${saves} · 💬 ${chats}`;
 }

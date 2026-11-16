@@ -4,6 +4,7 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import { useMarketplaceFeed } from "../lib/useMarketplaceFeed";
 import MarketplaceListingCard from "../components/MarketplaceListingCard";
 import LoadMoreButton from "../components/LoadMoreButton";
+import { useI18n } from "../i18n";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceDeals">;
 
@@ -11,6 +12,7 @@ const DEALS_QUERY = { on_sale: "1", ordering: "ending_soon" };
 
 /** Running flash sales, the ones ending soonest first. */
 export default function MarketplaceDealsScreen({ navigation }: Props) {
+  const { t } = useI18n();
   const { items, loading, failed, hasMore, loadingMore, loadMore, reload } = useMarketplaceFeed(DEALS_QUERY);
 
   if (loading) return <View style={styles.centered}><ActivityIndicator color="#1B2A4A" size="large" /></View>;
@@ -22,9 +24,9 @@ export default function MarketplaceDealsScreen({ navigation }: Props) {
       contentContainerStyle={styles.list}
       onRefresh={reload}
       refreshing={false}
-      ListHeaderComponent={<Text style={styles.subtitle}>Limited-time prices on goods. The deals ending soonest come first.</Text>}
+      ListHeaderComponent={<Text style={styles.subtitle}>{t("mkt.deals.subtitle")}</Text>}
       ListFooterComponent={hasMore ? <LoadMoreButton onPress={loadMore} loading={loadingMore} /> : null}
-      ListEmptyComponent={<Text style={styles.empty}>{failed ? "Could not load the flash deals. Pull down to try again." : "No flash sales are running right now. Check back soon."}</Text>}
+      ListEmptyComponent={<Text style={styles.empty}>{failed ? t("mkt.deals.loadFailed") : t("mkt.deals.empty")}</Text>}
       renderItem={({ item }) => (
         <MarketplaceListingCard listing={item} onPress={() => navigation.navigate("MarketplaceListingDetail", { category: item.category, listingId: item.id })} />
       )}

@@ -2,6 +2,8 @@ import type {
   MarketplaceOrderItem, ReturnKind, ReturnReason, ReturnRequest, ReturnRequestPayload, SellerPayoutRow, ShipmentEvent, ShipmentStatus, ShipmentStep, ShipmentUpdate,
 } from "./api";
 import { parseAmount } from "./marketplaceOffers";
+import { translateEnglish, type Translate } from "../i18n/translate";
+import type { MessageKey } from "../i18n/messages";
 
 export type OrderRole = "buying" | "selling";
 
@@ -16,8 +18,16 @@ export const SHIPMENT_LABELS: Record<ShipmentStep | "REPLACEMENT", string> = {
   REPLACEMENT: "Replacement sent",
 };
 
-export function shipmentEventLabel(status: ShipmentEvent["status"]): string {
-  return SHIPMENT_LABELS[status] ?? status;
+const SHIPMENT_KEYS: Record<ShipmentStep | "REPLACEMENT", MessageKey> = {
+  IN_TRANSIT: "mkt.orders.shipment.IN_TRANSIT",
+  OUT_FOR_DELIVERY: "mkt.orders.shipment.OUT_FOR_DELIVERY",
+  DELIVERED: "mkt.orders.shipment.DELIVERED",
+  REPLACEMENT: "mkt.orders.shipment.REPLACEMENT",
+};
+
+export function shipmentEventLabel(status: ShipmentEvent["status"], t: Translate = translateEnglish): string {
+  const key = SHIPMENT_KEYS[status];
+  return key ? t(key) : status;
 }
 
 /** Statuses only move forward, so only the steps after the current one are offered. */
@@ -46,10 +56,10 @@ export function shipmentDraftFor(order: Pick<MarketplaceOrderItem, "shipment_sta
   return { status: nextShipmentStatuses(order.shipment_status)[0] ?? "", courier_name: order.courier_name, tracking_number: order.tracking_number, note: "", proof_url: "" };
 }
 
-export function shipmentDraftError(draft: ShipmentDraft, order: Pick<MarketplaceOrderItem, "shipment_status" | "delivery_method">): string {
-  if (!draft.status || !nextShipmentStatuses(order.shipment_status).includes(draft.status)) return "Choose the next delivery step.";
-  if (order.delivery_method === "COURIER" && !draft.courier_name.trim()) return "Enter the courier name.";
-  if (draft.status === "DELIVERED" && !draft.proof_url && !draft.note.trim()) return "Add a proof photo or a note to mark it as delivered.";
+export function shipmentDraftError(draft: ShipmentDraft, order: Pick<MarketplaceOrderItem, "shipment_status" | "delivery_method">, t: Translate = translateEnglish): string {
+  if (!draft.status || !nextShipmentStatuses(order.shipment_status).includes(draft.status)) return t("mkt.orders.error.chooseStep");
+  if (order.delivery_method === "COURIER" && !draft.courier_name.trim()) return t("mkt.orders.error.courierName");
+  if (draft.status === "DELIVERED" && !draft.proof_url && !draft.note.trim()) return t("mkt.orders.error.proofOrNote");
   return "";
 }
 
@@ -83,8 +93,23 @@ export const RETURN_REASONS: { key: ReturnReason; label: string }[] = [
   { key: "OTHER", label: "Other" },
 ];
 
-export const returnKindLabel = (kind: ReturnKind) => RETURN_KINDS.find((k) => k.key === kind)?.label ?? kind;
-export const returnReasonLabel = (reason: ReturnReason) => RETURN_REASONS.find((r) => r.key === reason)?.label ?? reason;
+const RETURN_KIND_KEYS: Record<ReturnKind, MessageKey> = {
+  REFUND: "mkt.orders.returnKind.REFUND",
+  PARTIAL_REFUND: "mkt.orders.returnKind.PARTIAL_REFUND",
+  REPLACEMENT: "mkt.orders.returnKind.REPLACEMENT",
+};
+
+const RETURN_REASON_KEYS: Record<ReturnReason, MessageKey> = {
+  NOT_AS_DESCRIBED: "mkt.orders.returnReason.NOT_AS_DESCRIBED",
+  DAMAGED: "mkt.orders.returnReason.DAMAGED",
+  WRONG_ITEM: "mkt.orders.returnReason.WRONG_ITEM",
+  MISSING_PARTS: "mkt.orders.returnReason.MISSING_PARTS",
+  NOT_WORKING: "mkt.orders.returnReason.NOT_WORKING",
+  OTHER: "mkt.orders.returnReason.OTHER",
+};
+
+export const returnKindLabel = (kind: ReturnKind, t: Translate = translateEnglish) => (RETURN_KIND_KEYS[kind] ? t(RETURN_KIND_KEYS[kind]) : kind);
+export const returnReasonLabel = (reason: ReturnReason, t: Translate = translateEnglish) => (RETURN_REASON_KEYS[reason] ? t(RETURN_REASON_KEYS[reason]) : reason);
 
 /** A request is open while it waits for the seller or after the seller rejected it and the buyer has not decided. */
 export function isReturnOpen(request: Pick<ReturnRequest, "status"> | null | undefined): boolean {
@@ -105,48 +130,44 @@ export function returnActions(request: ReturnRequest | null | undefined, role: O
   return actions;
 }
 
-export function returnStatusLabel(request: Pick<ReturnRequest, "status">, role: OrderRole): string {
+export function returnStatusLabel(request: Pick<ReturnRequest, "status">, role: OrderRole, t: Translate = translateEnglish): string {
   switch (request.status) {
-    case "REQUESTED": return role === "selling" ? "Waiting for your answer" : "Waiting for the seller";
-    case "ACCEPTED": return "Accepted";
-    case "REJECTED": return role === "selling" ? "You rejected it" : "Rejected by the seller";
-    case "ESCALATED": return "With support";
-    case "WITHDRAWN": return "Withdrawn";
-    case "CLOSED": return "Closed";
+    case "REQUESTED": return role === "selling" ? t("mkt.orders.returnStatus.requestedSelling") : t("mkt.orders.returnStatus.requestedBuying");
+    case "ACCEPTED": return t("mkt.orders.returnStatus.accepted");
+    case "REJECTED": return role === "selling" ? t("mkt.orders.returnStatus.rejectedSelling") : t("mkt.orders.returnStatus.rejectedBuying");
+    case "ESCALATED": return t("mkt.orders.returnStatus.escalated");
+    case "WITHDRAWN": return t("mkt.orders.returnStatus.withdrawn");
+    case "CLOSED": return t("mkt.orders.returnStatus.closed");
   }
 }
 
-export function returnOutcomeText(request: ReturnRequest, role: OrderRole): string {
+export function returnOutcomeText(request: ReturnRequest, role: OrderRole, t: Translate = translateEnglish): string {
   const mine = role === "selling";
   switch (request.status) {
     case "REQUESTED":
-      return mine
-        ? "Accept or reject this request. If you do not answer in time, the buyer can send it to support."
-        : "The seller has been asked to respond. If they do not answer in time, you can send it to support.";
+      return mine ? t("mkt.orders.outcome.requestedSelling") : t("mkt.orders.outcome.requestedBuying");
     case "ACCEPTED":
-      if (request.kind === "REPLACEMENT") return mine ? "You accepted. Send the replacement and update the delivery." : "Accepted. The seller will send a replacement.";
-      return mine ? "You accepted. The buyer is refunded." : "Accepted. Your refund is on its way.";
+      if (request.kind === "REPLACEMENT") return mine ? t("mkt.orders.outcome.acceptedReplacementSelling") : t("mkt.orders.outcome.acceptedReplacementBuying");
+      return mine ? t("mkt.orders.outcome.acceptedRefundSelling") : t("mkt.orders.outcome.acceptedRefundBuying");
     case "REJECTED":
-      return mine
-        ? "You rejected the request. The buyer may send it to support or withdraw it."
-        : "The seller rejected your request. You can send it to support or withdraw it.";
-    case "ESCALATED": return "Support is reviewing this request and will decide the outcome.";
-    case "WITHDRAWN": return "The request was withdrawn.";
-    case "CLOSED": return "The request is closed.";
+      return mine ? t("mkt.orders.outcome.rejectedSelling") : t("mkt.orders.outcome.rejectedBuying");
+    case "ESCALATED": return t("mkt.orders.outcome.escalated");
+    case "WITHDRAWN": return t("mkt.orders.outcome.withdrawn");
+    case "CLOSED": return t("mkt.orders.outcome.closed");
   }
 }
 
 /** The deadline that matters to the viewer right now, if any. */
-export function returnDeadline(request: ReturnRequest, role: OrderRole): { label: string; at: string } | null {
-  if (request.status === "REQUESTED" && request.respond_by) return { label: role === "selling" ? "Respond by" : "Seller should respond by", at: request.respond_by };
-  if (request.status === "REJECTED" && request.buyer_decide_by) return { label: role === "selling" ? "Buyer can decide until" : "Decide by", at: request.buyer_decide_by };
+export function returnDeadline(request: ReturnRequest, role: OrderRole, t: Translate = translateEnglish): { label: string; at: string } | null {
+  if (request.status === "REQUESTED" && request.respond_by) return { label: role === "selling" ? t("mkt.orders.deadline.respondBy") : t("mkt.orders.deadline.sellerShouldRespondBy"), at: request.respond_by };
+  if (request.status === "REJECTED" && request.buyer_decide_by) return { label: role === "selling" ? t("mkt.orders.deadline.buyerCanDecideUntil") : t("mkt.orders.deadline.decideBy"), at: request.buyer_decide_by };
   return null;
 }
 
 /** Confirming receipt closes an open request, so the buyer is warned first. */
-export function confirmReceiptMessage(order: Pick<MarketplaceOrderItem, "return_request">): string {
-  const base = "Confirm you received what you paid for? The seller will be paid.";
-  return isReturnOpen(order.return_request) ? `${base} Your open return request will be closed.` : base;
+export function confirmReceiptMessage(order: Pick<MarketplaceOrderItem, "return_request">, t: Translate = translateEnglish): string {
+  const base = t("mkt.orders.confirmReceipt");
+  return isReturnOpen(order.return_request) ? `${base} ${t("mkt.orders.confirmReceiptClosesReturn")}` : base;
 }
 
 export interface ReturnDraft {
@@ -159,15 +180,15 @@ export interface ReturnDraft {
 
 export const EMPTY_RETURN_DRAFT: ReturnDraft = { kind: "REFUND", reason: "", description: "", amount: "", evidence: [] };
 
-export function returnDraftError(draft: ReturnDraft, orderAmountXaf: string | number): string {
-  if (!draft.reason) return "Choose a reason.";
-  if (draft.description.trim().length < MIN_RETURN_DESCRIPTION) return `Describe the problem in at least ${MIN_RETURN_DESCRIPTION} characters.`;
-  if (draft.evidence.length > MAX_RETURN_EVIDENCE) return `You can add up to ${MAX_RETURN_EVIDENCE} photos.`;
+export function returnDraftError(draft: ReturnDraft, orderAmountXaf: string | number, t: Translate = translateEnglish, locale = "en-US"): string {
+  if (!draft.reason) return t("mkt.orders.error.chooseReason");
+  if (draft.description.trim().length < MIN_RETURN_DESCRIPTION) return t("mkt.orders.error.describeMin", { min: MIN_RETURN_DESCRIPTION });
+  if (draft.evidence.length > MAX_RETURN_EVIDENCE) return t("mkt.orders.error.maxPhotos", { max: MAX_RETURN_EVIDENCE });
   if (draft.kind === "PARTIAL_REFUND") {
     const amount = parseAmount(draft.amount);
     const total = Number(orderAmountXaf);
-    if (amount === null) return "Enter the refund amount you are asking for.";
-    if (amount >= total) return `The partial refund must be less than the order amount (${total.toLocaleString("en-US")} XAF).`;
+    if (amount === null) return t("mkt.orders.error.enterRefundAmount");
+    if (amount >= total) return t("mkt.orders.error.partialTooHigh", { total: total.toLocaleString(locale) });
   }
   return "";
 }
@@ -179,41 +200,41 @@ export function returnPayload(draft: ReturnDraft): ReturnRequestPayload {
   return payload;
 }
 
-export function rejectNoteError(note: string): string {
-  return note.trim().length < MIN_REJECT_NOTE ? `Tell the buyer why in at least ${MIN_REJECT_NOTE} characters.` : "";
+export function rejectNoteError(note: string, t: Translate = translateEnglish): string {
+  return note.trim().length < MIN_REJECT_NOTE ? t("mkt.orders.error.rejectNoteMin", { min: MIN_REJECT_NOTE }) : "";
 }
 
 // ---- Receipt summary ---------------------------------------------------
 
 export interface ReceiptLine { label: string; value: string }
 
-const money = (value: number) => `${Math.round(value).toLocaleString("en-US")} XAF`;
+const money = (value: number, locale: string) => `${Math.round(value).toLocaleString(locale)} XAF`;
 
 /** The figures of the PDF receipt, shown in the app because the PDF needs an authenticated download. */
-export function receiptLines(order: MarketplaceOrderItem): ReceiptLine[] {
+export function receiptLines(order: MarketplaceOrderItem, t: Translate = translateEnglish, locale = "en-US"): ReceiptLine[] {
   const fee = Number(order.delivery_fee_xaf) || 0;
   const deposit = Number(order.deposit_xaf) || 0;
   const breakdownPrice = Number(order.price_breakdown?.price_xaf);
   const price = Number.isFinite(breakdownPrice) && order.price_breakdown?.price_xaf !== undefined ? breakdownPrice : Number(order.amount_xaf) - fee;
   const lines: ReceiptLine[] = [
-    { label: "Item", value: order.listing_title },
-    { label: "Quantity", value: String(order.quantity || 1) },
-    { label: "Price", value: money(price) },
+    { label: t("mkt.orders.receipt.item"), value: order.listing_title },
+    { label: t("mkt.orders.receipt.quantity"), value: String(order.quantity || 1) },
+    { label: t("mkt.orders.receipt.price"), value: money(price, locale) },
   ];
-  if (fee > 0) lines.push({ label: "Delivery fee", value: money(fee) });
-  if (deposit > 0) lines.push({ label: "Deposit", value: money(deposit) });
-  lines.push({ label: "Total paid", value: money(Number(order.total_xaf)) });
+  if (fee > 0) lines.push({ label: t("mkt.orders.receipt.deliveryFee"), value: money(fee, locale) });
+  if (deposit > 0) lines.push({ label: t("mkt.orders.receipt.deposit"), value: money(deposit, locale) });
+  lines.push({ label: t("mkt.orders.receipt.totalPaid"), value: money(Number(order.total_xaf), locale) });
   return lines;
 }
 
-export function payoutLines(payout: SellerPayoutRow): ReceiptLine[] {
-  const lines: ReceiptLine[] = [{ label: "Platform fee", value: `- ${money(Number(payout.fee_xaf))}` }];
-  if (Number(payout.refunded_xaf) > 0) lines.push({ label: "Refunded", value: `- ${money(Number(payout.refunded_xaf))}` });
-  lines.push({ label: "Your payout", value: money(Number(payout.net_xaf)) });
+export function payoutLines(payout: SellerPayoutRow, t: Translate = translateEnglish, locale = "en-US"): ReceiptLine[] {
+  const lines: ReceiptLine[] = [{ label: t("mkt.orders.receipt.platformFee"), value: `- ${money(Number(payout.fee_xaf), locale)}` }];
+  if (Number(payout.refunded_xaf) > 0) lines.push({ label: t("mkt.orders.receipt.refunded"), value: `- ${money(Number(payout.refunded_xaf), locale)}` });
+  lines.push({ label: t("mkt.orders.receipt.yourPayout"), value: money(Number(payout.net_xaf), locale) });
   return lines;
 }
 
-export function receiptText(order: MarketplaceOrderItem, extra: ReceiptLine[] = []): string {
-  const rows = [...receiptLines(order), ...extra].map((l) => `${l.label}: ${l.value}`);
-  return [`Receipt for order ${order.id}`, ...rows].join("\n");
+export function receiptText(order: MarketplaceOrderItem, extra: ReceiptLine[] = [], t: Translate = translateEnglish, locale = "en-US"): string {
+  const rows = [...receiptLines(order, t, locale), ...extra].map((l) => `${l.label}: ${l.value}`);
+  return [t("mkt.orders.receipt.forOrder", { id: order.id }), ...rows].join("\n");
 }

@@ -937,7 +937,8 @@
     "continueToListProperty": "Continue to List a Property",
     "alreadyEnabled": "Two-factor authentication is already enabled on your account.",
     "setupFailed": "Could not send the code. Please check the details and try again.",
-    "verifyFailed": "Incorrect or expired code. Please try again."
+    "verifyFailed": "Incorrect or expired code. Please try again.",
+    "noMethodsAvailable": "Receiving codes by SMS or email is not available right now. Please try again later."
   },
   "ListPropertyPage": {
     "title": "List a Property",
@@ -2679,7 +2680,8 @@
     "returnsOrderLine": "Order: {amount} XAF for {quantity} item(s)",
     "returnsNoSellerNote": "The seller has not replied yet.",
     "returnsRespondBy": "The seller must reply before {date}.",
-    "returnsDispute": "See dispute {id} →"
+    "returnsDispute": "See dispute {id} →",
+    "tabFeatures": "Services & switches"
   },
   "FavoritesPage": {
     "title": "Saved Listings",
@@ -6081,5 +6083,56 @@
     "error_quantityInvalid": "The stock must be a whole number between 0 and 100000.",
     "error_tooMany": "You can have at most 60 versions.",
     "error_priceTooLow": "This version would sell for 0 XAF or less."
+  },
+  "ChatTranslate": {
+    "translate": "Translate",
+    "translating": "Translating...",
+    "showTranslation": "Show translation",
+    "hideTranslation": "Show original",
+    "translatedFrom": "Translated from {language}",
+    "langFr": "French",
+    "langEn": "English",
+    "langOther": "another language",
+    "alreadyInYourLanguage": "This message is already in your language.",
+    "failed": "Could not translate this message."
+  },
+  "AdminFeatureSwitches": {
+    "title": "Services & switches",
+    "intro": "These features cost money each time they are used. If the budget runs out, switch one off: it disappears for users straight away and the platform stops calling the paid service behind it.",
+    "loadFailed": "The switches could not be loaded. Please try again.",
+    "saveFailed": "The change could not be saved. Please try again.",
+    "savedOn": "Switched on.",
+    "savedOff": "Switched off. Users no longer see it.",
+    "on": "On",
+    "off": "Off",
+    "translationTitle": "Chat translation",
+    "translationText": "A \"Translate\" link under chat messages shows them in the reader's language (English or French). Each message is translated once and then saved, so it is only paid for once.",
+    "providerLine": "Service: {provider}",
+    "providerGoogle": "Google Cloud Translation",
+    "providerAzure": "Azure AI Translator",
+    "providerSandbox": "test stand-in",
+    "providerNone": "none connected",
+    "testMode": "test mode: no real translation",
+    "translationNotConnected": "No translation service is connected on the server, so users cannot see translation even while this switch is on. Add GOOGLE_TRANSLATE_API_KEY or AZURE_TRANSLATOR_KEY to the server settings.",
+    "smsTitle": "SMS",
+    "smsText": "Text messages: verification codes and important notices. Switching it off stops all sending and hides the SMS choice wherever people pick how to receive codes.",
+    "emailTitle": "Email",
+    "emailText": "Emails: verification codes, weekly summaries and important notices. Switching it off stops all sending and hides the email choice wherever people pick how to receive codes.",
+    "connected": "provider connected",
+    "notConnected": "no provider connected",
+    "channelNotConnected": "No provider is connected for this channel yet, so nothing is really sent through it right now anyway.",
+    "whenOn": "{feature} is available to users.",
+    "whenOff": "{feature} is hidden from users, and nothing is sent or paid for.",
+    "alwaysSent": "Always sent, whatever you switch off: password-reset emails and emergency (SOS) alerts to a contact's phone, so nobody is locked out of their account or put at risk. In-app notifications are never affected.",
+    "lastChanged": "Last changed {date}."
+  },
+  "MfaLoginStep": {
+    "title": "Enter your code",
+    "sentTo": "We sent a 6-digit code to {destination}. It works for 10 minutes.",
+    "codeLabel": "Verification code",
+    "verify": "Verify and sign in",
+    "verifying": "Verifying...",
+    "back": "Back to sign in",
+    "wrongCode": "Incorrect or expired code. Please try again, or go back to sign in for a new one."
   }
 }

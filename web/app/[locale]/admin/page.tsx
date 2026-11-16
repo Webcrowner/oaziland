@@ -83,6 +83,7 @@ import AdminAreaRequests from "@/components/admin/AdminAreaRequests";
 import AdminPayments from "@/components/admin/AdminPayments";
 import AdminRides from "@/components/admin/AdminRides";
 import AdminReturns from "@/components/admin/AdminReturns";
+import AdminFeatureSwitches from "@/components/admin/AdminFeatureSwitches";
 import AdminVerificationQueue from "@/components/admin/AdminVerificationQueue";
 import AdminPrivacyRequests from "@/components/admin/AdminPrivacyRequests";
 import AdminAnalyticsPanel from "@/components/admin/AdminAnalyticsPanel";
@@ -160,6 +161,7 @@ const TABS = [
   "rides",
   "users",
   "greetings",
+  "features",
   "faqs",
   "visitors",
   "privacy",
@@ -1043,6 +1045,7 @@ export default function AdminConsolePage() {
     rides: IconCar,
     users: IconUsers,
     greetings: IconSparkles,
+    features: IconLock,
     faqs: IconMapPin,
     audit: IconClock,
     visitors: IconEye,
@@ -1079,6 +1082,7 @@ export default function AdminConsolePage() {
     { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
     { key: "support", label: t("tabSupport"), count: supportCount, isUrgent: (summary.support_tickets_awaiting ?? 0) > 0 },
     { key: "greetings", label: t("tabGreetings") || "Celebratory Messages" },
+    { key: "features", label: t("tabFeatures") },
     { key: "faqs", label: t("tabFaqs") },
     { key: "certificates", label: t("tabCertificates") }, { key: "trainers", label: t("tabTrainers"), count: summary.courses_awaiting_review ?? 0 },
 
@@ -1105,6 +1109,7 @@ export default function AdminConsolePage() {
         { key: "summary", label: t("tabSummary") },
         { key: "analytics", label: t("tabAnalytics") },
         { key: "greetings", label: t("tabGreetings") || "Celebratory Messages" },
+        { key: "features", label: t("tabFeatures") },
         { key: "faqs", label: t("tabFaqs") },
         { key: "certificates", label: t("tabCertificates") }, { key: "trainers", label: t("tabTrainers"), count: summary.courses_awaiting_review ?? 0 },
 
@@ -2633,6 +2638,7 @@ export default function AdminConsolePage() {
       {/* ================= TAB: PRICING ================= */}
       {tab === "payments" && token && <AdminPayments token={token} onOpenDisputes={() => setTab("disputes")} />}
       {tab === "returns" && token && <AdminReturns token={token} onOpenDisputes={() => setTab("disputes")} />}
+      {tab === "features" && token && <AdminFeatureSwitches token={token} />}
       {tab === "pricing" && isSuperAdmin && token && <AdminPricingEditor token={token} dialogs={dialogs} />}
 
       {/* ================= TAB: PUBLISHED CONTENT ================= */}

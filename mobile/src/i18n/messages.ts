@@ -1,9 +1,17 @@
+import { en as coreEn, fr as coreFr } from "./mkt/core";
+import { en as shopEn, fr as shopFr } from "./mkt/shop";
+import { en as offersEn, fr as offersFr } from "./mkt/offers";
+import { en as ordersEn, fr as ordersFr } from "./mkt/orders";
+import { en as dashEn, fr as dashFr } from "./mkt/dash";
+import { en as chatEn, fr as chatFr } from "./chat";
+import { en as authEn, fr as authFr } from "./auth";
+
 /**
  * App text in English and French. Keys are flat strings; `{name}` placeholders are filled in by t().
  * `fr` is typed against `en`, so a missing French entry is a type error.
  *
- * Covered so far: OaziGo, wallet payouts, identity verification and the language switch.
- * Other screens are still English-only.
+ * Covered so far: OaziGo, wallet payouts, identity verification, the language switch and the marketplace
+ * (cart, deals, search, shop, offers, orders, seller dashboard; see ./mkt). Other screens are still English-only.
  */
 export const en = {
   "lang.label": "Language",
@@ -522,6 +530,13 @@ export const en = {
   "variants.error.delta": "The price difference must be a whole number of XAF, positive or negative.",
   "variants.error.price": "This version would cost nothing or less.",
   "variants.error.sku": "SKUs must be unique and at most 40 characters.",
+  ...coreEn,
+  ...shopEn,
+  ...offersEn,
+  ...ordersEn,
+  ...dashEn,
+  ...chatEn,
+  ...authEn,
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1043,4 +1058,11 @@ export const fr: Record<MessageKey, string> = {
   "variants.error.delta": "La différence de prix doit être un nombre entier de XAF, positif ou négatif.",
   "variants.error.price": "Cette version ne coûterait rien ou moins que rien.",
   "variants.error.sku": "Les références SKU doivent être uniques et compter 40 caractères au maximum.",
+  ...coreFr,
+  ...shopFr,
+  ...offersFr,
+  ...ordersFr,
+  ...dashFr,
+  ...chatFr,
+  ...authFr,
 };

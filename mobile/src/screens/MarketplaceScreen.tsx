@@ -6,15 +6,16 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import MarketplaceUnifiedSearch from "../components/MarketplaceUnifiedSearch";
 import { getMarketplaceCart } from "../lib/api";
 import { cartBadge } from "../lib/marketplaceCart";
+import { useI18n } from "../i18n";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Marketplace">;
 
 const CATEGORIES = [
-  { key: "Warehouses" as const, icon: "🏭", label: "Warehouses", desc: "Storage and industrial space for rent or sale." },
-  { key: "Stores" as const, icon: "🏬", label: "Stores", desc: "Retail shopfronts, for rent or sale." },
-  { key: "Businesses" as const, icon: "💼", label: "Businesses", desc: "Going concerns for sale." },
-  { key: "Cars" as const, icon: "🚗", label: "Cars", desc: "Vehicles for sale or rent." },
-  { key: "Goods" as const, icon: "📦", label: "Goods", desc: "New and used items, with pickup or delivery." },
+  { key: "Warehouses" as const, icon: "🏭" },
+  { key: "Stores" as const, icon: "🏬" },
+  { key: "Businesses" as const, icon: "💼" },
+  { key: "Cars" as const, icon: "🚗" },
+  { key: "Goods" as const, icon: "📦" },
 ];
 
 /**
@@ -24,6 +25,7 @@ const CATEGORIES = [
  * transaction, not a listing category.
  */
 export default function MarketplaceScreen({ navigation }: Props) {
+  const { t } = useI18n();
   const [cartCount, setCartCount] = useState(0);
 
   const loadCartCount = useCallback(async () => {
@@ -45,55 +47,55 @@ export default function MarketplaceScreen({ navigation }: Props) {
       <MarketplaceUnifiedSearch onOpen={(result) => navigation.navigate("MarketplaceListingDetail", { category: result.category, listingId: result.id })} />
 
       <View style={styles.quickRow}>
-        <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate("MarketplaceCart")} accessibilityLabel={`Cart, ${cartCount} items`}>
-          <Text style={styles.quickText}>🛒 Cart</Text>
+        <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate("MarketplaceCart")} accessibilityLabel={t("mkt.hub.cartLabel", { count: cartCount })}>
+          <Text style={styles.quickText}>🛒 {t("mkt.hub.cart")}</Text>
           {cartCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{cartBadge(cartCount)}</Text></View>}
         </TouchableOpacity>
         <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate("MarketplaceDeals")}>
-          <Text style={styles.quickText}>⚡ Flash deals</Text>
+          <Text style={styles.quickText}>⚡ {t("mkt.hub.deals")}</Text>
         </TouchableOpacity>
       </View>
-      <Text style={styles.subtitle}>Beyond real estate: browse or list warehouses, stores, businesses and cars, and browse goods.</Text>
+      <Text style={styles.subtitle}>{t("mkt.hub.subtitle")}</Text>
 
       {CATEGORIES.map((category) => (
         <TouchableOpacity key={category.key} style={styles.card} onPress={() => navigation.navigate(category.key)}>
           <Text style={styles.icon}>{category.icon}</Text>
           <View style={styles.cardText}>
-            <Text style={styles.cardLabel}>{category.label}</Text>
-            <Text style={styles.cardDesc}>{category.desc}</Text>
+            <Text style={styles.cardLabel}>{t(`mkt.hub.cat${category.key}`)}</Text>
+            <Text style={styles.cardDesc}>{t(`mkt.hub.cat${category.key}Desc`)}</Text>
           </View>
         </TouchableOpacity>
       ))}
 
       <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceOrders")}>
-        <Text style={styles.cardLabel}>My orders</Text>
-        <Text style={styles.cardDesc}>Track what you bought or sold, confirm receipt, or report a problem.</Text>
+        <Text style={styles.cardLabel}>{t("mkt.hub.orders")}</Text>
+        <Text style={styles.cardDesc}>{t("mkt.hub.ordersDesc")}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceOffers")}>
-        <Text style={styles.cardLabel}>My offers</Text>
-        <Text style={styles.cardDesc}>Offers you made, and offers on your listings to accept, decline or counter.</Text>
+        <Text style={styles.cardLabel}>{t("mkt.hub.offers")}</Text>
+        <Text style={styles.cardDesc}>{t("mkt.hub.offersDesc")}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceSellerDashboard")}>
-        <Text style={styles.cardLabel}>Seller dashboard</Text>
-        <Text style={styles.cardDesc}>Your sales, fees, earnings, payouts and top listings, with a CSV export.</Text>
+        <Text style={styles.cardLabel}>{t("mkt.hub.dashboard")}</Text>
+        <Text style={styles.cardDesc}>{t("mkt.hub.dashboardDesc")}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MyMarketplaceListings")}>
-        <Text style={styles.cardLabel}>My listings</Text>
-        <Text style={styles.cardDesc}>Edit, boost, renew, pause, mark as sold or delete what you have posted.</Text>
+        <Text style={styles.cardLabel}>{t("mkt.hub.listings")}</Text>
+        <Text style={styles.cardDesc}>{t("mkt.hub.listingsDesc")}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceShopSettings")}>
-        <Text style={styles.cardLabel}>My shop</Text>
-        <Text style={styles.cardDesc}>Your storefront, policies, vacation mode, discount codes and staff.</Text>
+        <Text style={styles.cardLabel}>{t("mkt.hub.shop")}</Text>
+        <Text style={styles.cardDesc}>{t("mkt.hub.shopDesc")}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.ridesCard} onPress={() => navigation.navigate("OaziGo")}>
         <Text style={styles.ridesTitle}>OaziGo</Text>
-        <Text style={styles.ridesDesc}>Real rides for people, or moving building materials between properties — with a transparent fare and secure Mobile Money payment.</Text>
-        <Text style={styles.ridesCta}>Open OaziGo →</Text>
+        <Text style={styles.ridesDesc}>{t("mkt.hub.ridesDesc")}</Text>
+        <Text style={styles.ridesCta}>{t("mkt.hub.ridesCta")}</Text>
       </TouchableOpacity>
     </ScrollView>
   );

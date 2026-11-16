@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useRouter, Link } from "@/i18n/navigation";
-import { loginUser } from "@/lib/api";
+import { loginUser, MfaRequiredError } from "@/lib/api";
 import { loginHref, safeNextPath } from "@/lib/authRedirect";
 import Button from "@/components/ui/Button";
+import MfaLoginStep from "@/components/MfaLoginStep";
 import {
   IconUser,
   IconLock,
@@ -38,35 +39,40 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mfaChallenge, setMfaChallenge] = useState<MfaRequiredError | null>(null);
+
+  async function finishSignIn(tokens: { access: string; refresh: string }) {
+    localStorage.setItem("access_token", tokens.access);
+    localStorage.setItem("refresh_token", tokens.refresh);
+    // If there's an explicit return URL (e.g. ?next=/dashboard or ?redirect=...), honor it
+    const params = new URLSearchParams(window.location.search);
+    const nextUrl = safeNextPath(params.get("next") || params.get("redirect"));
+
+    if (nextUrl) {
+      // A new account coming back to what they were doing (e.g. enrolling in a course) goes straight there.
+      sessionStorage.removeItem("oaziland_just_registered");
+      sessionStorage.removeItem("oaziland_signup_role");
+      router.push(nextUrl);
+    } else if (sessionStorage.getItem("oaziland_just_registered")) {
+      sessionStorage.removeItem("oaziland_just_registered");
+      const chosenRole = sessionStorage.getItem("oaziland_signup_role") || "renter";
+      sessionStorage.removeItem("oaziland_signup_role");
+      router.push(ROLE_HOME[chosenRole] ?? "/get-started");
+    } else {
+      // Direct returning users into their primary active workspace
+      router.push("/renter-dashboard");
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const tokens = await loginUser(username, password);
-      localStorage.setItem("access_token", tokens.access);
-      localStorage.setItem("refresh_token", tokens.refresh);
-      // If there's an explicit return URL (e.g. ?next=/dashboard or ?redirect=...), honor it
-      const params = new URLSearchParams(window.location.search);
-      const nextUrl = safeNextPath(params.get("next") || params.get("redirect"));
-
-      if (nextUrl) {
-        // A new account coming back to what they were doing (e.g. enrolling in a course) goes straight there.
-        sessionStorage.removeItem("oaziland_just_registered");
-        sessionStorage.removeItem("oaziland_signup_role");
-        router.push(nextUrl);
-      } else if (sessionStorage.getItem("oaziland_just_registered")) {
-        sessionStorage.removeItem("oaziland_just_registered");
-        const chosenRole = sessionStorage.getItem("oaziland_signup_role") || "renter";
-        sessionStorage.removeItem("oaziland_signup_role");
-        router.push(ROLE_HOME[chosenRole] ?? "/get-started");
-      } else {
-        // Direct returning users into their primary active workspace
-        router.push("/renter-dashboard");
-      }
+      await finishSignIn(await loginUser(username, password));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("loginFailed"));
+      if (err instanceof MfaRequiredError) setMfaChallenge(err);
+      else setError(err instanceof Error ? err.message : t("loginFailed"));
     } finally {
       setLoading(false);
     }
@@ -108,6 +114,9 @@ export default function LoginPage() {
           </div>
 
           {/* Form */}
+          {mfaChallenge ? (
+            <MfaLoginStep challenge={mfaChallenge} onTokens={finishSignIn} onBack={() => { setMfaChallenge(null); setPassword(""); }} />
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="login-username" className="block text-sm font-semibold text-slate-700 mb-1.5">
@@ -173,6 +182,7 @@ export default function LoginPage() {
               {loading ? t("signingIn") : t("signIn")}
             </Button>
           </form>
+          )}
 
           <p className="text-xs text-slate-500 mt-5 text-center">
             {t("noAccountYet")}{" "}

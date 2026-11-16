@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { setupMfa, verifyMfa, getMfaStatus } from "../lib/api";
+import { setupMfa, verifyMfa, getMfaStatus, getPublicFeatures, type PublicFeatures } from "../lib/api";
+import { useI18n } from "../i18n";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MfaSetup">;
 
@@ -13,6 +14,8 @@ type Props = NativeStackScreenProps<RootStackParamList, "MfaSetup">;
  * flow as web: choose a method, receive a real code, verify it.
  */
 export default function MfaSetupScreen({ navigation }: Props) {
+  const { t } = useI18n();
+  const [features, setFeatures] = useState<PublicFeatures>({ chat_translation: false, sms: true, email: true });
   const [alreadyEnabled, setAlreadyEnabled] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [mfaType, setMfaType] = useState<"SMS_OTP" | "EMAIL_OTP">("SMS_OTP");
@@ -24,11 +27,17 @@ export default function MfaSetupScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    getMfaStatus()
-      .then((status) => setAlreadyEnabled(status.mfa_enabled))
-      .catch(() => {})
-      .finally(() => setCheckingStatus(false));
+    Promise.all([
+      getMfaStatus().then((status) => setAlreadyEnabled(status.mfa_enabled)).catch(() => {}),
+      getPublicFeatures().then((f) => {
+        setFeatures(f);
+        // Start on a method an admin hasn't switched off.
+        if (!f.sms && f.email) setMfaType("EMAIL_OTP");
+      }),
+    ]).finally(() => setCheckingStatus(false));
   }, []);
+
+  const methods = (["SMS_OTP", "EMAIL_OTP"] as const).filter((type) => (type === "SMS_OTP" ? features.sms : features.email));
 
   async function handleSendCode() {
     setError("");
@@ -37,7 +46,7 @@ export default function MfaSetupScreen({ navigation }: Props) {
       const result = await setupMfa(mfaType, destination);
       setChallengeId(result.challenge_id);
     } catch {
-      setError("Could not send the code. Please check the details and try again.");
+      setError(t("auth.mfaSendFailed"));
     } finally {
       setLoading(false);
     }
@@ -51,7 +60,7 @@ export default function MfaSetupScreen({ navigation }: Props) {
       await verifyMfa(challengeId, code);
       setSuccess(true);
     } catch {
-      setError("Incorrect or expired code. Please try again.");
+      setError(t("auth.mfaBadCode"));
     } finally {
       setLoading(false);
     }
@@ -69,10 +78,10 @@ export default function MfaSetupScreen({ navigation }: Props) {
     return (
       <View style={styles.centered}>
         <Text style={styles.successText}>
-          ✓ {success ? "Two-factor authentication is now enabled on your account." : "Two-factor authentication is already enabled on your account."}
+          ✓ {success ? t("auth.mfaNowOn") : t("auth.mfaAlreadyOn")}
         </Text>
         <TouchableOpacity style={styles.continueButton} onPress={() => navigation.navigate("ListProperty")}>
-          <Text style={styles.continueButtonText}>Continue to List a Property</Text>
+          <Text style={styles.continueButtonText}>{t("auth.mfaContinue")}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -80,21 +89,23 @@ export default function MfaSetupScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Set Up Two-Factor Authentication</Text>
-      <Text style={styles.subtitle}>Required before you can list a property or make a booking — this keeps your account secure.</Text>
+      <Text style={styles.title}>{t("auth.mfaTitle")}</Text>
+      <Text style={styles.subtitle}>{t("auth.mfaSubtitle")}</Text>
 
-      {!challengeId ? (
+      {methods.length === 0 ? (
+        <Text style={styles.subtitle}>{t("chat.noMfaMethods")}</Text>
+      ) : !challengeId ? (
         <>
-          <Text style={styles.label}>How should we send your verification code?</Text>
+          <Text style={styles.label}>{t("auth.mfaHow")}</Text>
           <View style={styles.toggleRow}>
-            {(["SMS_OTP", "EMAIL_OTP"] as const).map((type) => (
+            {methods.map((type) => (
               <TouchableOpacity
                 key={type}
                 style={[styles.toggle, mfaType === type && styles.toggleSelected]}
                 onPress={() => setMfaType(type)}
               >
                 <Text style={[styles.toggleText, mfaType === type && styles.toggleTextSelected]}>
-                  {type === "SMS_OTP" ? "Text Message (SMS)" : "Email"}
+                  {type === "SMS_OTP" ? t("auth.mfaSms") : t("auth.mfaEmail")}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -105,18 +116,18 @@ export default function MfaSetupScreen({ navigation }: Props) {
             keyboardType={mfaType === "SMS_OTP" ? "phone-pad" : "email-address"}
             value={destination}
             onChangeText={setDestination}
-            placeholder={mfaType === "SMS_OTP" ? "Phone number (+237...)" : "Email address"}
+            placeholder={mfaType === "SMS_OTP" ? t("auth.mfaPhonePlaceholder") : t("auth.mfaEmailPlaceholder")}
           />
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <TouchableOpacity style={styles.submitButton} onPress={handleSendCode} disabled={loading || !destination}>
-            {loading ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.submitButtonText}>Send Code</Text>}
+            {loading ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.submitButtonText}>{t("auth.mfaSendCode")}</Text>}
           </TouchableOpacity>
         </>
       ) : (
         <>
-          <Text style={styles.label}>Enter the 6-digit code we sent you</Text>
+          <Text style={styles.label}>{t("auth.mfaEnterCode")}</Text>
           <TextInput
             style={[styles.input, styles.codeInput]} keyboardType="number-pad" maxLength={6}
             value={code} onChangeText={(text) => setCode(text.replace(/\D/g, ""))} placeholder="123456"
@@ -125,10 +136,10 @@ export default function MfaSetupScreen({ navigation }: Props) {
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <TouchableOpacity style={styles.submitButton} onPress={handleVerify} disabled={loading || code.length < 6}>
-            {loading ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.submitButtonText}>Verify</Text>}
+            {loading ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.submitButtonText}>{t("auth.mfaVerify")}</Text>}
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setChallengeId(null)}>
-            <Text style={styles.resendText}>Send a new code</Text>
+            <Text style={styles.resendText}>{t("auth.mfaResend")}</Text>
           </TouchableOpacity>
         </>
       )}

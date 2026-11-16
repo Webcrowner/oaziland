@@ -221,6 +221,29 @@ def issue_mfa_challenge(mfa_method):
     return challenge
 
 
+def login_mfa_method(user):
+    """The verified code method to ask this person for when they sign in, or None to sign in with the
+    password alone. Methods whose channel an admin switched off are skipped: the code could not be
+    delivered, and locking every user out of their account would be worse than the missing second step."""
+    from notifications.features import channel_enabled
+    from .models import MfaType
+
+    for method in user.mfa_methods.filter(verified=True).order_by("-is_primary", "created_at"):
+        if method.mfa_type == MfaType.SMS_OTP and channel_enabled("SMS"):
+            return method
+        if method.mfa_type == MfaType.EMAIL_OTP and channel_enabled("EMAIL"):
+            return method
+    return None
+
+
+def mask_destination(value: str) -> str:
+    """'+237677123456' -> '+237•••••3456', 'jane@mail.com' -> 'j•••@mail.com': enough to recognise, not to leak."""
+    if "@" in value:
+        name, _, domain = value.partition("@")
+        return f"{name[:1]}•••@{domain}"
+    return f"{value[:4]}•••••{value[-4:]}" if len(value) > 8 else "•••" + value[-2:]
+
+
 # ---------------------------------------------------------------------------
 # Password reset — a real gap this closes: no reset flow existed at all.
 # ---------------------------------------------------------------------------
@@ -253,7 +276,7 @@ def request_password_reset(user):
         recipient=user, notification_type="PASSWORD_RESET",
         title="Reset your Oaziland password",
         message=f"Use this code to reset your password: {token_value}. It expires in {PASSWORD_RESET_VALIDITY_MINUTES} minutes.",
-        channel="EMAIL", related_reference=str(reset_token.id),
+        channel="EMAIL", related_reference=str(reset_token.id), essential=True,  # a switched-off email channel must not lock people out
     )
     return reset_token
 

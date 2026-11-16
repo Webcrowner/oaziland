@@ -937,7 +937,8 @@
     "continueToListProperty": "Continuer vers Publier une Propriété",
     "alreadyEnabled": "L'authentification à deux facteurs est déjà activée sur votre compte.",
     "setupFailed": "Impossible d'envoyer le code. Veuillez vérifier les informations et réessayer.",
-    "verifyFailed": "Code incorrect ou expiré. Veuillez réessayer."
+    "verifyFailed": "Code incorrect ou expiré. Veuillez réessayer.",
+    "noMethodsAvailable": "La réception de codes par SMS ou par e-mail n'est pas disponible pour le moment. Veuillez réessayer plus tard."
   },
   "ListPropertyPage": {
     "title": "Publier une propriété",
@@ -2679,7 +2680,8 @@
     "returnsOrderLine": "Commande : {amount} XAF pour {quantity} article(s)",
     "returnsNoSellerNote": "Le vendeur n'a pas encore répondu.",
     "returnsRespondBy": "Le vendeur doit répondre avant le {date}.",
-    "returnsDispute": "Voir le litige {id} →"
+    "returnsDispute": "Voir le litige {id} →",
+    "tabFeatures": "Services et interrupteurs"
   },
   "FavoritesPage": {
     "title": "Annonces Enregistrées",
@@ -6081,5 +6083,56 @@
     "error_quantityInvalid": "Le stock doit être un nombre entier entre 0 et 100000.",
     "error_tooMany": "Vous pouvez avoir au maximum 60 versions.",
     "error_priceTooLow": "Cette version se vendrait à 0 XAF ou moins."
+  },
+  "ChatTranslate": {
+    "translate": "Traduire",
+    "translating": "Traduction...",
+    "showTranslation": "Afficher la traduction",
+    "hideTranslation": "Afficher l'original",
+    "translatedFrom": "Traduit du {language}",
+    "langFr": "français",
+    "langEn": "anglais",
+    "langOther": "une autre langue",
+    "alreadyInYourLanguage": "Ce message est déjà dans votre langue.",
+    "failed": "Impossible de traduire ce message."
+  },
+  "AdminFeatureSwitches": {
+    "title": "Services et interrupteurs",
+    "intro": "Ces fonctions coûtent de l'argent à chaque utilisation. Si le budget est épuisé, désactivez-en une : elle disparaît aussitôt pour les utilisateurs et la plateforme cesse d'appeler le service payant qui la fait fonctionner.",
+    "loadFailed": "Impossible de charger les interrupteurs. Veuillez réessayer.",
+    "saveFailed": "Impossible d'enregistrer la modification. Veuillez réessayer.",
+    "savedOn": "Activé.",
+    "savedOff": "Désactivé. Les utilisateurs ne la voient plus.",
+    "on": "Activé",
+    "off": "Désactivé",
+    "translationTitle": "Traduction des messages",
+    "translationText": "Un lien « Traduire » sous les messages affiche leur traduction dans la langue du lecteur (anglais ou français). Chaque message n'est traduit qu'une fois puis enregistré, donc il n'est payé qu'une seule fois.",
+    "providerLine": "Service : {provider}",
+    "providerGoogle": "Google Cloud Translation",
+    "providerAzure": "Azure AI Translator",
+    "providerSandbox": "simulation de test",
+    "providerNone": "aucun connecté",
+    "testMode": "mode test : pas de vraie traduction",
+    "translationNotConnected": "Aucun service de traduction n'est connecté au serveur : les utilisateurs ne voient donc pas la traduction, même si cet interrupteur est activé. Ajoutez GOOGLE_TRANSLATE_API_KEY ou AZURE_TRANSLATOR_KEY aux réglages du serveur.",
+    "smsTitle": "SMS",
+    "smsText": "Messages texte : codes de vérification et avis importants. La désactivation arrête tout envoi et masque le choix SMS partout où l'on choisit comment recevoir les codes.",
+    "emailTitle": "E-mail",
+    "emailText": "E-mails : codes de vérification, résumés hebdomadaires et avis importants. La désactivation arrête tout envoi et masque le choix e-mail partout où l'on choisit comment recevoir les codes.",
+    "connected": "fournisseur connecté",
+    "notConnected": "aucun fournisseur connecté",
+    "channelNotConnected": "Aucun fournisseur n'est encore connecté à ce canal : rien n'est réellement envoyé par ce canal pour le moment, de toute façon.",
+    "whenOn": "{feature} est disponible pour les utilisateurs.",
+    "whenOff": "{feature} est masqué aux utilisateurs, et rien n'est envoyé ni payé.",
+    "alwaysSent": "Toujours envoyés, quoi que vous désactiviez : les e-mails de réinitialisation de mot de passe et les alertes d'urgence (SOS) vers le téléphone d'un contact, pour que personne ne soit bloqué hors de son compte ni mis en danger. Les notifications dans l'application ne sont jamais concernées.",
+    "lastChanged": "Dernière modification : {date}."
+  },
+  "MfaLoginStep": {
+    "title": "Saisissez votre code",
+    "sentTo": "Nous avons envoyé un code à 6 chiffres à {destination}. Il est valable 10 minutes.",
+    "codeLabel": "Code de vérification",
+    "verify": "Vérifier et se connecter",
+    "verifying": "Vérification...",
+    "back": "Retour à la connexion",
+    "wrongCode": "Code incorrect ou expiré. Réessayez, ou revenez à la connexion pour en recevoir un nouveau."
   }
 }

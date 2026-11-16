@@ -173,6 +173,25 @@ class ConversationViewSet(viewsets.ModelViewSet):
         )
         return Response(MessageSerializer(message, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["post"], url_path=r"messages/(?P<message_id>\d+)/translate")
+    def translate_message_action(self, request, pk=None, message_id=None):
+        """POST {target?: "en"|"fr"} — the message in the reader's language (their account language when no target
+        is given). 404 while an admin has translation off or no provider is connected, so the apps hide the button."""
+        from .translation import TranslationError, TranslationRefused, TranslationUnavailable, translate_message
+        conversation = self.get_object()
+        message = conversation.messages.filter(pk=message_id, folder="SENT").first()
+        if message is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        target = str(request.data.get("target") or getattr(request.user, "preferred_language", "") or "en").lower()
+        try:
+            return Response(translate_message(message, target, request.user))
+        except TranslationUnavailable:
+            return Response({"detail": "Translation is not available right now."}, status=status.HTTP_404_NOT_FOUND)
+        except TranslationRefused as error:
+            return Response({"detail": str(error)}, status=error.status_code)
+        except TranslationError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_502_BAD_GATEWAY)
+
     @action(detail=True, methods=["post"])
     def mark_seen(self, request, pk=None):
         """Marks every message in this conversation NOT sent by the

@@ -1,13 +1,13 @@
-"""identity.views — registration, 'my profile', and MFA setup/verify
-endpoints. JWT login/refresh itself is handled by simplejwt's built-in
-views, wired directly in oaziland/urls.py rather than duplicated here.
+"""identity.views — registration, 'my profile', sign-in (password + optional
+code) and MFA setup/verify endpoints. Token refresh is simplejwt's built-in
+view, wired in oaziland/urls.py.
 
 WHY the MFA endpoints matter: issue_mfa_challenge() and MfaChallenge.
 verify() (identity/services.py, identity/models.py) already existed
-and were already tested — but NOTHING exposed them over real HTTP. MFA
-is now a purely OPTIONAL security feature a user can turn on for
-themselves (surfaced as a toggle on their account/dashboard settings),
-not a mandatory gate — IsKycVerified (oaziland/permissions.py) is what's
+and were already tested — but NOTHING exposed them over real HTTP.
+MFA is an OPTIONAL security feature a user can turn on for themselves.
+Once they have a verified SMS/email method, signing in takes the password
+AND a code (LoginView -> MfaLoginView). IsKycVerified (oaziland/permissions.py) is what's
 actually enforced on sensitive actions (listing a property, making a
 booking) platform-wide, and it checks KYC only.
 """
@@ -18,14 +18,18 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
-from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.core.exceptions import ValidationError
 from drf_spectacular.utils import extend_schema
 from .models import User, MfaMethod, KYCProfile, VerificationStatus
 from .serializers import (
     RegisterSerializer, UserProfileSerializer, KYCProfileSerializer, AdminKYCProfileSerializer,
     ChangePasswordSerializer, PasswordResetRequestSerializer, PasswordResetConfirmSerializer,
 )
-from .services import issue_mfa_challenge, user_has_verified_mfa, approve_kyc, reject_kyc
+from .services import (
+    issue_mfa_challenge, user_has_verified_mfa, approve_kyc, reject_kyc, login_mfa_method, mask_destination,
+)
 from oaziland.permissions import IsAdminRole
 from trust_safety.audit import audit_note
 
@@ -43,7 +47,30 @@ class LoginThrottle(AnonRateThrottle):
 
 
 class LoginView(TokenObtainPairView):
+    """Password step. Someone who turned on two-factor sign-in gets no tokens here: the answer is 202 with
+    a challenge (a code was just sent) to finish at MfaLoginView."""
     throttle_classes = [LoginThrottle]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as exc:
+            raise InvalidToken(exc.args[0])
+
+        method = login_mfa_method(serializer.user)
+        if method is None:
+            return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        challenge = issue_mfa_challenge(method)
+        return Response(
+            {
+                "mfa_required": True,
+                "challenge_id": str(challenge.id),
+                "method": method.mfa_type,
+                "destination_hint": mask_destination(method.destination),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class SafeTokenRefreshSerializer(TokenRefreshSerializer):
@@ -149,6 +176,9 @@ class MfaSetupView(APIView):
         destination = request.data.get("destination")
         if mfa_type not in ("SMS_OTP", "EMAIL_OTP"):
             return Response({"detail": "mfa_type must be SMS_OTP or EMAIL_OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        from notifications.features import channel_enabled
+        if not channel_enabled("SMS" if mfa_type == "SMS_OTP" else "EMAIL"):
+            return Response({"detail": "This way of receiving codes is not available right now."}, status=status.HTTP_400_BAD_REQUEST)
         if not destination:
             return Response({"detail": "destination (phone number or email) is required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -185,6 +215,31 @@ class MfaVerifyView(APIView):
         method.verified = True
         method.save(update_fields=["verified"])
         return Response({"detail": "MFA verified.", "mfa_enabled": user_has_verified_mfa(request.user)})
+
+
+class MfaLoginView(APIView):
+    """Second sign-in step: the code that was sent after the password was accepted. Only a challenge of a
+    verified method that belongs to an active account can finish a sign-in (5 wrong tries kill the code)."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [OtpThrottle]
+
+    @extend_schema(request=dict, responses={200: dict, 400: dict})
+    def post(self, request):
+        from .models import MfaChallenge
+
+        wrong = Response({"detail": "Incorrect or expired code."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            challenge = MfaChallenge.objects.select_related("mfa_method__user").get(
+                id=request.data.get("challenge_id"), mfa_method__verified=True,
+            )
+        except (MfaChallenge.DoesNotExist, ValueError, ValidationError):
+            return wrong
+        user = challenge.mfa_method.user
+        if not user.is_active or not challenge.verify(request.data.get("code")):
+            return wrong
+
+        refresh = TokenObtainPairSerializer.get_token(user)
+        return Response({"refresh": str(refresh), "access": str(refresh.access_token)})
 
 
 class MyMfaStatusView(APIView):

@@ -1,8 +1,10 @@
 import { Text, StyleSheet } from "react-native";
+import { useI18n } from "../i18n";
 
 /** Marks a listing the seller paid to boost to the top of its category. */
 export default function TopBadge() {
-  return <Text style={styles.badge}>TOP</Text>;
+  const { t } = useI18n();
+  return <Text style={styles.badge}>{t("mkt.top")}</Text>;
 }
 
 const styles = StyleSheet.create({

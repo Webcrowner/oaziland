@@ -246,7 +246,7 @@ def sandbox_channels() -> list:
     return [channel for channel in EXTERNAL_CHANNELS if not is_delivery_live(channel)]
 
 
-def notify(*, recipient=None, external_phone_number: str = "", notification_type: str, title: str, message: str, channel="IN_APP", related_reference: str = ""):
+def notify(*, recipient=None, external_phone_number: str = "", notification_type: str, title: str, message: str, channel="IN_APP", related_reference: str = "", essential: bool = False):
     """The ONE shared way any part of the platform sends someone a
     notification. Creates the record, attempts delivery through the
     active dispatcher for that channel, and marks the real outcome —
@@ -255,7 +255,12 @@ def notify(*, recipient=None, external_phone_number: str = "", notification_type
     Exactly one of recipient/external_phone_number must be given —
     a registered user gets a normal notification; an external contact
     (e.g. an agent's emergency contact with no Oaziland account) gets
-    one addressed by phone number instead."""
+    one addressed by phone number instead.
+
+    An external channel (SMS, email) that an admin has switched off (see notifications.features) is skipped: the
+    record is kept with delivered=False and no provider is called. `essential` messages (password reset) and SMS to
+    an external contact (emergency alerts) ignore the switch."""
+    from .features import channel_enabled
     from .models import Notification
 
     if not recipient and not external_phone_number:
@@ -266,6 +271,10 @@ def notify(*, recipient=None, external_phone_number: str = "", notification_type
         notification_type=notification_type, title=title, message=message,
         channel=channel, related_reference=related_reference,
     )
+    exempt = essential or bool(external_phone_number)
+    if not exempt and not channel_enabled(channel):
+        logger.info("%s notification %s (%s) not sent: an admin has switched %s off.", channel, record.id, notification_type, channel)
+        return record
     dispatcher = get_active_dispatcher(channel)
     record.delivered = dispatcher.send(record)
     record.save(update_fields=["delivered"])
@@ -299,8 +308,9 @@ def notify_important(*, recipient, notification_type: str, title: str, message: 
         channels += ["WHATSAPP", "SMS"]
     if recipient.email:
         channels.append("EMAIL")
+    from .features import channel_enabled
     for channel in channels:
-        if not is_delivery_live(channel):
+        if not is_delivery_live(channel) or not channel_enabled(channel):
             continue
         try:
             external = notify(

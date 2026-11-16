@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { View, Text, Modal, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Share } from "react-native";
 import { listSellerPayouts, type MarketplaceOrderItem, type SellerPayoutRow } from "../lib/api";
 import { payoutLines, receiptLines, receiptText, type OrderRole } from "../lib/orderFulfilment";
+import { useI18n } from "../i18n";
 
 interface Props {
   order: MarketplaceOrderItem | null;
@@ -26,6 +27,7 @@ async function findPayout(orderId: string): Promise<SellerPayoutRow | null> {
  * and the app has no file-system or sharing package to save it, so the figures are shown (and can be shared as text).
  */
 export default function ReceiptModal({ order, role, onClose }: Props) {
+  const { t, locale } = useI18n();
   const [payout, setPayout] = useState<SellerPayoutRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -39,19 +41,19 @@ export default function ReceiptModal({ order, role, onClose }: Props) {
     setLoading(true);
     findPayout(orderId)
       .then((row) => { if (!cancelled) setPayout(row); })
-      .catch(() => { if (!cancelled) setError("Could not load the platform fee and payout."); })
+      .catch(() => { if (!cancelled) setError(t("mkt.orders.receipt.loadError")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [orderId, role]);
 
-  const extra = payout ? payoutLines(payout) : [];
+  const extra = payout ? payoutLines(payout, t, locale) : [];
 
   async function share() {
     if (!order) return;
     try {
-      await Share.share({ message: receiptText(order, extra), title: `Receipt for ${order.listing_title}` });
+      await Share.share({ message: receiptText(order, extra, t, locale), title: t("mkt.orders.receipt.shareTitle", { title: order.listing_title }) });
     } catch {
-      setError("Could not share the receipt.");
+      setError(t("mkt.orders.receipt.shareError"));
     }
   }
 
@@ -59,24 +61,24 @@ export default function ReceiptModal({ order, role, onClose }: Props) {
     <Modal visible={!!order} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.title}>Receipt</Text>
+          <Text style={styles.title}>{t("mkt.orders.receipt.title")}</Text>
           {order && (
             <ScrollView>
-              {[...receiptLines(order), ...extra].map((line) => (
+              {[...receiptLines(order, t, locale), ...extra].map((line) => (
                 <View key={line.label} style={styles.row}>
                   <Text style={styles.label}>{line.label}</Text>
                   <Text style={styles.value}>{line.value}</Text>
                 </View>
               ))}
-              {order.delivery_address ? <Text style={styles.muted}>Delivery address: {order.delivery_address}</Text> : null}
+              {order.delivery_address ? <Text style={styles.muted}>{t("mkt.orders.receipt.address", { address: order.delivery_address })}</Text> : null}
               {loading && <ActivityIndicator color="#1B2A4A" style={styles.spinner} />}
-              {role === "selling" && !loading && !payout && !error && <Text style={styles.muted}>The platform fee and payout appear once the order is paid out.</Text>}
+              {role === "selling" && !loading && !payout && !error && <Text style={styles.muted}>{t("mkt.orders.receipt.payoutPending")}</Text>}
               {error ? <Text style={styles.error}>{error}</Text> : null}
             </ScrollView>
           )}
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.primary} onPress={share}><Text style={styles.primaryText}>Share receipt</Text></TouchableOpacity>
-            <TouchableOpacity onPress={onClose}><Text style={styles.secondary}>Close</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.primary} onPress={share}><Text style={styles.primaryText}>{t("mkt.orders.receipt.share")}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={onClose}><Text style={styles.secondary}>{t("mkt.orders.close")}</Text></TouchableOpacity>
           </View>
         </View>
       </View>

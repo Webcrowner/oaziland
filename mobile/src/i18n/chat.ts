@@ -1,0 +1,38 @@
+// Chat texts (translate link, message status) and the two-factor note. Keys are `chat.*`.
+export const en = {
+  "chat.translate": "Translate",
+  "chat.translating": "Translating...",
+  "chat.showTranslation": "Show translation",
+  "chat.hideTranslation": "Show original",
+  "chat.translatedFrom": "Translated from {language}",
+  "chat.langFr": "French",
+  "chat.langEn": "English",
+  "chat.langOther": "another language",
+  "chat.alreadyYours": "This message is already in your language.",
+  "chat.translateFailed": "Could not translate this message.",
+  "chat.seen": "Seen",
+  "chat.delivered": "Delivered",
+  "chat.sent": "Sent",
+  "chat.typing": "{names} is typing...",
+  "chat.placeholder": "Type a message...",
+  "chat.noMfaMethods": "Receiving codes by SMS or email is not available right now. Please try again later.",
+} as const;
+
+export const fr: Record<keyof typeof en, string> = {
+  "chat.translate": "Traduire",
+  "chat.translating": "Traduction...",
+  "chat.showTranslation": "Afficher la traduction",
+  "chat.hideTranslation": "Afficher l'original",
+  "chat.translatedFrom": "Traduit du {language}",
+  "chat.langFr": "français",
+  "chat.langEn": "anglais",
+  "chat.langOther": "une autre langue",
+  "chat.alreadyYours": "Ce message est déjà dans votre langue.",
+  "chat.translateFailed": "Impossible de traduire ce message.",
+  "chat.seen": "Vu",
+  "chat.delivered": "Distribué",
+  "chat.sent": "Envoyé",
+  "chat.typing": "{names} écrit...",
+  "chat.placeholder": "Écrivez un message...",
+  "chat.noMfaMethods": "La réception de codes par SMS ou par e-mail n'est pas disponible pour le moment. Veuillez réessayer plus tard.",
+};

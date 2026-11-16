@@ -16,7 +16,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from identity.views import (
     RegisterView, MyProfileView, MfaSetupView, MfaVerifyView, MyMfaStatusView, MyReferralCodeView,
-    MyKycView, ChangePasswordView, PasswordResetRequestView, PasswordResetConfirmView, LoginView, RefreshView,
+    MyKycView, ChangePasswordView, PasswordResetRequestView, PasswordResetConfirmView, LoginView, RefreshView, MfaLoginView,
     AdminKYCReviewViewSet, UserPublicIndexView, DevRoleSwitchView,
 )
 from geo.views import QuarterViewSet, AreaSuggestionView, AdminAreaSuggestionViewSet
@@ -52,7 +52,7 @@ from student_hostels.views import (
 from guest_houses.views import GuestHouseLodgeViewSet, channel_calendar_feed
 from discovery.views import WantedListingViewSet, SavedSearchViewSet, MyComparisonView, ListingWaitlistView
 from discovery.home_stats import HomeStatsView
-from notifications.views import MyNotificationViewSet, AdminGreetingSettingsView, ListingShareMessageView, PushConfigView, PushDeviceView, PushDeviceRemoveView
+from notifications.views import MyNotificationViewSet, AdminGreetingSettingsView, AdminFeatureSettingsView, PublicFeaturesView, ListingShareMessageView, PushConfigView, PushDeviceView, PushDeviceRemoveView
 from monetization.views import (
     MyCreatorPremiumView, MyWalletView, WithdrawWalletView, RechargeWalletView, SendGiftView, MyGiftsView,
     ConvertGiftsView, BoostPriceQuoteView, PurchaseCampaignBoostView, MyAdCampaignsView, AdminWithdrawalViewSet,
@@ -229,6 +229,7 @@ urlpatterns = [
     path('api/auth/dev-switch-role/', DevRoleSwitchView.as_view(), name='dev-switch-role'),
     path('api/auth/mfa/setup/', MfaSetupView.as_view(), name='mfa-setup'),
     path('api/auth/mfa/verify/', MfaVerifyView.as_view(), name='mfa-verify'),
+    path('api/auth/mfa/login/', MfaLoginView.as_view(), name='mfa-login'),
     path('api/auth/mfa/status/', MyMfaStatusView.as_view(), name='mfa-status'),
     path('api/auth/my-referral-code/', MyReferralCodeView.as_view(), name='my-referral-code'),
     path('api/auth/kyc/', MyKycView.as_view(), name='my-kyc'),
@@ -301,6 +302,8 @@ urlpatterns = [
     path('api/my-emergency-contact/', MyEmergencyContactView.as_view(), name='my-emergency-contact'),
     path('api/content-reports/', FileContentReportView.as_view(), name='file-content-report'),
     path('api/admin/greeting-settings/', AdminGreetingSettingsView.as_view(), name='admin-greeting-settings'),
+    path('api/admin/feature-settings/', AdminFeatureSettingsView.as_view(), name='admin-feature-settings'),
+    path('api/features/', PublicFeaturesView.as_view(), name='public-features'),
     path('api/listing-share-message/', ListingShareMessageView.as_view(), name='listing-share-message'),
     path('api/push/config/', PushConfigView.as_view(), name='push-config'),
     path('api/push/devices/', PushDeviceView.as_view(), name='push-devices'),

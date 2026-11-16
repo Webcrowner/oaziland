@@ -6,11 +6,13 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import { getMarketplaceCart, removeCartItem, setCartItem, type CartCheckoutResult, type MarketplaceCart } from "../lib/api";
 import CartSellerGroup from "../components/CartSellerGroup";
 import { cartLineKey, formatXaf } from "../lib/marketplaceCart";
+import { useI18n } from "../i18n";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceCart">;
 
 /** Goods you plan to buy, grouped by seller; each seller is checked out with a single Mobile Money payment. */
 export default function MarketplaceCartScreen({ navigation }: Props) {
+  const { t } = useI18n();
   const [cart, setCart] = useState<MarketplaceCart | null>(null);
   const [state, setState] = useState<"loading" | "signedOut" | "ready">("loading");
   const [error, setError] = useState("");
@@ -26,10 +28,10 @@ export default function MarketplaceCartScreen({ navigation }: Props) {
       setCart(await getMarketplaceCart());
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load your cart.");
+      setError(err instanceof Error ? err.message : t("mkt.cart.loadFailed"));
     }
     setState("ready");
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -42,7 +44,7 @@ export default function MarketplaceCartScreen({ navigation }: Props) {
     try {
       setCart(await action());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That did not work. Please try again.");
+      setError(err instanceof Error ? err.message : t("common.actionFailedBody"));
     } finally {
       setBusyKey(null);
     }
@@ -50,10 +52,11 @@ export default function MarketplaceCartScreen({ navigation }: Props) {
 
   function handlePaid(result: CartCheckoutResult) {
     const count = result.orders.length;
+    const amount = formatXaf(result.total_xaf);
     Alert.alert(
-      "Payment request sent",
-      `Approve the Mobile Money prompt to pay ${formatXaf(result.total_xaf)}. ${count > 0 ? `${count} ${count === 1 ? "order is" : "orders are"} created` : "Your orders are created"} once it is confirmed, and each item is tracked and refundable separately.`,
-      [{ text: "View my orders", onPress: () => navigation.navigate("MarketplaceOrders") }],
+      t("mkt.cart.paymentSentTitle"),
+      count === 0 ? t("mkt.cart.paymentSentNone", { amount }) : count === 1 ? t("mkt.cart.paymentSentOne", { amount }) : t("mkt.cart.paymentSentMany", { amount, count }),
+      [{ text: t("mkt.cart.viewOrders"), onPress: () => navigation.navigate("MarketplaceOrders") }],
       { cancelable: false },
     );
     load();
@@ -64,8 +67,8 @@ export default function MarketplaceCartScreen({ navigation }: Props) {
   if (state === "signedOut") {
     return (
       <View style={styles.centered}>
-        <Text style={styles.muted}>Sign in to see your cart.</Text>
-        <TouchableOpacity style={styles.primary} onPress={() => navigation.navigate("Login")}><Text style={styles.primaryText}>Sign In</Text></TouchableOpacity>
+        <Text style={styles.muted}>{t("mkt.cart.signInPrompt")}</Text>
+        <TouchableOpacity style={styles.primary} onPress={() => navigation.navigate("Login")}><Text style={styles.primaryText}>{t("common.signIn")}</Text></TouchableOpacity>
       </View>
     );
   }
@@ -75,13 +78,13 @@ export default function MarketplaceCartScreen({ navigation }: Props) {
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {!cart || cart.groups.length === 0 ? (
         <View style={styles.centered}>
-          <Text style={styles.muted}>Your cart is empty.</Text>
-          <TouchableOpacity style={styles.primary} onPress={() => navigation.navigate("Goods")}><Text style={styles.primaryText}>Browse goods</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate("MarketplaceDeals")}><Text style={styles.link}>See flash deals</Text></TouchableOpacity>
+          <Text style={styles.muted}>{t("mkt.cart.empty")}</Text>
+          <TouchableOpacity style={styles.primary} onPress={() => navigation.navigate("Goods")}><Text style={styles.primaryText}>{t("mkt.cart.browseGoods")}</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate("MarketplaceDeals")}><Text style={styles.link}>{t("mkt.cart.seeDeals")}</Text></TouchableOpacity>
         </View>
       ) : (
         <>
-          <Text style={styles.subtitle}>Items from different sellers are paid separately, one payment per seller.</Text>
+          <Text style={styles.subtitle}>{t("mkt.cart.separatePayments")}</Text>
           {cart.groups.map((group) => (
             <CartSellerGroup
               key={group.seller_id} group={group} busyKey={busyKey}

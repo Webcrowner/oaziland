@@ -7,6 +7,8 @@ import {
   type MarketplaceOffer, type MarketplaceOfferActionName, type MarketplaceOfferStatus,
 } from "../lib/api";
 import { counterAmountError, offerActions, offerCurrentAmount, offerStatusLabel, parseAmount, type OfferRole } from "../lib/marketplaceOffers";
+import { useI18n } from "../i18n";
+import type { Translate } from "../i18n/translate";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceOffers">;
 
@@ -14,29 +16,33 @@ const STATUS_COLORS: Record<MarketplaceOfferStatus, string> = {
   PENDING: "#C9A227", COUNTERED: "#C9A227", ACCEPTED: "#16A34A", PAID: "#16A34A", DECLINED: "#A8502E", WITHDRAWN: "#6B7280", EXPIRED: "#6B7280",
 };
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+function formatDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
 }
 
-function hint(offer: MarketplaceOffer, role: OfferRole): string {
+function hint(offer: MarketplaceOffer, role: OfferRole, t: Translate, locale: string): string {
+  const amount = offerCurrentAmount(offer).toLocaleString();
+  const date = (iso: string | null | undefined) => (iso ? formatDate(iso, locale) : t("mkt.offers.theDeadline"));
   switch (offer.status) {
     case "PENDING":
-      return offer.respond_by ? `${role === "selling" ? "Answer" : "The seller has"} by ${formatDate(offer.respond_by)} or it expires.` : "";
+      if (!offer.respond_by) return "";
+      return role === "selling" ? t("mkt.offers.hintPendingSelling", { date: date(offer.respond_by) }) : t("mkt.offers.hintPendingBuying", { date: date(offer.respond_by) });
     case "COUNTERED":
       return role === "buying"
-        ? `The seller would accept ${offerCurrentAmount(offer).toLocaleString()} XAF. Answer by ${offer.respond_by ? formatDate(offer.respond_by) : "the deadline"} or it expires.`
-        : `You countered with ${offerCurrentAmount(offer).toLocaleString()} XAF. Waiting for the buyer.`;
+        ? t("mkt.offers.hintCounteredBuying", { amount, date: date(offer.respond_by) })
+        : t("mkt.offers.hintCounteredSelling", { amount });
     case "ACCEPTED":
       return role === "buying"
-        ? `Pay ${offerCurrentAmount(offer).toLocaleString()} XAF by ${offer.pay_by ? formatDate(offer.pay_by) : "the deadline"}; the item is reserved for you until then.`
-        : `The buyer has until ${offer.pay_by ? formatDate(offer.pay_by) : "the deadline"} to pay ${offerCurrentAmount(offer).toLocaleString()} XAF.`;
-    case "PAID": return "The buyer paid. Follow the order under My orders.";
+        ? t("mkt.offers.hintAcceptedBuying", { amount, date: date(offer.pay_by) })
+        : t("mkt.offers.hintAcceptedSelling", { amount, date: date(offer.pay_by) });
+    case "PAID": return t("mkt.offers.hintPaid");
     default: return "";
   }
 }
 
 /** Offers on marketplace listings: the ones you made as a buyer and the ones you received as a seller. */
 export default function MarketplaceOffersScreen({ navigation, route }: Props) {
+  const { t, locale } = useI18n();
   const [role, setRole] = useState<OfferRole>(route.params?.role ?? "buying");
   const [offers, setOffers] = useState<MarketplaceOffer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,11 +56,11 @@ export default function MarketplaceOffersScreen({ navigation, route }: Props) {
       setError("");
     } catch (err) {
       setOffers([]);
-      setError(err instanceof Error ? err.message : "Could not load your offers.");
+      setError(err instanceof Error ? err.message : t("mkt.offers.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(role); }, [load, role]);
 
@@ -72,19 +78,19 @@ export default function MarketplaceOffersScreen({ navigation, route }: Props) {
       setCounterText("");
       await load(role);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That did not work. Please try again.");
+      setError(err instanceof Error ? err.message : t("common.actionFailedBody"));
     }
   }
 
   function confirmThen(message: string, offerId: string, action: MarketplaceOfferActionName) {
-    Alert.alert("Are you sure?", message, [
-      { text: "No", style: "cancel" },
-      { text: "Yes", onPress: () => run(offerId, action) },
+    Alert.alert(t("mkt.offers.areYouSure"), message, [
+      { text: t("mkt.offers.no"), style: "cancel" },
+      { text: t("mkt.offers.yes"), onPress: () => run(offerId, action) },
     ]);
   }
 
   function sendCounter(offer: MarketplaceOffer) {
-    const invalid = counterAmountError(counterText, Number(offer.amount_xaf), Number(offer.listing_price_xaf));
+    const invalid = counterAmountError(counterText, Number(offer.amount_xaf), Number(offer.listing_price_xaf), t);
     if (invalid) {
       setError(invalid);
       return;
@@ -104,7 +110,7 @@ export default function MarketplaceOffersScreen({ navigation, route }: Props) {
       <View style={styles.tabs}>
         {(["buying", "selling"] as OfferRole[]).map((value) => (
           <TouchableOpacity key={value} style={[styles.tab, role === value && styles.tabActive]} onPress={() => switchRole(value)}>
-            <Text style={[styles.tabText, role === value && styles.tabTextActive]}>{value === "buying" ? "Buying" : "Selling"}</Text>
+            <Text style={[styles.tabText, role === value && styles.tabTextActive]}>{value === "buying" ? t("mkt.offers.tabBuying") : t("mkt.offers.tabSelling")}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -119,8 +125,8 @@ export default function MarketplaceOffersScreen({ navigation, route }: Props) {
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.centered}>
-              <Text style={styles.empty}>{role === "buying" ? "You have not made any offers yet." : "Nobody has made an offer on your listings yet."}</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Marketplace")}><Text style={styles.link}>Browse the marketplace</Text></TouchableOpacity>
+              <Text style={styles.empty}>{role === "buying" ? t("mkt.offers.emptyBuying") : t("mkt.offers.emptySelling")}</Text>
+              <TouchableOpacity onPress={() => navigation.navigate("Marketplace")}><Text style={styles.link}>{t("mkt.offers.browse")}</Text></TouchableOpacity>
             </View>
           }
           renderItem={({ item: offer }) => {
@@ -131,47 +137,47 @@ export default function MarketplaceOffersScreen({ navigation, route }: Props) {
                   <TouchableOpacity style={styles.titleWrap} disabled={!offer.category} onPress={() => offer.category && navigation.navigate("MarketplaceListingDetail", { category: offer.category, listingId: offer.listing_id })}>
                     <Text style={styles.cardTitle}>{offer.listing_title}</Text>
                   </TouchableOpacity>
-                  <View style={[styles.badge, { backgroundColor: STATUS_COLORS[offer.status] }]}><Text style={styles.badgeText}>{offerStatusLabel(offer.status, role)}</Text></View>
+                  <View style={[styles.badge, { backgroundColor: STATUS_COLORS[offer.status] }]}>                  <Text style={styles.badgeText}>{offerStatusLabel(offer.status, role, t)}</Text></View>
                 </View>
                 <Text style={styles.meta}>
-                  Asking {Number(offer.listing_price_xaf).toLocaleString()} XAF · Offer {Number(offer.amount_xaf).toLocaleString()} XAF
-                  {offer.counter_amount_xaf ? ` · Counter ${Number(offer.counter_amount_xaf).toLocaleString()} XAF` : ""}
+                                    {t("mkt.offers.metaAsking", { amount: Number(offer.listing_price_xaf).toLocaleString() })} · {t("mkt.offers.metaOffer", { amount: Number(offer.amount_xaf).toLocaleString() })}
+                                    {offer.counter_amount_xaf ? ` · ${t("mkt.offers.metaCounter", { amount: Number(offer.counter_amount_xaf).toLocaleString() })}` : ""}
                 </Text>
-                <Text style={styles.meta}>{role === "buying" ? `Seller: ${offer.seller_name}` : `Buyer: ${offer.buyer_name}`}</Text>
+                                  <Text style={styles.meta}>{role === "buying" ? t("mkt.offers.seller", { name: offer.seller_name }) : t("mkt.offers.buyer", { name: offer.buyer_name })}</Text>
                 {offer.message ? <Text style={styles.message}>“{offer.message}”</Text> : null}
-                <Text style={styles.date}>{formatDate(offer.created_at)}</Text>
-                {hint(offer, role) ? <Text style={styles.hint}>{hint(offer, role)}</Text> : null}
+                                  <Text style={styles.date}>{formatDate(offer.created_at, locale)}</Text>
+                                  {hint(offer, role, t, locale) ? <Text style={styles.hint}>{hint(offer, role, t, locale)}</Text> : null}
 
                 {countering === offer.id ? (
                   <View>
-                    <TextInput style={styles.input} placeholder="Your counter-offer (XAF)" value={counterText} onChangeText={setCounterText} keyboardType="number-pad" />
+                                      <TextInput style={styles.input} placeholder={t("mkt.offers.counterPlaceholder")} value={counterText} onChangeText={setCounterText} keyboardType="number-pad" />
                     <View style={styles.actions}>
                       <TouchableOpacity style={[styles.primary, !counterText.trim() && styles.disabled]} disabled={!counterText.trim()} onPress={() => sendCounter(offer)}>
-                        <Text style={styles.primaryText}>Send counter-offer</Text>
+                                          <Text style={styles.primaryText}>{t("mkt.offers.sendCounter")}</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => setCountering(null)}><Text style={styles.secondary}>Close</Text></TouchableOpacity>
+                                        <TouchableOpacity onPress={() => setCountering(null)}><Text style={styles.secondary}>{t("mkt.offers.close")}</Text></TouchableOpacity>
                     </View>
                   </View>
                 ) : actions.length > 0 ? (
                   <View style={styles.actions}>
                     {actions.includes("accept") && (
                       <TouchableOpacity style={styles.primary} onPress={() => run(offer.id, "accept")}>
-                        <Text style={styles.primaryText}>{role === "buying" ? "Accept counter" : "Accept"}</Text>
+                                          <Text style={styles.primaryText}>{role === "buying" ? t("mkt.offers.acceptCounter") : t("mkt.offers.accept")}</Text>
                       </TouchableOpacity>
                     )}
                     {actions.includes("pay") && offer.category !== "" && (
                       <TouchableOpacity style={styles.primary} onPress={() => navigation.navigate("MarketplaceListingDetail", { category: offer.category as Exclude<MarketplaceOffer["category"], "">, listingId: offer.listing_id })}>
-                        <Text style={styles.primaryText}>Pay now</Text>
+                                          <Text style={styles.primaryText}>{t("mkt.offers.payNow")}</Text>
                       </TouchableOpacity>
                     )}
                     {actions.includes("counter") && (
-                      <TouchableOpacity onPress={() => { setCountering(offer.id); setCounterText(""); setError(""); }}><Text style={styles.secondary}>Counter</Text></TouchableOpacity>
+                                        <TouchableOpacity onPress={() => { setCountering(offer.id); setCounterText(""); setError(""); }}><Text style={styles.secondary}>{t("mkt.offers.counter")}</Text></TouchableOpacity>
                     )}
                     {actions.includes("decline") && (
-                      <TouchableOpacity onPress={() => confirmThen("Decline this offer?", offer.id, "decline")}><Text style={styles.danger}>Decline</Text></TouchableOpacity>
+                                        <TouchableOpacity onPress={() => confirmThen(t("mkt.offers.declineConfirm"), offer.id, "decline")}><Text style={styles.danger}>{t("mkt.offers.decline")}</Text></TouchableOpacity>
                     )}
                     {actions.includes("withdraw") && (
-                      <TouchableOpacity onPress={() => confirmThen("Withdraw this offer?", offer.id, "withdraw")}><Text style={styles.danger}>Withdraw</Text></TouchableOpacity>
+                                        <TouchableOpacity onPress={() => confirmThen(t("mkt.offers.withdrawConfirm"), offer.id, "withdraw")}><Text style={styles.danger}>{t("mkt.offers.withdraw")}</Text></TouchableOpacity>
                     )}
                   </View>
                 ) : null}

@@ -100,19 +100,48 @@ export async function registerUser(payload: { username: string; phone: string; p
   return res.json();
 }
 
+/** Sign-in needs a second step: a code was just sent to the person's phone or email. */
+export class MfaRequiredError extends Error {
+  constructor(public challengeId: string, public method: string, public destinationHint: string) {
+    super("A verification code is required");
+    this.name = "MfaRequiredError";
+  }
+}
+
+async function saveTokens(tokens: { access: string; refresh: string }) {
+  // WHY SecureStore, not AsyncStorage: JWTs are credentials — SecureStore
+  // uses the device's Keychain (iOS) / Keystore (Android) encrypted
+  // storage, not plain-text storage AsyncStorage would use.
+  await SecureStore.setItemAsync("access_token", tokens.access);
+  await SecureStore.setItemAsync("refresh_token", tokens.refresh);
+}
+
+/** Throws MfaRequiredError when the account has two-factor sign-in; finish with completeMfaLogin. */
 export async function loginUser(username: string, password: string): Promise<{ access: string; refresh: string }> {
   const res = await fetch(`${API_BASE_URL}/api/auth/login/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
+  if (res.status === 202) {
+    const data = await res.json();
+    throw new MfaRequiredError(data.challenge_id, data.method, data.destination_hint);
+  }
   if (!res.ok) throw new Error("Invalid username or password");
   const tokens = await res.json();
-  // WHY SecureStore, not AsyncStorage: JWTs are credentials — SecureStore
-  // uses the device's Keychain (iOS) / Keystore (Android) encrypted
-  // storage, not plain-text storage AsyncStorage would use.
-  await SecureStore.setItemAsync("access_token", tokens.access);
-  await SecureStore.setItemAsync("refresh_token", tokens.refresh);
+  await saveTokens(tokens);
+  return tokens;
+}
+
+export async function completeMfaLogin(challengeId: string, code: string): Promise<{ access: string; refresh: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/mfa/login/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge_id: challengeId, code }),
+  });
+  if (!res.ok) throw new Error("Incorrect or expired code");
+  const tokens = await res.json();
+  await saveTokens(tokens);
   return tokens;
 }
 
@@ -266,6 +295,41 @@ export async function getMfaStatus(): Promise<{ mfa_enabled: boolean }> {
   const res = await fetch(`${API_BASE_URL}/api/auth/mfa/status/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error("Could not check MFA status");
   return res.json();
+}
+
+/** What the platform offers right now: admins can switch chat translation, SMS and email off. */
+export interface PublicFeatures { chat_translation: boolean; sms: boolean; email: boolean }
+
+/** Errs on the side of hiding translation (the paid feature) when the server can't be reached. */
+export async function getPublicFeatures(): Promise<PublicFeatures> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/features/`);
+    if (!res.ok) throw new Error("features");
+    return await res.json();
+  } catch {
+    return { chat_translation: false, sms: true, email: true };
+  }
+}
+
+export interface ChatTranslation {
+  text: string;
+  source_language: string;
+  target: string;
+  /** The message was already in the reader's language, so there is nothing to translate. */
+  same_language: boolean;
+  provider: string;
+  cached: boolean;
+}
+
+export async function translateChatMessage(conversationId: string, messageId: string, target: "en" | "fr"): Promise<ChatTranslation> {
+  const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/${messageId}/translate/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ target }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not translate this message");
+  return data;
 }
 
 // ---------------------------------------------------------------------------

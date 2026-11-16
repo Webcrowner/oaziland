@@ -9,16 +9,18 @@ import { useMarketplaceFeed } from "../lib/useMarketplaceFeed";
 import { memberSinceLabel, replyTimeLabel } from "../lib/sellerTrust";
 import MarketplaceListingCard from "../components/MarketplaceListingCard";
 import LoadMoreButton from "../components/LoadMoreButton";
+import { useI18n } from "../i18n";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceShop">;
 type Tab = "listings" | "deals" | "about" | "policies";
 
 function ShopListings({ userId, dealsOnly, onOpen }: { userId: string; dealsOnly: boolean; onOpen: (category: BrowsableCategory, id: string) => void }) {
+  const { t } = useI18n();
   const query: Record<string, string> = dealsOnly ? { lister_id: userId, on_sale: "1", ordering: "ending_soon" } : { lister_id: userId, ordering: "newest" };
   const { items, loading, failed, hasMore, loadingMore, loadMore } = useMarketplaceFeed(query);
   if (loading) return <ActivityIndicator color="#1B2A4A" style={styles.status} />;
   if (items.length === 0) {
-    return <Text style={styles.empty}>{failed ? "Could not load the listings. Please try again." : dealsOnly ? "No flash deals from this shop right now." : "This shop has no listings yet."}</Text>;
+    return <Text style={styles.empty}>{failed ? t("mkt.shop.loadListingsFailed") : dealsOnly ? t("mkt.shop.noDeals") : t("mkt.shop.noListings")}</Text>;
   }
   return (
     <View>
@@ -30,6 +32,7 @@ function ShopListings({ userId, dealsOnly, onOpen }: { userId: string; dealsOnly
 
 /** A seller's public storefront: banner, trust details, announcement, and their listings, deals, about and policies. */
 export default function MarketplaceShopScreen({ route, navigation }: Props) {
+  const { t, locale } = useI18n();
   const { userId } = route.params;
   const [shop, setShop] = useState<MarketplaceShop | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
@@ -41,8 +44,8 @@ export default function MarketplaceShopScreen({ route, navigation }: Props) {
   const load = useCallback(() => {
     getMarketplaceShop(userId)
       .then((data) => { setShop(data); setState("ready"); })
-      .catch((err) => { setError(err instanceof Error ? err.message : "Could not load the shop."); setState("failed"); });
-  }, [userId]);
+      .catch((err) => { setError(err instanceof Error ? err.message : t("mkt.shop.loadFailed")); setState("failed"); });
+  }, [userId, t]);
 
   useEffect(() => {
     load();
@@ -62,25 +65,25 @@ export default function MarketplaceShopScreen({ route, navigation }: Props) {
       const result = await toggleFollow(userId);
       setShop({ ...shop, is_following: result.is_following, follower_count: result.follower_count });
     } catch (err) {
-      setFollowError(err instanceof Error ? err.message : "Could not update follow status.");
+      setFollowError(err instanceof Error ? err.message : t("mkt.shop.followFailed"));
     } finally {
       setFollowBusy(false);
     }
   }
 
   if (state === "loading") return <View style={styles.centered}><ActivityIndicator color="#1B2A4A" size="large" /></View>;
-  if (state === "failed" || !shop) return <View style={styles.centered}><Text style={styles.empty}>{error || "This shop could not be found."}</Text></View>;
+  if (state === "failed" || !shop) return <View style={styles.centered}><Text style={styles.empty}>{error || t("mkt.shop.notFound")}</Text></View>;
 
   const openListing = (category: BrowsableCategory, id: string) =>
     navigation.navigate("MarketplaceListingDetail", { category, listingId: id });
   const seller = shop.seller;
   const tabs: { key: Tab; label: string }[] = [
-    { key: "listings", label: `Listings (${shop.listing_count})` },
-    { key: "deals", label: `Deals (${shop.deal_count})` },
-    { key: "about", label: "About" },
-    { key: "policies", label: "Policies" },
+    { key: "listings", label: t("mkt.shop.tabListings", { count: shop.listing_count }) },
+    { key: "deals", label: t("mkt.shop.tabDeals", { count: shop.deal_count }) },
+    { key: "about", label: t("mkt.shop.tabAbout") },
+    { key: "policies", label: t("mkt.shop.tabPolicies") },
   ];
-  const vacation = shop.on_vacation ? vacationNotice(shop) : null;
+  const vacation = shop.on_vacation ? vacationNotice(shop, t, locale) : null;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -96,28 +99,28 @@ export default function MarketplaceShopScreen({ route, navigation }: Props) {
           </View>
         </View>
         <Text style={styles.stats}>
-          {seller.rating_avg != null ? `★ ${seller.rating_avg} (${seller.rating_count})` : "No ratings yet"} · {seller.items_sold} sold · {followerLabel(shop.follower_count)}
+          {seller.rating_avg != null ? `★ ${seller.rating_avg} (${seller.rating_count})` : t("mkt.shop.noRatings")} · {t("mkt.shop.soldCount", { count: seller.items_sold })} · {followerLabel(shop.follower_count, t)}
         </Text>
-        {seller.id_verified && <Text style={styles.verified}>✓ ID verified</Text>}
+        {seller.id_verified && <Text style={styles.verified}>{t("mkt.shop.idVerified")}</Text>}
         {shop.is_owner ? (
           <TouchableOpacity style={styles.secondary} onPress={() => navigation.navigate("MarketplaceShopSettings")}>
-            <Text style={styles.secondaryText}>Edit my shop</Text>
+            <Text style={styles.secondaryText}>{t("mkt.shop.editShop")}</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={[styles.follow, shop.is_following && styles.following, followBusy && styles.disabled]} disabled={followBusy} onPress={handleFollow}>
-            {followBusy ? <ActivityIndicator color="#1B2A4A" /> : <Text style={[styles.followText, shop.is_following && styles.followingText]}>{shop.is_following ? "Unfollow" : "Follow"}</Text>}
+            {followBusy ? <ActivityIndicator color="#1B2A4A" /> : <Text style={[styles.followText, shop.is_following && styles.followingText]}>{shop.is_following ? t("mkt.shop.unfollow") : t("mkt.shop.follow")}</Text>}
           </TouchableOpacity>
         )}
         {followError ? <Text style={styles.error}>{followError}</Text> : null}
       </View>
 
       {shop.announcement ? <View style={styles.announcement}><Text style={styles.announcementText}>📣 {shop.announcement}</Text></View> : null}
-      {shop.coupon_available ? <Text style={styles.couponHint}>🏷 This shop has discount codes. Enter a code at checkout.</Text> : null}
+      {shop.coupon_available ? <Text style={styles.couponHint}>{t("mkt.shop.couponHint")}</Text> : null}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-        {tabs.map((t) => (
-          <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabOn]} onPress={() => setTab(t.key)}>
-            <Text style={[styles.tabText, tab === t.key && styles.tabTextOn]}>{t.label}</Text>
+        {tabs.map((item) => (
+          <TouchableOpacity key={item.key} style={[styles.tab, tab === item.key && styles.tabOn]} onPress={() => setTab(item.key)}>
+            <Text style={[styles.tabText, tab === item.key && styles.tabTextOn]}>{item.label}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -134,23 +137,23 @@ export default function MarketplaceShopScreen({ route, navigation }: Props) {
 
         {tab === "about" && (
           <View>
-            <Text style={styles.sectionTitle}>About this shop</Text>
-            <Text style={styles.text}>{shop.description?.trim() || "This seller has not written a description yet."}</Text>
-            <Text style={styles.sectionTitle}>Seller</Text>
-            <Text style={styles.text}>{memberSinceLabel(seller.member_since)}</Text>
-            <Text style={styles.text}>{seller.items_sold} sold · {seller.active_listings} active {seller.active_listings === 1 ? "listing" : "listings"}</Text>
+            <Text style={styles.sectionTitle}>{t("mkt.shop.aboutTitle")}</Text>
+            <Text style={styles.text}>{shop.description?.trim() || t("mkt.shop.noDescription")}</Text>
+            <Text style={styles.sectionTitle}>{t("mkt.shop.sellerTitle")}</Text>
+            <Text style={styles.text}>{memberSinceLabel(seller.member_since, t, locale)}</Text>
+            <Text style={styles.text}>{t("mkt.shop.soldCount", { count: seller.items_sold })} · {t(seller.active_listings === 1 ? "mkt.shop.activeListingsOne" : "mkt.shop.activeListingsMany", { count: seller.active_listings })}</Text>
             {seller.reply_time_hours != null && seller.reply_rate_pct != null && (
-              <Text style={styles.text}>⏱ {replyTimeLabel(seller.reply_time_hours)} · {seller.reply_rate_pct}% reply rate</Text>
+              <Text style={styles.text}>⏱ {replyTimeLabel(seller.reply_time_hours, t)} · {t("mkt.shop.replyRate", { pct: seller.reply_rate_pct })}</Text>
             )}
           </View>
         )}
 
         {tab === "policies" && (
           <View>
-            <Text style={styles.sectionTitle}>Shipping policy</Text>
-            <Text style={styles.text}>{policyText(shop.shipping_policy, "shipping")}</Text>
-            <Text style={styles.sectionTitle}>Return policy</Text>
-            <Text style={styles.text}>{policyText(shop.return_policy, "returns")}</Text>
+            <Text style={styles.sectionTitle}>{t("mkt.shop.shippingPolicyTitle")}</Text>
+            <Text style={styles.text}>{policyText(shop.shipping_policy, "shipping", t)}</Text>
+            <Text style={styles.sectionTitle}>{t("mkt.shop.returnPolicyTitle")}</Text>
+            <Text style={styles.text}>{policyText(shop.return_policy, "returns", t)}</Text>
           </View>
         )}
       </View>

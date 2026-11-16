@@ -1,19 +1,23 @@
-export function replyTimeLabel(hours: number): string {
-  if (hours < 1) return "Usually replies within an hour";
-  if (hours < 24) return `Usually replies within ${Math.ceil(hours)} hours`;
-  return `Usually replies within ${Math.ceil(hours / 24)} days`;
+import { translateEnglish, type Translate } from "../i18n/translate";
+
+export function replyTimeLabel(hours: number, t: Translate = translateEnglish): string {
+  if (hours < 1) return t("mkt.trust.replyHour");
+  if (hours < 24) return t("mkt.trust.replyHours", { count: Math.ceil(hours) });
+  return t("mkt.trust.replyDays", { count: Math.ceil(hours / 24) });
 }
 
-export function lastSeenLabel(iso: string, now: Date = new Date()): string {
+export function lastSeenLabel(iso: string, now: Date = new Date(), t: Translate = translateEnglish): string {
   const minutes = Math.max(0, Math.round((now.getTime() - new Date(iso).getTime()) / 60000));
-  if (minutes < 5) return "Active now";
-  if (minutes < 60) return `Last seen ${minutes} minutes ago`;
+  if (minutes < 5) return t("mkt.trust.activeNow");
+  if (minutes < 60) return t("mkt.trust.seenMinutes", { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Last seen ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  if (hours < 24) return t(hours === 1 ? "mkt.trust.seenHour" : "mkt.trust.seenHours", { count: hours });
   const days = Math.round(hours / 24);
-  return `Last seen ${days} ${days === 1 ? "day" : "days"} ago`;
+  return t(days === 1 ? "mkt.trust.seenDay" : "mkt.trust.seenDays", { count: days });
 }
 
-export function memberSinceLabel(date: string): string {
-  return `Member since ${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" })}`;
+export function memberSinceLabel(date: string, t: Translate = translateEnglish, locale?: string): string {
+  return t("mkt.trust.memberSince", {
+    date: new Date(`${date}T12:00:00`).toLocaleDateString(locale, { month: "long", year: "numeric" }),
+  });
 }

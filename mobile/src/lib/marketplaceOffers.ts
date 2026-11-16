@@ -1,4 +1,5 @@
 import type { MarketplaceOffer, MarketplaceOfferStatus } from "./api";
+import { translateEnglish, type Translate } from "../i18n/translate";
 
 export type OfferRole = "buying" | "selling";
 export type OfferAction = "accept" | "decline" | "counter" | "withdraw" | "pay";
@@ -12,13 +13,13 @@ export const OFFER_STATUS_LABELS: Record<MarketplaceOfferStatus, string> = {
   DECLINED: "Declined", WITHDRAWN: "Withdrawn", EXPIRED: "Expired",
 };
 
-export function offerStatusLabel(status: MarketplaceOfferStatus, role: OfferRole): string {
+export function offerStatusLabel(status: MarketplaceOfferStatus, role: OfferRole, t: Translate = translateEnglish): string {
   if (role === "selling") {
-    if (status === "PENDING") return "Waiting for your answer";
-    if (status === "COUNTERED") return "Counter-offer sent";
-    if (status === "ACCEPTED") return "Accepted, waiting for payment";
+    if (status === "PENDING") return t("mkt.offers.sellPENDING");
+    if (status === "COUNTERED") return t("mkt.offers.sellCOUNTERED");
+    if (status === "ACCEPTED") return t("mkt.offers.sellACCEPTED");
   }
-  return OFFER_STATUS_LABELS[status];
+  return t(`mkt.offers.status${status}`);
 }
 
 /** What the caller may do with an offer, given the side they are on. "pay" opens the listing to pay the agreed price. */
@@ -50,19 +51,19 @@ export function parseAmount(text: string): number | null {
   return value > 0 ? value : null;
 }
 
-export function offerAmountError(text: string, askingXaf: number): string {
+export function offerAmountError(text: string, askingXaf: number, t: Translate = translateEnglish): string {
   const amount = parseAmount(text);
-  if (amount === null) return "Enter your offer in XAF.";
-  if (amount >= askingXaf) return "Your offer is at or above the asking price: just buy it at that price.";
-  if (amount < Math.round(askingXaf * MIN_OFFER_SHARE)) return `Offers must be at least ${Math.round(MIN_OFFER_SHARE * 100)}% of the asking price.`;
+  if (amount === null) return t("mkt.offers.errEnterOffer");
+  if (amount >= askingXaf) return t("mkt.offers.errAtOrAbove");
+  if (amount < Math.round(askingXaf * MIN_OFFER_SHARE)) return t("mkt.offers.errMinShare", { pct: Math.round(MIN_OFFER_SHARE * 100) });
   return "";
 }
 
-export function counterAmountError(text: string, buyerOfferXaf: number, askingXaf: number): string {
+export function counterAmountError(text: string, buyerOfferXaf: number, askingXaf: number, t: Translate = translateEnglish): string {
   const amount = parseAmount(text);
-  if (amount === null) return "Enter your counter-offer in XAF.";
+  if (amount === null) return t("mkt.offers.errEnterCounter");
   if (amount <= buyerOfferXaf || amount >= askingXaf) {
-    return `A counter-offer must be between the buyer's ${buyerOfferXaf.toLocaleString()} XAF and your asking ${askingXaf.toLocaleString()} XAF.`;
+    return t("mkt.offers.errCounterRange", { buyer: buyerOfferXaf.toLocaleString(), asking: askingXaf.toLocaleString() });
   }
   return "";
 }

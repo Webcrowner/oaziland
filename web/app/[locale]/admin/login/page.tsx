@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useRouter, Link } from "@/i18n/navigation";
-import { loginUser, getMyProfile, getDataAdminLink, ApiStatusError } from "@/lib/api";
+import { loginUser, getMyProfile, getDataAdminLink, ApiStatusError, MfaRequiredError } from "@/lib/api";
 import Button from "@/components/ui/Button";
+import MfaLoginStep from "@/components/MfaLoginStep";
 import { IconUser, IconLock, IconEye, IconEyeOff, IconShield } from "@/components/Icons";
 
 /** Set when the data admin (/admin/ on the backend) sent the visitor here to sign in. */
@@ -24,7 +25,7 @@ export default function AdminLoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [handingOver, setHandingOver] = useState(false);
-
+  const [mfaChallenge, setMfaChallenge] = useState<MfaRequiredError | null>(null);
   /** Sends a signed-in admin on to the data admin. Returns false when the session can't be used. */
   async function goToDataAdmin(accessToken: string, next?: string): Promise<boolean> {
     try {
@@ -56,34 +57,39 @@ export default function AdminLoginPage() {
       let tokens;
       try {
         tokens = await loginUser(username, password);
-      } catch {
-        setError(t("invalidCredentials"));
+      } catch (err) {
+        if (err instanceof MfaRequiredError) setMfaChallenge(err);
+        else setError(t("invalidCredentials"));
         return;
       }
-
-      // Tokens are only kept if the account really is an admin.
-      const profile = await getMyProfile(tokens.access);
-      if (!profile.is_admin) {
-        setError(t("notAdmin"));
-        return;
-      }
-
-      localStorage.setItem("access_token", tokens.access);
-      localStorage.setItem("refresh_token", tokens.refresh);
-      const target = dataAdminTarget();
-      if (target) {
-        setHandingOver(true);
-        if (!(await goToDataAdmin(tokens.access, target.next))) setHandingOver(false);
-        return;
-      }
-      // Back to the console tab the admin was trying to open; only a plain tab name is passed on.
-      const wanted = new URLSearchParams(window.location.search).get("tab");
-      router.push(wanted && /^[a-z]{2,20}$/.test(wanted) ? `/admin?tab=${wanted}` : "/admin");
+      await finishAdminSignIn(tokens);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("invalidCredentials"));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function finishAdminSignIn(tokens: { access: string; refresh: string }) {
+    // Tokens are only kept if the account really is an admin.
+    const profile = await getMyProfile(tokens.access);
+    if (!profile.is_admin) {
+      setMfaChallenge(null);
+      setError(t("notAdmin"));
+      return;
+    }
+
+    localStorage.setItem("access_token", tokens.access);
+    localStorage.setItem("refresh_token", tokens.refresh);
+    const target = dataAdminTarget();
+    if (target) {
+      setHandingOver(true);
+      if (!(await goToDataAdmin(tokens.access, target.next))) setHandingOver(false);
+      return;
+    }
+    // Back to the console tab the admin was trying to open; only a plain tab name is passed on.
+    const wanted = new URLSearchParams(window.location.search).get("tab");
+    router.push(wanted && /^[a-z]{2,20}$/.test(wanted) ? `/admin?tab=${wanted}` : "/admin");
   }
 
   return (
@@ -123,6 +129,12 @@ export default function AdminLoginPage() {
             </p>
           )}
 
+          {mfaChallenge ? (
+            <>
+              <MfaLoginStep challenge={mfaChallenge} onTokens={finishAdminSignIn} onBack={() => { setMfaChallenge(null); setPassword(""); }} />
+              {error && <div role="alert" className="mt-4 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 font-medium">{error}</div>}
+            </>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="admin-username" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
@@ -180,6 +192,7 @@ export default function AdminLoginPage() {
               {loading ? t("signingIn") : t("signIn")}
             </Button>
           </form>
+          )}
 
           <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col items-center gap-3 text-xs text-slate-500">
             <span>{t("restrictedNote")}</span>

@@ -422,6 +422,20 @@ class Message(models.Model):
         self.save(update_fields=["folder"])
 
 
+class MessageTranslation(models.Model):
+    """A chat message translated into one language, saved so it is only ever paid for once (see social.translation)."""
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="translations")
+    target = models.CharField(max_length=5)
+    text = models.TextField()
+    source_language = models.CharField(max_length=10, blank=True)
+    provider = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "message_translations"
+        unique_together = [("message", "target")]
+
+
 class MessageReceipt(models.Model):
     """One row per (message, recipient) — WHY this instead of a
     delivered_at/seen_at pair directly on Message: Message.sender is

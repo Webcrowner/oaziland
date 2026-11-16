@@ -11,8 +11,58 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 from oaziland.permissions import IsAdminRole
-from .models import Notification, GreetingSettings
+from .models import Notification, GreetingSettings, FeatureSettings
 from .serializers import NotificationSerializer, GreetingSettingsSerializer, ListingShareMessageSerializer, PushDeviceSerializer
+
+
+class AdminFeatureSettingsView(APIView):
+    """Admin switches for the paid features: chat translation, SMS and email. GET shows each switch and whether
+    a provider is really connected behind it; PATCH changes any of the three."""
+    permission_classes = [IsAdminRole]
+    FIELDS = ("chat_translation_enabled", "sms_enabled", "email_enabled")
+
+    @staticmethod
+    def _payload(row) -> dict:
+        from social.translation import provider_status
+        from .services import EmailDispatcher, SMSDispatcher
+        return {
+            **{field: getattr(row, field) for field in AdminFeatureSettingsView.FIELDS},
+            "translation": provider_status(),
+            "sms_connected": SMSDispatcher.is_configured(),
+            "email_connected": EmailDispatcher.is_configured(),
+            "updated_at": row.updated_at,
+        }
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        return Response(self._payload(FeatureSettings.get_settings()))
+
+    @extend_schema(request=dict, responses={200: dict, 400: dict})
+    def patch(self, request):
+        row = FeatureSettings.get_settings()
+        unknown = [key for key in request.data if key not in self.FIELDS]
+        if unknown:
+            return Response({"detail": f"Unknown setting: {', '.join(unknown)}."}, status=status.HTTP_400_BAD_REQUEST)
+        for field in self.FIELDS:
+            if field in request.data:
+                value = request.data[field]
+                if not isinstance(value, bool):
+                    return Response({field: "Send true or false."}, status=status.HTTP_400_BAD_REQUEST)
+                setattr(row, field, value)
+        row.updated_by = request.user
+        row.save()
+        return Response(self._payload(row))
+
+
+class PublicFeaturesView(APIView):
+    """What the apps may show right now (translate button, SMS / email choices). Public, so the pages can hide
+    a switched-off feature before anyone signs in."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .features import public_features
+        return Response(public_features())
 
 
 class AdminGreetingSettingsView(APIView):

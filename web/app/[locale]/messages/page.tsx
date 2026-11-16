@@ -5,6 +5,7 @@ import { Link } from "@/i18n/navigation";
 import Button from "@/components/ui/Button";
 import Avatar from "@/components/Avatar";
 import ChatLinkText from "@/components/ChatLinkText";
+import ChatTranslate from "@/components/ChatTranslate";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import {
   listConversations,
@@ -14,6 +15,7 @@ import {
   sendTypingHeartbeat,
   getTypingStatus,
   getMyProfile,
+  getPublicFeatures,
   setUserBlocked,
   type ConversationSummary,
   type ConversationMessage,
@@ -77,6 +79,12 @@ export default function MessagesPage() {
       .then((p) => setMyUserId(p.id))
       .catch(() => {});
   }, [token]);
+
+  // The "Translate" link only exists while an admin has translation on and a provider is connected.
+  const [canTranslate, setCanTranslate] = useState(false);
+  useEffect(() => {
+    getPublicFeatures().then((features) => setCanTranslate(features.chat_translation));
+  }, []);
 
   const [nowMs, setNowMs] = useState<number>(0);
 
@@ -568,6 +576,10 @@ export default function MessagesPage() {
                             <div className="text-xs sm:text-[13px] leading-relaxed break-words whitespace-pre-wrap">
                               <ChatLinkText text={msg.text} />
                             </div>
+
+                            {canTranslate && !isMe && selectedId && msg.text.trim() && (
+                              <ChatTranslate conversationId={selectedId} messageId={msg.id} text={msg.text} />
+                            )}
 
                             <div className="flex items-center justify-end gap-1.5 mt-1 -mb-1 select-none">
                               <span className={`text-[10px] font-medium ${isMe ? "text-slate-400" : "text-slate-400"}`}>

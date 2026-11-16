@@ -5,9 +5,11 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { getMarketplaceSeller, type MarketplaceSellerSummary } from "../lib/api";
 import { lastSeenLabel, memberSinceLabel, replyTimeLabel } from "../lib/sellerTrust";
+import { useI18n } from "../i18n";
 
 /** Who you are dealing with: verified ID, rating, member since, items sold, other listings and how quickly they reply. The name opens their shop. */
 export default function SellerTrustCard({ sellerId, sellerName }: { sellerId: string; sellerName: string }) {
+  const { t, locale } = useI18n();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [seller, setSeller] = useState<MarketplaceSellerSummary | null>(null);
 
@@ -18,22 +20,22 @@ export default function SellerTrustCard({ sellerId, sellerName }: { sellerId: st
   return (
     <View style={styles.card}>
       <View style={styles.nameRow}>
-        <TouchableOpacity onPress={() => navigation.navigate("MarketplaceShop", { userId: sellerId })} accessibilityRole="link" accessibilityLabel="Open this seller's shop">
+        <TouchableOpacity onPress={() => navigation.navigate("MarketplaceShop", { userId: sellerId })} accessibilityRole="link" accessibilityLabel={t("mkt.trust.openShop")}>
           <Text style={styles.name}>{seller?.name ?? sellerName}</Text>
         </TouchableOpacity>
-        {seller?.id_verified && <Text style={styles.verified}>✓ ID verified</Text>}
+        {seller?.id_verified && <Text style={styles.verified}>✓ {t("mkt.trust.idVerified")}</Text>}
       </View>
       {seller && (
         <View>
           <Text style={styles.line}>
-            {seller.rating_avg != null ? `★ ${seller.rating_avg} (${seller.rating_count} ${seller.rating_count === 1 ? "rating" : "ratings"})` : "No ratings yet"}
+            {seller.rating_avg != null ? `★ ${seller.rating_avg} (${t(seller.rating_count === 1 ? "mkt.trust.ratingOne" : "mkt.trust.ratingMany", { count: seller.rating_count })})` : t("mkt.trust.noRatings")}
           </Text>
-          <Text style={styles.line}>{memberSinceLabel(seller.member_since)}</Text>
-          <Text style={styles.line}>{seller.items_sold} sold · {seller.active_listings} active {seller.active_listings === 1 ? "listing" : "listings"}</Text>
+          <Text style={styles.line}>{memberSinceLabel(seller.member_since, t, locale)}</Text>
+          <Text style={styles.line}>{t(seller.active_listings === 1 ? "mkt.trust.soldOne" : "mkt.trust.soldMany", { sold: seller.items_sold, active: seller.active_listings })}</Text>
           {seller.reply_time_hours != null && seller.reply_rate_pct != null && (
-            <Text style={styles.line}>⏱ {replyTimeLabel(seller.reply_time_hours)} · {seller.reply_rate_pct}% reply rate</Text>
+            <Text style={styles.line}>⏱ {replyTimeLabel(seller.reply_time_hours, t)} · {t("mkt.trust.replyRate", { pct: seller.reply_rate_pct })}</Text>
           )}
-          {seller.last_seen_at ? <Text style={styles.line}>{lastSeenLabel(seller.last_seen_at)}</Text> : null}
+          {seller.last_seen_at ? <Text style={styles.line}>{lastSeenLabel(seller.last_seen_at, new Date(), t)}</Text> : null}
         </View>
       )}
     </View>

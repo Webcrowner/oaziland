@@ -10,6 +10,7 @@ import {
   cartLineKey, checkoutBlocker, chosenDeliveryMethod, deliveryOptionLabel, formatXaf, needsDeliveryAddress, quoteRequest, type CartDeliveryMethod,
 } from "../lib/marketplaceCart";
 import { compareAtDisplay } from "../lib/compareAt";
+import { useI18n } from "../i18n";
 import { PercentBadge, SaleCountdown } from "./SalePrice";
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
 
 /** One seller's part of the cart: the items, and the delivery, coupon and Mobile Money payment for them. */
 export default function CartSellerGroup({ group, busyKey, onSetQuantity, onRemove, onPaid, onOpenListing, onOpenShop }: Props) {
+  const { t } = useI18n();
   const [picked, setPicked] = useState<CartDeliveryMethod | "">("");
   const [address, setAddress] = useState("");
   const [quoteAddress, setQuoteAddress] = useState("");
@@ -37,7 +39,7 @@ export default function CartSellerGroup({ group, busyKey, onSetQuantity, onRemov
 
   const method = chosenDeliveryMethod(group.delivery_options, picked);
   const itemsKey = group.items.map((i) => `${cartLineKey(i)}:${i.quantity}`).join(",");
-  const blocker = checkoutBlocker(group, method, address, phone, quote !== null);
+  const blocker = checkoutBlocker(group, method, address, phone, quote !== null, t);
 
   useEffect(() => {
     setQuote(null);
@@ -46,9 +48,9 @@ export default function CartSellerGroup({ group, busyKey, onSetQuantity, onRemov
     let stale = false;
     quoteMarketplaceCart(quoteRequest(group.seller_id, method, quoteAddress, coupon))
       .then((next) => { if (!stale) setQuote(next); })
-      .catch((err) => { if (!stale) setQuoteError(err instanceof Error ? err.message : "Could not work out the total."); });
+      .catch((err) => { if (!stale) setQuoteError(err instanceof Error ? err.message : t("mkt.cart.quoteFailed")); });
     return () => { stale = true; };
-  }, [group.seller_id, group.can_checkout, method, coupon, quoteAddress, itemsKey]);
+  }, [group.seller_id, group.can_checkout, method, coupon, quoteAddress, itemsKey, t]);
 
   async function handlePay() {
     if (method === "" || !quote) return;
@@ -58,7 +60,7 @@ export default function CartSellerGroup({ group, busyKey, onSetQuantity, onRemov
       const request = quoteRequest(group.seller_id, method, address, quote.coupon_error ? "" : coupon);
       onPaid(await checkoutMarketplaceCart({ ...request, phone_number: phone.trim() }));
     } catch (err) {
-      setPayError(err instanceof Error ? err.message : "Could not start the payment. Please try again.");
+      setPayError(err instanceof Error ? err.message : t("mkt.cart.payFailed"));
     } finally {
       setPaying(false);
     }
@@ -82,7 +84,7 @@ export default function CartSellerGroup({ group, busyKey, onSetQuantity, onRemov
         return (
           <View key={key} style={[styles.item, !item.available && styles.itemOff]}>
             <TouchableOpacity onPress={() => onOpenListing(item.listing_id)}>
-              {item.photo_url ? <Image source={{ uri: item.photo_url }} style={styles.photo} /> : <View style={[styles.photo, styles.photoEmpty]}><Text style={styles.photoEmptyText}>No photo</Text></View>}
+              {item.photo_url ? <Image source={{ uri: item.photo_url }} style={styles.photo} /> : <View style={[styles.photo, styles.photoEmpty]}><Text style={styles.photoEmptyText}>{t("mkt.noPhoto")}</Text></View>}
             </TouchableOpacity>
             <View style={styles.itemBody}>
               <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
@@ -94,21 +96,21 @@ export default function CartSellerGroup({ group, busyKey, onSetQuantity, onRemov
               </View>
               {item.on_sale && <SaleCountdown endsAt={item.sale_ends_at} />}
               {!item.available ? (
-                <Text style={styles.reason}>{item.reason || "This item is no longer available."}</Text>
+                <Text style={styles.reason}>{item.reason || t("mkt.cart.itemGone")}</Text>
               ) : (
                 <View style={styles.stepper}>
-                  <TouchableOpacity style={styles.stepButton} disabled={busy || item.quantity <= 1} onPress={() => onSetQuantity(item, clampQuantity(item.quantity - 1, item.stock))} accessibilityLabel="Fewer">
+                  <TouchableOpacity style={styles.stepButton} disabled={busy || item.quantity <= 1} onPress={() => onSetQuantity(item, clampQuantity(item.quantity - 1, item.stock))} accessibilityLabel={t("mkt.cart.fewer")}>
                     <Text style={styles.stepText}>−</Text>
                   </TouchableOpacity>
                   <Text style={styles.stepValue}>{item.quantity}</Text>
-                  <TouchableOpacity style={styles.stepButton} disabled={busy || item.quantity >= item.stock} onPress={() => onSetQuantity(item, clampQuantity(item.quantity + 1, item.stock))} accessibilityLabel="More">
+                  <TouchableOpacity style={styles.stepButton} disabled={busy || item.quantity >= item.stock} onPress={() => onSetQuantity(item, clampQuantity(item.quantity + 1, item.stock))} accessibilityLabel={t("mkt.cart.more")}>
                     <Text style={styles.stepText}>+</Text>
                   </TouchableOpacity>
                   <Text style={styles.line}>{formatXaf(item.line_total_xaf)}</Text>
                 </View>
               )}
               <TouchableOpacity style={styles.removeButton} disabled={busy} onPress={() => onRemove(item)}>
-                <Text style={styles.remove}>Remove</Text>
+                <Text style={styles.remove}>{t("mkt.remove")}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -116,57 +118,57 @@ export default function CartSellerGroup({ group, busyKey, onSetQuantity, onRemov
       })}
 
       <View style={styles.checkout}>
-        {!quote && <View style={styles.totalRow}><Text style={styles.label}>Items</Text><Text style={styles.value}>{formatXaf(group.subtotal_xaf)}</Text></View>}
+        {!quote && <View style={styles.totalRow}><Text style={styles.label}>{t("mkt.cart.items")}</Text><Text style={styles.value}>{formatXaf(group.subtotal_xaf)}</Text></View>}
 
-        <Text style={styles.heading}>How do you want to get them?</Text>
+        <Text style={styles.heading}>{t("mkt.cart.howToGet")}</Text>
         {group.delivery_options.length === 0 ? (
-          <Text style={styles.muted}>No delivery option works for all of these items together. Try checking out fewer items.</Text>
+          <Text style={styles.muted}>{t("mkt.cart.noDeliveryTogether")}</Text>
         ) : group.delivery_options.map((option) => (
           <TouchableOpacity key={option.method} style={[styles.option, method === option.method && styles.optionOn]} onPress={() => setPicked(option.method)}>
-            <Text style={styles.optionText}>{method === option.method ? "● " : "○ "}{deliveryOptionLabel(option)}</Text>
+            <Text style={styles.optionText}>{method === option.method ? "● " : "○ "}{deliveryOptionLabel(option, t)}</Text>
           </TouchableOpacity>
         ))}
         {needsDeliveryAddress(method) && (
           <TextInput
-            style={styles.input} placeholder="Delivery address" value={address} onChangeText={setAddress}
+            style={styles.input} placeholder={t("mkt.cart.address")} value={address} onChangeText={setAddress}
             onEndEditing={() => setQuoteAddress(address.trim())}
           />
         )}
 
-        <Text style={styles.heading}>Discount code</Text>
+        <Text style={styles.heading}>{t("mkt.cart.discountCode")}</Text>
         <View style={styles.couponRow}>
           <TextInput
-            style={[styles.input, styles.couponInput]} placeholder="Have a coupon?" value={couponInput} autoCapitalize="characters" autoCorrect={false}
-            onChangeText={setCouponInput} accessibilityLabel="Coupon code"
+            style={[styles.input, styles.couponInput]} placeholder={t("mkt.cart.haveCoupon")} value={couponInput} autoCapitalize="characters" autoCorrect={false}
+            onChangeText={setCouponInput} accessibilityLabel={t("mkt.cart.couponCode")}
           />
           <TouchableOpacity style={[styles.applyButton, !couponInput.trim() && styles.disabled]} disabled={!couponInput.trim()} onPress={() => setCoupon(normalizeCouponCode(couponInput))}>
-            <Text style={styles.applyText}>Apply</Text>
+            <Text style={styles.applyText}>{t("mkt.apply")}</Text>
           </TouchableOpacity>
         </View>
         {quote?.coupon_error ? <Text style={styles.error}>{quote.coupon_error}</Text> : null}
         {coupon && quote && !quote.coupon_error && discount > 0 ? (
           <View style={styles.totalRow}>
-            <Text style={styles.success}>Coupon {coupon} applied</Text>
-            <TouchableOpacity onPress={() => { setCoupon(""); setCouponInput(""); }}><Text style={styles.remove}>Remove</Text></TouchableOpacity>
+            <Text style={styles.success}>{t("mkt.cart.couponApplied", { code: coupon })}</Text>
+            <TouchableOpacity onPress={() => { setCoupon(""); setCouponInput(""); }}><Text style={styles.remove}>{t("mkt.remove")}</Text></TouchableOpacity>
           </View>
         ) : null}
 
         {quoteError ? <Text style={styles.error}>{quoteError}</Text> : null}
         {quote && (
           <View style={styles.summary}>
-            <View style={styles.totalRow}><Text style={styles.label}>Items</Text><Text style={styles.value}>{formatXaf(quote.subtotal_xaf)}</Text></View>
-            {discount > 0 && <View style={styles.totalRow}><Text style={styles.label}>Discount</Text><Text style={styles.success}>−{formatXaf(discount)}</Text></View>}
-            <View style={styles.totalRow}><Text style={styles.label}>Delivery</Text><Text style={styles.value}>{Number(quote.delivery_fee_xaf) > 0 ? formatXaf(quote.delivery_fee_xaf) : "Free"}</Text></View>
-            <View style={styles.totalRow}><Text style={styles.total}>Total</Text><Text style={styles.total}>{formatXaf(quote.total_xaf)}</Text></View>
+            <View style={styles.totalRow}><Text style={styles.label}>{t("mkt.cart.items")}</Text><Text style={styles.value}>{formatXaf(quote.subtotal_xaf)}</Text></View>
+            {discount > 0 && <View style={styles.totalRow}><Text style={styles.label}>{t("mkt.cart.discount")}</Text><Text style={styles.success}>−{formatXaf(discount)}</Text></View>}
+            <View style={styles.totalRow}><Text style={styles.label}>{t("mkt.cart.delivery")}</Text><Text style={styles.value}>{Number(quote.delivery_fee_xaf) > 0 ? formatXaf(quote.delivery_fee_xaf) : t("mkt.freeCapital")}</Text></View>
+            <View style={styles.totalRow}><Text style={styles.total}>{t("mkt.cart.total")}</Text><Text style={styles.total}>{formatXaf(quote.total_xaf)}</Text></View>
           </View>
         )}
 
-        <TextInput style={styles.input} placeholder="Mobile money phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-        <Text style={styles.note}>You make one Mobile Money payment for everything from {group.seller_name}. Each item then becomes its own order, tracked and refundable separately.</Text>
+        <TextInput style={styles.input} placeholder={t("mkt.cart.phone")} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+        <Text style={styles.note}>{t("mkt.cart.onePayment", { seller: group.seller_name })}</Text>
         {blocker && !paying ? <Text style={styles.muted}>{blocker}</Text> : null}
         {payError ? <Text style={styles.error}>{payError}</Text> : null}
         <TouchableOpacity style={[styles.payButton, (paying || Boolean(blocker)) && styles.disabled]} disabled={paying || Boolean(blocker)} onPress={handlePay}>
-          {paying ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.payText}>{quote ? `Pay ${formatXaf(quote.total_xaf)}` : "Pay"}</Text>}
+          {paying ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.payText}>{quote ? t("mkt.cart.payAmount", { amount: formatXaf(quote.total_xaf) }) : t("mkt.cart.pay")}</Text>}
         </TouchableOpacity>
       </View>
     </View>

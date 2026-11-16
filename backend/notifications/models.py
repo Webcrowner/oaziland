@@ -85,6 +85,30 @@ class GreetingSettings(models.Model):
         return obj
 
 
+class FeatureSettings(models.Model):
+    """Admin switches for the features that cost money per use. A single row (id=1), read through
+    notifications.features, which also caches it. Turning a switch off hides the feature from users and stops the
+    platform calling the paid provider behind it."""
+    chat_translation_enabled = models.BooleanField(default=True)
+    sms_enabled = models.BooleanField(default=True)
+    email_enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    class Meta:
+        db_table = "feature_settings"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from .features import clear_cache
+        clear_cache()  # this server sees the change at once; any other server within CACHE_SECONDS
+
+    @classmethod
+    def get_settings(cls):
+        obj, _ = cls.objects.get_or_create(id=1)
+        return obj
+
+
 class PushPlatform(models.TextChoices):
     WEB = "WEB", "Web browser (Web Push)"
     EXPO = "EXPO", "Mobile app (Expo push)"

@@ -5,8 +5,10 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import {
   getConversationMessages, sendConversationMessage, markConversationSeen,
-  sendTypingHeartbeat, getTypingStatus, ConversationMessage,
+  sendTypingHeartbeat, getTypingStatus, getPublicFeatures, ConversationMessage,
 } from "../lib/api";
+import ChatBubble from "../components/ChatBubble";
+import { useI18n } from "../i18n";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Conversation">;
 
@@ -19,12 +21,19 @@ type Props = NativeStackScreenProps<RootStackParamList, "Conversation">;
  * instant like a true WebSocket connection would be.
  */
 export default function ConversationScreen({ route }: Props) {
+  const { t } = useI18n();
   const { conversationId } = route.params;
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [typingUsernames, setTypingUsernames] = useState<string[]>([]);
+  const [canTranslate, setCanTranslate] = useState(false);
   const lastHeartbeatRef = useRef<number>(0);
+
+  // The "Translate" link only exists while an admin has translation on and a provider is connected.
+  useEffect(() => {
+    getPublicFeatures().then((features) => setCanTranslate(features.chat_translation));
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -70,21 +79,16 @@ export default function ConversationScreen({ route }: Props) {
         data={messages}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <View style={styles.bubble}>
-            <Text style={styles.bubbleText}>{item.text}</Text>
-            <Text style={styles.tickStatus}>{item.tick_status.seen ? "Seen" : item.tick_status.delivered ? "Delivered" : "Sent"}</Text>
-          </View>
-        )}
+        renderItem={({ item }) => <ChatBubble message={item} conversationId={conversationId} canTranslate={canTranslate} />}
       />
 
       {typingUsernames.length > 0 && (
-        <Text style={styles.typingIndicator}>{typingUsernames.join(", ")} is typing...</Text>
+        <Text style={styles.typingIndicator}>{t("chat.typing", { names: typingUsernames.join(", ") })}</Text>
       )}
 
       <View style={styles.inputRow}>
         <TextInput
-          style={styles.input} value={draft} onChangeText={handleDraftChange} placeholder="Type a message..."
+          style={styles.input} value={draft} onChangeText={handleDraftChange} placeholder={t("chat.placeholder")}
         />
         <TouchableOpacity style={styles.sendButton} onPress={handleSend} disabled={sending}>
           <Text style={styles.sendButtonText}>→</Text>
@@ -97,9 +101,6 @@ export default function ConversationScreen({ route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   list: { padding: 16 },
-  bubble: { backgroundColor: "#F3F4F6", borderRadius: 10, padding: 10, marginBottom: 8, alignSelf: "flex-start", maxWidth: "80%" },
-  bubbleText: { fontSize: 14, color: "#1F2937" },
-  tickStatus: { fontSize: 10, color: "#9CA3AF", marginTop: 4 },
   typingIndicator: { fontSize: 12, color: "#6B7280", fontStyle: "italic", paddingHorizontal: 16, paddingBottom: 4 },
   inputRow: { flexDirection: "row", borderTopWidth: 1, borderTopColor: "#E5E7EB", padding: 10, gap: 8 },
   input: { flex: 1, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },

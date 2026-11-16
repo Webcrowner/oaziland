@@ -2,19 +2,21 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { setupMfa, verifyMfa, getMfaStatus } from "@/lib/api";
+import { setupMfa, verifyMfa, getMfaStatus, getPublicFeatures } from "@/lib/api";
 
 /**
  * The real MFA setup/verify flow — closes the critical gap where the
  * backend endpoints existed but no page ever let a real user actually
  * complete them. A user landing here with MFA already enabled sees
  * that immediately rather than being walked through it again.
+ * A way of receiving codes that an admin switched off (SMS or email) is not offered.
  */
 export default function MfaSetupPage() {
   const t = useTranslations("MfaSetupPage");
   const router = useRouter();
 
   const [mfaType, setMfaType] = useState<"SMS_OTP" | "EMAIL_OTP">("SMS_OTP");
+  const [allowed, setAllowed] = useState<{ sms: boolean; email: boolean } | null>(null);
   const [destination, setDestination] = useState("");
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -32,6 +34,10 @@ export default function MfaSetupPage() {
     getMfaStatus(token)
       .then((status) => setAlreadyEnabled(status.mfa_enabled))
       .catch(() => {});
+    getPublicFeatures().then((features) => {
+      setAllowed({ sms: features.sms, email: features.email });
+      setMfaType((current) => (current === "SMS_OTP" && !features.sms && features.email ? "EMAIL_OTP" : current));
+    });
   }, [router]);
 
   async function handleSendCode(e: React.FormEvent) {
@@ -96,22 +102,28 @@ export default function MfaSetupPage() {
       <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--navy)] mb-2">{t("title")}</h1>
       <p className="text-gray-600 text-sm mb-6">{t("subtitle")}</p>
 
-      {!challengeId ? (
+      {allowed && !allowed.sms && !allowed.email ? (
+        <p role="status" className="rounded bg-amber-50 p-3 text-sm text-amber-900">{t("noMethodsAvailable")}</p>
+      ) : !challengeId ? (
         <form onSubmit={handleSendCode} className="flex flex-col gap-3">
           <label className="text-sm font-semibold text-gray-700">{t("chooseMethod")}</label>
           <div className="flex rounded overflow-hidden border border-gray-300">
-            <label className="flex-1">
-              <input type="radio" name="mfaType" checked={mfaType === "SMS_OTP"} onChange={() => setMfaType("SMS_OTP")} className="peer sr-only" />
-              <span className="block text-center py-2 text-gray-700 peer-checked:bg-[var(--navy)] peer-checked:text-white cursor-pointer transition-colors">
-                {t("methodSms")}
-              </span>
-            </label>
-            <label className="flex-1">
-              <input type="radio" name="mfaType" checked={mfaType === "EMAIL_OTP"} onChange={() => setMfaType("EMAIL_OTP")} className="peer sr-only" />
-              <span className="block text-center py-2 text-gray-700 peer-checked:bg-[var(--navy)] peer-checked:text-white cursor-pointer transition-colors">
-                {t("methodEmail")}
-              </span>
-            </label>
+            {(!allowed || allowed.sms) && (
+              <label className="flex-1">
+                <input type="radio" name="mfaType" checked={mfaType === "SMS_OTP"} onChange={() => setMfaType("SMS_OTP")} className="peer sr-only" />
+                <span className="block text-center py-2 text-gray-700 peer-checked:bg-[var(--navy)] peer-checked:text-white cursor-pointer transition-colors">
+                  {t("methodSms")}
+                </span>
+              </label>
+            )}
+            {(!allowed || allowed.email) && (
+              <label className="flex-1">
+                <input type="radio" name="mfaType" checked={mfaType === "EMAIL_OTP"} onChange={() => setMfaType("EMAIL_OTP")} className="peer sr-only" />
+                <span className="block text-center py-2 text-gray-700 peer-checked:bg-[var(--navy)] peer-checked:text-white cursor-pointer transition-colors">
+                  {t("methodEmail")}
+                </span>
+              </label>
+            )}
           </div>
 
           <input

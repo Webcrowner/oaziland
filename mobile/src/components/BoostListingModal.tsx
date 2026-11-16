@@ -4,7 +4,8 @@ import {
   getMarketplaceBoostOptions, boostMarketplaceListing,
   type BoostOption, type BoostPayWith, type BoostUnit, type BrowsableCategory,
 } from "../lib/api";
-import { boostLengthLabel, boostOption, boostTotal, clampBoostQuantity, BOOST_UNIT_LABELS } from "../lib/marketplaceBoost";
+import { boostLengthLabel, boostOption, boostTotal, clampBoostQuantity } from "../lib/marketplaceBoost";
+import { useI18n } from "../i18n";
 
 interface Props {
   target: { category: BrowsableCategory; id: string; title: string } | null;
@@ -14,6 +15,7 @@ interface Props {
 
 /** Buy a TOP boost for one listing: pick the length, then pay from the wallet or by Mobile Money. */
 export default function BoostListingModal({ target, onClose, onBoosted }: Props) {
+  const { t, locale } = useI18n();
   const [options, setOptions] = useState<BoostOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [unit, setUnit] = useState<BoostUnit>("DAILY");
@@ -35,9 +37,9 @@ export default function BoostListingModal({ target, onClose, onBoosted }: Props)
         setOptions(loaded);
         if (loaded.length > 0) setUnit(loaded[0].duration_unit);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the boost prices."))
+      .catch((err) => setError(err instanceof Error ? err.message : t("mkt.boost.loadFailed")))
       .finally(() => setLoading(false));
-  }, [target]);
+  }, [target, t]);
 
   const option = boostOption(options, unit);
   const total = option ? boostTotal(option.unit_price_xaf, quantity) : 0;
@@ -57,10 +59,10 @@ export default function BoostListingModal({ target, onClose, onBoosted }: Props)
       const result = await boostMarketplaceListing(target.category, target.id, {
         duration_unit: unit, quantity, pay_with: payWith, phone_number: payWith === "MOMO" ? phone.trim() : "",
       });
-      setDone(`Boosted until ${new Date(result.boosted_until).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}.`);
+      setDone(t("mkt.boost.boostedUntil", { date: new Date(result.boosted_until).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) }));
       onBoosted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not boost the listing. Please try again.");
+      setError(err instanceof Error ? err.message : t("mkt.boost.boostFailed"));
     } finally {
       setBusy(false);
     }
@@ -70,55 +72,55 @@ export default function BoostListingModal({ target, onClose, onBoosted }: Props)
     <Modal visible={target !== null} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.title}>Boost “{target?.title}”</Text>
-          <Text style={styles.text}>A boosted listing shows a TOP badge and comes first in its category.</Text>
+          <Text style={styles.title}>{t("mkt.boost.title", { title: target?.title ?? "" })}</Text>
+          <Text style={styles.text}>{t("mkt.boost.intro")}</Text>
 
           {loading ? <ActivityIndicator color="#1B2A4A" style={styles.spinner} /> : done ? (
             <View>
               <Text style={styles.success}>{done}</Text>
-              <TouchableOpacity style={styles.primary} onPress={onClose}><Text style={styles.primaryText}>Done</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.primary} onPress={onClose}><Text style={styles.primaryText}>{t("mkt.boost.done")}</Text></TouchableOpacity>
             </View>
           ) : options.length === 0 ? (
             <View>
-              {error ? <Text style={styles.error}>{error}</Text> : <Text style={styles.text}>Boosts are not on sale right now.</Text>}
-              <TouchableOpacity onPress={onClose}><Text style={styles.cancel}>Close</Text></TouchableOpacity>
+              {error ? <Text style={styles.error}>{error}</Text> : <Text style={styles.text}>{t("mkt.boost.notOnSale")}</Text>}
+              <TouchableOpacity onPress={onClose}><Text style={styles.cancel}>{t("mkt.boost.close")}</Text></TouchableOpacity>
             </View>
           ) : (
             <View>
-              <Text style={styles.label}>Length</Text>
+              <Text style={styles.label}>{t("mkt.boost.length")}</Text>
               <View style={styles.chips}>
                 {options.map((o) => (
                   <TouchableOpacity key={o.duration_unit} style={[styles.chip, unit === o.duration_unit && styles.chipActive]} onPress={() => pickUnit(o.duration_unit)}>
                     <Text style={[styles.chipText, unit === o.duration_unit && styles.chipTextActive]}>
-                      Per {BOOST_UNIT_LABELS[o.duration_unit].one} · {Number(o.unit_price_xaf).toLocaleString()} XAF
+                      {t(o.duration_unit === "DAILY" ? "mkt.boost.perDay" : "mkt.boost.perMonth")} · {Number(o.unit_price_xaf).toLocaleString()} XAF
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
               <View style={styles.stepper}>
-                <TouchableOpacity style={styles.stepButton} onPress={() => setQuantity(clampBoostQuantity(quantity - 1, option?.max_quantity ?? 1))} accessibilityLabel="Fewer"><Text style={styles.stepText}>−</Text></TouchableOpacity>
-                <Text style={styles.stepValue}>{boostLengthLabel(unit, quantity)}</Text>
-                <TouchableOpacity style={styles.stepButton} onPress={() => setQuantity(clampBoostQuantity(quantity + 1, option?.max_quantity ?? 1))} accessibilityLabel="More"><Text style={styles.stepText}>+</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.stepButton} onPress={() => setQuantity(clampBoostQuantity(quantity - 1, option?.max_quantity ?? 1))} accessibilityLabel={t("mkt.cart.fewer")}><Text style={styles.stepText}>−</Text></TouchableOpacity>
+                <Text style={styles.stepValue}>{boostLengthLabel(unit, quantity, t)}</Text>
+                <TouchableOpacity style={styles.stepButton} onPress={() => setQuantity(clampBoostQuantity(quantity + 1, option?.max_quantity ?? 1))} accessibilityLabel={t("mkt.cart.more")}><Text style={styles.stepText}>+</Text></TouchableOpacity>
               </View>
-              <Text style={styles.total}>Total: {total.toLocaleString()} XAF</Text>
+              <Text style={styles.total}>{t("mkt.boost.total", { amount: total.toLocaleString() })}</Text>
 
-              <Text style={styles.label}>Pay with</Text>
+              <Text style={styles.label}>{t("mkt.boost.payWith")}</Text>
               <View style={styles.chips}>
                 {(["WALLET", "MOMO"] as BoostPayWith[]).map((value) => (
                   <TouchableOpacity key={value} style={[styles.chip, payWith === value && styles.chipActive]} onPress={() => setPayWith(value)}>
-                    <Text style={[styles.chipText, payWith === value && styles.chipTextActive]}>{value === "WALLET" ? "Wallet" : "Mobile Money"}</Text>
+                    <Text style={[styles.chipText, payWith === value && styles.chipTextActive]}>{value === "WALLET" ? t("mkt.boost.wallet") : "Mobile Money"}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
               {payWith === "MOMO" && (
-                <TextInput style={styles.input} placeholder="Mobile money phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+                <TextInput style={styles.input} placeholder={t("mkt.cart.phone")} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
               )}
               {error ? <Text style={styles.error}>{error}</Text> : null}
               <View style={styles.buttons}>
                 <TouchableOpacity style={[styles.primary, !canPay && styles.disabled]} disabled={!canPay} onPress={submit}>
-                  {busy ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.primaryText}>Pay {total.toLocaleString()} XAF</Text>}
+                  {busy ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.primaryText}>{t("mkt.cart.payAmount", { amount: `${total.toLocaleString()} XAF` })}</Text>}
                 </TouchableOpacity>
-                <TouchableOpacity onPress={onClose}><Text style={styles.cancel}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity onPress={onClose}><Text style={styles.cancel}>{t("common.cancel")}</Text></TouchableOpacity>
               </View>
             </View>
           )}

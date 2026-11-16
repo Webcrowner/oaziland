@@ -9,15 +9,19 @@ import {
 import {
   DEFAULT_SELLER_PERIOD, SELLER_PERIODS, barHeights, bucketLabel, formatXaf, labelEvery, netBreakdown, periodLabel, salesCsvTitle, viewsLabel,
 } from "../lib/sellerDashboard";
+import { useI18n } from "../i18n";
+import type { MessageKey } from "../i18n/messages";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceSellerDashboard">;
 
-const CATEGORY_LABELS: Record<string, string> = { warehouses: "Warehouses", stores: "Stores", businesses: "Businesses", cars: "Cars", goods: "Goods" };
+const CATEGORY_KEYS: Record<string, MessageKey> = {
+  warehouses: "mkt.hub.catWarehouses", stores: "mkt.hub.catStores", businesses: "mkt.hub.catBusinesses", cars: "mkt.hub.catCars", goods: "mkt.hub.catGoods",
+};
 const CHART_HEIGHT = 120;
 const BAR_WIDTH = 22;
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+function formatDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function Kpi({ label, value, hint, accent }: { label: string; value: string; hint?: string; accent?: boolean }) {
@@ -32,6 +36,8 @@ function Kpi({ label, value, hint, accent }: { label: string; value: string; hin
 
 /** What the seller earned on the marketplace: totals, a net-per-period chart, fees, categories, top listings and payouts. */
 export default function MarketplaceSellerDashboardScreen({ navigation }: Props) {
+  const { t, locale } = useI18n();
+  const categoryLabel = (category: string) => (CATEGORY_KEYS[category] ? t(CATEGORY_KEYS[category]) : category);
   const [period, setPeriod] = useState<SellerPeriod>(DEFAULT_SELLER_PERIOD);
   const [data, setData] = useState<SellerDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,7 +63,7 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
     if (dashboard.status === "fulfilled") setData(dashboard.value);
     else {
       setData(null);
-      setError(dashboard.reason instanceof Error ? dashboard.reason.message : "Could not load your sales dashboard.");
+      setError(dashboard.reason instanceof Error ? dashboard.reason.message : t("mkt.dash.loadFailed"));
     }
     if (firstPage.status === "fulfilled") {
       setPayouts(firstPage.value.results);
@@ -66,11 +72,11 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
     } else {
       setPayouts([]);
       setHasMorePayouts(false);
-      setPayoutError(firstPage.reason instanceof Error ? firstPage.reason.message : "Could not load your payouts.");
+      setPayoutError(firstPage.reason instanceof Error ? firstPage.reason.message : t("mkt.dash.payoutsFailed"));
     }
     setLoading(false);
     setPayoutsLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(period); }, [load, period]);
 
@@ -85,7 +91,7 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
       setPayoutPage((page) => page + 1);
       setHasMorePayouts(!!next.next);
     } catch (err) {
-      setPayoutError(err instanceof Error ? err.message : "Could not load more payouts.");
+      setPayoutError(err instanceof Error ? err.message : t("mkt.dash.morePayoutsFailed"));
     } finally {
       setPayoutsLoading(false);
     }
@@ -96,9 +102,9 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
     setError("");
     try {
       const csv = await fetchSellerSalesCsv(period);
-      await Share.share({ message: csv, title: salesCsvTitle(period) });
+      await Share.share({ message: csv, title: salesCsvTitle(period, t) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not export your sales.");
+      setError(err instanceof Error ? err.message : t("mkt.dash.exportFailed"));
     } finally {
       setExporting(false);
     }
@@ -117,7 +123,7 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
       <View style={styles.chips}>
         {SELLER_PERIODS.map((p) => (
           <TouchableOpacity key={p.key} style={[styles.chip, period === p.key && styles.chipActive]} onPress={() => setPeriod(p.key)}>
-            <Text style={[styles.chipText, period === p.key && styles.chipTextActive]}>{p.label}</Text>
+            <Text style={[styles.chipText, period === p.key && styles.chipTextActive]}>{periodLabel(p.key, t)}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -130,27 +136,27 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
           {data.returns.open > 0 && (
             <TouchableOpacity style={styles.notice} onPress={() => navigation.navigate("MarketplaceOrders")}>
               <Text style={styles.noticeText}>
-                {data.returns.open} open return request{data.returns.open === 1 ? "" : "s"} waiting on you. Tap to review them in your orders.
+                {t(data.returns.open === 1 ? "mkt.dash.openReturnsOne" : "mkt.dash.openReturnsMany", { count: data.returns.open })}
               </Text>
             </TouchableOpacity>
           )}
 
           <View style={styles.grid}>
-            <Kpi accent label="Net earnings" value={formatXaf(summary.net_earnings_xaf)} hint={periodLabel(period)} />
-            <Kpi label="Gross sales" value={formatXaf(summary.gross_sales_xaf)} />
-            <Kpi label="Platform fees" value={formatXaf(summary.platform_fees_xaf)} hint={`${breakdown.feePct}% of gross`} />
-            <Kpi label="Held in escrow" value={formatXaf(summary.held_in_escrow_xaf)} hint="Released after delivery" />
-            <Kpi label="Wallet balance" value={formatXaf(summary.wallet_balance_xaf)} />
-            <Kpi label="Completed orders" value={String(summary.orders_completed)} hint={`${summary.orders_open} open · ${summary.orders_cancelled} cancelled`} />
-            <Kpi label="Items sold" value={String(summary.items_sold)} />
-            <Kpi label="Average order" value={formatXaf(summary.average_order_xaf)} />
-            <Kpi label="Listing views" value={viewsLabel(summary.listing_views, summary.conversion_pct)} />
+            <Kpi accent label={t("mkt.dash.kpiNet")} value={formatXaf(summary.net_earnings_xaf)} hint={periodLabel(period, t)} />
+            <Kpi label={t("mkt.dash.kpiGross")} value={formatXaf(summary.gross_sales_xaf)} />
+            <Kpi label={t("mkt.dash.kpiFees")} value={formatXaf(summary.platform_fees_xaf)} hint={t("mkt.dash.ofGross", { pct: breakdown.feePct })} />
+            <Kpi label={t("mkt.dash.kpiEscrow")} value={formatXaf(summary.held_in_escrow_xaf)} hint={t("mkt.dash.releasedAfterDelivery")} />
+            <Kpi label={t("mkt.dash.kpiWallet")} value={formatXaf(summary.wallet_balance_xaf)} />
+            <Kpi label={t("mkt.dash.kpiCompleted")} value={String(summary.orders_completed)} hint={t("mkt.dash.openCancelled", { open: summary.orders_open, cancelled: summary.orders_cancelled })} />
+            <Kpi label={t("mkt.dash.kpiItemsSold")} value={String(summary.items_sold)} />
+            <Kpi label={t("mkt.dash.kpiAverage")} value={formatXaf(summary.average_order_xaf)} />
+            <Kpi label={t("mkt.dash.kpiViews")} value={viewsLabel(summary.listing_views, summary.conversion_pct, t)} />
           </View>
 
-          <Text style={styles.section}>Net earnings per {bucket}</Text>
+          <Text style={styles.section}>{t(bucket === "month" ? "mkt.dash.netPerMonth" : "mkt.dash.netPerDay")}</Text>
           <View style={styles.panel}>
             {points.length === 0 || heights.every((h) => h === 0) ? (
-              <Text style={styles.muted}>No earnings in this period yet.</Text>
+              <Text style={styles.muted}>{t("mkt.dash.noEarnings")}</Text>
             ) : (
               <>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -158,53 +164,53 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
                     {points.map((point, index) => (
                       <TouchableOpacity
                         key={point.date} style={styles.barSlot} onPress={() => setSelected(selected === index ? null : index)}
-                        accessibilityLabel={`${bucketLabel(point.date, bucket)}: ${formatXaf(point.net_xaf)}`}
+                        accessibilityLabel={`${bucketLabel(point.date, bucket, t)}: ${formatXaf(point.net_xaf)}`}
                       >
                         <View style={styles.barArea}>
                           <View style={[styles.bar, { height: heights[index] }, selected === index && styles.barSelected]} />
                         </View>
-                        <Text style={styles.barLabel} numberOfLines={1}>{index % every === 0 ? bucketLabel(point.date, bucket) : ""}</Text>
+                        <Text style={styles.barLabel} numberOfLines={1}>{index % every === 0 ? bucketLabel(point.date, bucket, t) : ""}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </ScrollView>
                 <Text style={styles.chartDetail}>
                   {picked
-                    ? `${bucketLabel(picked.date, bucket)}: ${formatXaf(picked.net_xaf)} net · ${formatXaf(picked.gross_xaf)} gross · ${picked.orders} order${picked.orders === 1 ? "" : "s"}`
-                    : "Tap a bar for details."}
+                    ? t(picked.orders === 1 ? "mkt.dash.chartDetailOne" : "mkt.dash.chartDetailMany", { date: bucketLabel(picked.date, bucket, t), net: formatXaf(picked.net_xaf), gross: formatXaf(picked.gross_xaf), count: picked.orders })
+                    : t("mkt.dash.tapBar")}
                 </Text>
               </>
             )}
           </View>
 
-          <Text style={styles.section}>Where your money goes</Text>
+          <Text style={styles.section}>{t("mkt.dash.whereMoneyGoes")}</Text>
           <View style={styles.panel}>
-            <View style={styles.row}><Text style={styles.rowLabel}>Gross sales</Text><Text style={styles.rowValue}>{formatXaf(breakdown.gross)}</Text></View>
-            <View style={styles.row}><Text style={styles.rowLabel}>Platform fees ({breakdown.feePct}%)</Text><Text style={styles.rowValue}>- {formatXaf(breakdown.fees)}</Text></View>
-            <View style={styles.row}><Text style={styles.rowLabel}>Refunds</Text><Text style={styles.rowValue}>- {formatXaf(breakdown.refunds)}</Text></View>
-            <View style={[styles.row, styles.rowTotal]}><Text style={styles.rowTotalLabel}>Net earnings</Text><Text style={styles.rowTotalValue}>{formatXaf(breakdown.net)}</Text></View>
+            <View style={styles.row}><Text style={styles.rowLabel}>{t("mkt.dash.kpiGross")}</Text><Text style={styles.rowValue}>{formatXaf(breakdown.gross)}</Text></View>
+            <View style={styles.row}><Text style={styles.rowLabel}>{t("mkt.dash.feesPct", { pct: breakdown.feePct })}</Text><Text style={styles.rowValue}>- {formatXaf(breakdown.fees)}</Text></View>
+            <View style={styles.row}><Text style={styles.rowLabel}>{t("mkt.dash.refunds")}</Text><Text style={styles.rowValue}>- {formatXaf(breakdown.refunds)}</Text></View>
+            <View style={[styles.row, styles.rowTotal]}><Text style={styles.rowTotalLabel}>{t("mkt.dash.kpiNet")}</Text><Text style={styles.rowTotalValue}>{formatXaf(breakdown.net)}</Text></View>
           </View>
 
-          <Text style={styles.section}>By category</Text>
+          <Text style={styles.section}>{t("mkt.dash.byCategory")}</Text>
           <View style={styles.panel}>
-            {data.by_category.length === 0 ? <Text style={styles.muted}>No sales yet.</Text> : data.by_category.map((row) => (
+            {data.by_category.length === 0 ? <Text style={styles.muted}>{t("mkt.dash.noSales")}</Text> : data.by_category.map((row) => (
               <View key={row.category} style={styles.row}>
                 <View style={styles.rowMain}>
-                  <Text style={styles.rowLabel}>{CATEGORY_LABELS[row.category] ?? row.category}</Text>
-                  <Text style={styles.muted}>{row.orders} order{row.orders === 1 ? "" : "s"} · net {formatXaf(row.net_xaf)}</Text>
+                  <Text style={styles.rowLabel}>{categoryLabel(row.category)}</Text>
+                  <Text style={styles.muted}>{t(row.orders === 1 ? "mkt.dash.ordersNetOne" : "mkt.dash.ordersNetMany", { count: row.orders, net: formatXaf(row.net_xaf) })}</Text>
                 </View>
                 <Text style={styles.rowValue}>{formatXaf(row.gross_xaf)}</Text>
               </View>
             ))}
           </View>
 
-          <Text style={styles.section}>Top listings</Text>
+          <Text style={styles.section}>{t("mkt.dash.topListings")}</Text>
           <View style={styles.panel}>
-            {data.top_listings.length === 0 ? <Text style={styles.muted}>Nothing sold yet.</Text> : data.top_listings.map((listing) => (
+            {data.top_listings.length === 0 ? <Text style={styles.muted}>{t("mkt.dash.nothingSold")}</Text> : data.top_listings.map((listing) => (
               <TouchableOpacity key={listing.listing_id} style={styles.row} onPress={() => navigation.navigate("MarketplaceListingDetail", { category: listing.category, listingId: listing.listing_id })}>
                 <View style={styles.rowMain}>
                   <Text style={styles.link} numberOfLines={1}>{listing.title}</Text>
-                  <Text style={styles.muted}>{CATEGORY_LABELS[listing.category] ?? listing.category} · {listing.orders} order{listing.orders === 1 ? "" : "s"}</Text>
+                  <Text style={styles.muted}>{categoryLabel(listing.category)} · {t(listing.orders === 1 ? "mkt.dash.ordersOne" : "mkt.dash.ordersMany", { count: listing.orders })}</Text>
                 </View>
                 <Text style={styles.rowValue}>{formatXaf(listing.gross_xaf)}</Text>
               </TouchableOpacity>
@@ -214,33 +220,33 @@ export default function MarketplaceSellerDashboardScreen({ navigation }: Props) 
       ) : null}
 
       <View style={styles.sectionRow}>
-        <Text style={styles.sectionInline}>Payout history</Text>
+        <Text style={styles.sectionInline}>{t("mkt.dash.payoutHistory")}</Text>
         <TouchableOpacity style={[styles.exportButton, exporting && styles.disabled]} disabled={exporting} onPress={exportCsv}>
-          {exporting ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.exportText}>Export CSV</Text>}
+          {exporting ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.exportText}>{t("mkt.dash.exportCsv")}</Text>}
         </TouchableOpacity>
       </View>
       {payoutError ? <Text style={styles.error}>{payoutError}</Text> : null}
       <View style={styles.panel}>
-        {payouts.length === 0 && !payoutsLoading && <Text style={styles.muted}>No payouts in this period.</Text>}
+        {payouts.length === 0 && !payoutsLoading && <Text style={styles.muted}>{t("mkt.dash.noPayouts")}</Text>}
         {payouts.map((payout) => (
           <View key={payout.order_id} style={styles.payout}>
             <View style={styles.row}>
               <Text style={[styles.rowLabel, styles.rowMain]} numberOfLines={1}>{payout.listing_title}</Text>
               <Text style={styles.rowTotalValue}>{formatXaf(payout.net_xaf)}</Text>
             </View>
-            <Text style={styles.muted}>{payout.buyer_name} · ×{payout.quantity} · {formatDate(payout.paid_at)}</Text>
+            <Text style={styles.muted}>{payout.buyer_name} · ×{payout.quantity} · {formatDate(payout.paid_at, locale)}</Text>
             <Text style={styles.muted}>
-              Gross {formatXaf(payout.gross_xaf)} · fee {formatXaf(payout.fee_xaf)}{Number(payout.refunded_xaf) > 0 ? ` · refunded ${formatXaf(payout.refunded_xaf)}` : ""}
+              {t("mkt.dash.payoutLine", { gross: formatXaf(payout.gross_xaf), fee: formatXaf(payout.fee_xaf) })}{Number(payout.refunded_xaf) > 0 ? ` · ${t("mkt.dash.refundedAmount", { amount: formatXaf(payout.refunded_xaf) })}` : ""}
             </Text>
           </View>
         ))}
         {payoutsLoading && <ActivityIndicator color="#1B2A4A" style={styles.spinner} />}
         {hasMorePayouts && !payoutsLoading && (
-          <TouchableOpacity onPress={loadMorePayouts}><Text style={styles.link}>Load more</Text></TouchableOpacity>
+          <TouchableOpacity onPress={loadMorePayouts}><Text style={styles.link}>{t("mkt.dash.loadMore")}</Text></TouchableOpacity>
         )}
       </View>
 
-      <TouchableOpacity onPress={() => navigation.navigate("MarketplaceOrders")}><Text style={styles.link}>Go to my orders</Text></TouchableOpacity>
+      <TouchableOpacity onPress={() => navigation.navigate("MarketplaceOrders")}><Text style={styles.link}>{t("mkt.dash.goToOrders")}</Text></TouchableOpacity>
     </ScrollView>
   );
 }

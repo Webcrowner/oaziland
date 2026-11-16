@@ -9,11 +9,12 @@ import { isOnSale, unitPriceXaf } from "../lib/flashSale";
 import { pickPhoto, type PhotoSource } from "../lib/pickImage";
 import { useDidYouMean } from "../lib/useDidYouMean";
 import DidYouMeanBanner from "./DidYouMeanBanner";
-
-const CATEGORY_LABELS: Record<BrowsableCategory, string> = { warehouses: "Warehouse", stores: "Store", businesses: "Business", cars: "Car", goods: "Goods" };
+import { useI18n } from "../i18n";
+import type { MessageKey } from "../i18n/messages";
 
 /** One search box across warehouses, stores, businesses, cars and goods; mirrors the web marketplace page. */
 export default function MarketplaceUnifiedSearch({ onOpen }: { onOpen: (result: MarketplaceSearchResult) => void }) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [outcome, setOutcome] = useState<MarketplaceSearchOutcome | null>(null);
   const [loading, setLoading] = useState(false);
@@ -78,22 +79,22 @@ export default function MarketplaceUnifiedSearch({ onOpen }: { onOpen: (result: 
       const result = await searchMarketplaceByImage(photo.uri, searchImageMime(photo.mimeType));
       const term = (result.q || result.keywords.join(" ")).trim();
       if (!term) {
-        setPhotoError("We couldn't tell what is in that photo. Try a clearer picture of the item.");
+        setPhotoError(t("mkt.search.photoUnclear"));
         return;
       }
       pickTerm(term);
     } catch (err) {
-      setPhotoError(err instanceof Error ? err.message : "Photo search failed. Please try again.");
+      setPhotoError(err instanceof Error ? err.message : t("mkt.search.photoFailed"));
     } finally {
       setPhotoBusy(false);
     }
   }
 
   function handlePhotoPress() {
-    Alert.alert("Search by photo", "Show us what you are looking for.", [
-      { text: "Take a photo", onPress: () => searchByPhoto("camera") },
-      { text: "Choose from gallery", onPress: () => searchByPhoto("library") },
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("mkt.search.photoTitle"), t("mkt.search.photoBody"), [
+      { text: t("mkt.search.takePhoto"), onPress: () => searchByPhoto("camera") },
+      { text: t("mkt.search.choosePhoto"), onPress: () => searchByPhoto("library") },
+      { text: t("common.cancel"), style: "cancel" },
     ]);
   }
 
@@ -103,14 +104,14 @@ export default function MarketplaceUnifiedSearch({ onOpen }: { onOpen: (result: 
     <View style={styles.container}>
       <View style={styles.inputRow}>
         <TextInput
-          style={styles.input} placeholder="Search warehouses, stores, businesses, cars and goods" value={query}
-          onChangeText={setQuery} returnKeyType="search" autoCorrect={false} accessibilityLabel="Search the marketplace"
+          style={styles.input} placeholder={t("mkt.search.placeholder")} value={query}
+          onChangeText={setQuery} returnKeyType="search" autoCorrect={false} accessibilityLabel={t("mkt.search.label")}
           onFocus={() => { if (blurTimer.current) clearTimeout(blurTimer.current); setFocused(true); }}
           // Delayed so a tap on a recent or trending chip still lands before the list disappears.
           onBlur={() => { blurTimer.current = setTimeout(() => setFocused(false), 200); }}
           onSubmitEditing={() => active && remember(active)}
         />
-        <TouchableOpacity style={styles.photoButton} onPress={handlePhotoPress} disabled={photoBusy} accessibilityLabel="Search by photo">
+        <TouchableOpacity style={styles.photoButton} onPress={handlePhotoPress} disabled={photoBusy} accessibilityLabel={t("mkt.search.photoTitle")}>
           {photoBusy ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.photoIcon}>📷</Text>}
         </TouchableOpacity>
       </View>
@@ -122,8 +123,8 @@ export default function MarketplaceUnifiedSearch({ onOpen }: { onOpen: (result: 
           {recent.length > 0 && (
             <View>
               <View style={styles.suggestionHeader}>
-                <Text style={styles.suggestionTitle}>Recent searches</Text>
-                <TouchableOpacity onPress={clearRecent}><Text style={styles.clear}>Clear</Text></TouchableOpacity>
+                <Text style={styles.suggestionTitle}>{t("mkt.search.recent")}</Text>
+                <TouchableOpacity onPress={clearRecent}><Text style={styles.clear}>{t("mkt.search.clear")}</Text></TouchableOpacity>
               </View>
               {recent.map((term) => (
                 <TouchableOpacity key={term} style={styles.recentRow} onPress={() => pickTerm(term)}>
@@ -134,7 +135,7 @@ export default function MarketplaceUnifiedSearch({ onOpen }: { onOpen: (result: 
           )}
           {trending.length > 0 && (
             <View>
-              <Text style={styles.suggestionTitle}>Trending now</Text>
+              <Text style={styles.suggestionTitle}>{t("mkt.search.trending")}</Text>
               <View style={styles.chips}>
                 {trending.map((term) => (
                   <TouchableOpacity key={term} style={styles.chip} onPress={() => pickTerm(term)}>
@@ -148,23 +149,23 @@ export default function MarketplaceUnifiedSearch({ onOpen }: { onOpen: (result: 
       )}
 
       {active && loading && <ActivityIndicator color="#1B2A4A" style={styles.status} />}
-      {active && !loading && outcome?.failed && <Text style={styles.error}>Marketplace search is unavailable right now. Please try again.</Text>}
+      {active && !loading && outcome?.failed && <Text style={styles.error}>{t("mkt.search.unavailable")}</Text>}
       {active && !loading && outcome && !outcome.failed && (
         <View style={styles.results}>
-          {outcome.partial && <Text style={styles.partial}>Some categories could not be searched. The available results are shown below.</Text>}
+          {outcome.partial && <Text style={styles.partial}>{t("mkt.search.partial")}</Text>}
           {outcome.results.length === 0 ? (
-            <Text style={styles.empty}>No marketplace listings match your search.</Text>
+            <Text style={styles.empty}>{t("mkt.search.noMatch")}</Text>
           ) : outcome.results.map((result) => (
             <TouchableOpacity key={`${result.category}-${result.id}`} style={styles.row} onPress={() => { remember(active); onOpen(result); }}>
               <View style={styles.rowText}>
                 <Text style={styles.title} numberOfLines={1}>{result.title}</Text>
                 <Text style={styles.meta}>
-                  {CATEGORY_LABELS[result.category]} · {PRICE_BASIS_LABELS[result.price_basis] ?? result.price_basis}{result.quarter_name ? ` · ${result.quarter_name}` : ""}
+                  {t(`mkt.catOne.${result.category}` as MessageKey)} · {result.price_basis in PRICE_BASIS_LABELS ? t(`mkt.basis.${result.price_basis}` as MessageKey) : result.price_basis}{result.quarter_name ? ` · ${result.quarter_name}` : ""}
                 </Text>
               </View>
               <View style={styles.priceBox}>
                 <Text style={[styles.price, isOnSale(result) && styles.priceSale]}>{unitPriceXaf(result).toLocaleString()} XAF</Text>
-                {isOnSale(result) && <Text style={styles.saleTag}>SALE</Text>}
+                {isOnSale(result) && <Text style={styles.saleTag}>{t("mkt.sale")}</Text>}
               </View>
             </TouchableOpacity>
           ))}

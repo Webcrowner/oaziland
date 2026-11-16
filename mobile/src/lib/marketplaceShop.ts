@@ -1,4 +1,5 @@
 import { parseDay } from "./dateTimeInput";
+import { translateEnglish, type Translate } from "../i18n/translate";
 import type { MarketplaceShop, MarketplaceShopSettings } from "./api";
 
 export const SHOP_LIMITS = { name: 80, tagline: 140, announcement: 200, vacationMessage: 200 } as const;
@@ -32,12 +33,12 @@ export function shopDraftFrom(shop: MarketplaceShopSettings): ShopDraft {
   };
 }
 
-export function shopDraftError(draft: ShopDraft): string {
-  if (draft.name.trim().length > SHOP_LIMITS.name) return `The shop name can be at most ${SHOP_LIMITS.name} characters.`;
-  if (draft.tagline.trim().length > SHOP_LIMITS.tagline) return `The tagline can be at most ${SHOP_LIMITS.tagline} characters.`;
-  if (draft.announcement.trim().length > SHOP_LIMITS.announcement) return `The announcement can be at most ${SHOP_LIMITS.announcement} characters.`;
-  if (draft.vacationMessage.trim().length > SHOP_LIMITS.vacationMessage) return `The vacation message can be at most ${SHOP_LIMITS.vacationMessage} characters.`;
-  if (draft.vacationUntil.trim() && !parseDay(draft.vacationUntil)) return "Enter the return date as YYYY-MM-DD, or leave it blank.";
+export function shopDraftError(draft: ShopDraft, t: Translate = translateEnglish): string {
+  if (draft.name.trim().length > SHOP_LIMITS.name) return t("mkt.shop.errNameLength", { max: SHOP_LIMITS.name });
+  if (draft.tagline.trim().length > SHOP_LIMITS.tagline) return t("mkt.shop.errTaglineLength", { max: SHOP_LIMITS.tagline });
+  if (draft.announcement.trim().length > SHOP_LIMITS.announcement) return t("mkt.shop.errAnnouncementLength", { max: SHOP_LIMITS.announcement });
+  if (draft.vacationMessage.trim().length > SHOP_LIMITS.vacationMessage) return t("mkt.shop.errVacationMessageLength", { max: SHOP_LIMITS.vacationMessage });
+  if (draft.vacationUntil.trim() && !parseDay(draft.vacationUntil)) return t("mkt.shop.errReturnDate");
   return "";
 }
 
@@ -57,20 +58,24 @@ export const POLICY_FALLBACKS = {
   returns: "This seller has not published a return policy. Items are still covered by escrow: if something is not as described you can report a problem on your order.",
 } as const;
 
-export function policyText(text: string | null | undefined, kind: keyof typeof POLICY_FALLBACKS): string {
-  return text?.trim() ? text.trim() : POLICY_FALLBACKS[kind];
+const POLICY_FALLBACK_KEYS = { shipping: "mkt.shop.policyShipping", returns: "mkt.shop.policyReturns" } as const;
+
+export function policyText(text: string | null | undefined, kind: keyof typeof POLICY_FALLBACKS, t: Translate = translateEnglish): string {
+  return text?.trim() ? text.trim() : t(POLICY_FALLBACK_KEYS[kind]);
 }
 
 /** What a buyer sees in place of the listings while the owner is away. */
-export function vacationNotice(shop: Pick<MarketplaceShop, "vacation_message" | "vacation_until">): { title: string; body: string } {
+export function vacationNotice(
+  shop: Pick<MarketplaceShop, "vacation_message" | "vacation_until">, t: Translate = translateEnglish, locale?: string,
+): { title: string; body: string } {
   const until = shop.vacation_until ? parseDay(shop.vacation_until) : null;
-  const back = until ? `Back on ${new Date(`${until}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" })}.` : "";
+  const back = until ? t("mkt.shop.vacationBack", { date: new Date(`${until}T12:00:00`).toLocaleDateString(locale, { dateStyle: "medium" }) }) : "";
   return {
-    title: "This shop is on vacation",
-    body: [shop.vacation_message?.trim() || "The seller is away and is not taking orders right now.", back].filter(Boolean).join(" "),
+    title: t("mkt.shop.vacationTitle"),
+    body: [shop.vacation_message?.trim() || t("mkt.shop.vacationDefaultMessage"), back].filter(Boolean).join(" "),
   };
 }
 
-export function followerLabel(count: number): string {
-  return `${count} ${count === 1 ? "follower" : "followers"}`;
+export function followerLabel(count: number, t: Translate = translateEnglish): string {
+  return t(count === 1 ? "mkt.shop.followerOne" : "mkt.shop.followerMany", { count });
 }

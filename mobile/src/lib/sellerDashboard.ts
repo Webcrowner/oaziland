@@ -1,4 +1,6 @@
 import type { SellerDashboardSummary, SellerPeriod, SellerSeriesPoint } from "./api";
+import { translateEnglish, type Translate } from "../i18n/translate";
+import type { MessageKey } from "../i18n/messages";
 
 export const SELLER_PERIODS: { key: SellerPeriod; label: string }[] = [
   { key: "7d", label: "7 days" },
@@ -10,10 +12,8 @@ export const SELLER_PERIODS: { key: SellerPeriod; label: string }[] = [
 
 export const DEFAULT_SELLER_PERIOD: SellerPeriod = "30d";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-export function periodLabel(period: SellerPeriod): string {
-  return SELLER_PERIODS.find((p) => p.key === period)?.label ?? period;
+export function periodLabel(period: SellerPeriod, t: Translate = translateEnglish): string {
+  return t(`mkt.dash.period${period}` as MessageKey);
 }
 
 /** Money values arrive as strings of whole XAF. */
@@ -35,11 +35,12 @@ export function barHeights(points: Pick<SellerSeriesPoint, "net_xaf">[], maxHeig
 }
 
 /** Short axis label for a bucket date ("2026-11-15" or "2026-11"): "15 Nov" for days, "Nov 26" for months. */
-export function bucketLabel(date: string, bucket: "day" | "month"): string {
+export function bucketLabel(date: string, bucket: "day" | "month", t: Translate = translateEnglish): string {
   const match = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(date);
   if (!match) return date;
-  const month = MONTHS[Number(match[2]) - 1];
-  if (!month) return date;
+  const monthNumber = Number(match[2]);
+  if (monthNumber < 1 || monthNumber > 12) return date;
+  const month = t(`mkt.dash.month${monthNumber}` as MessageKey);
   if (bucket === "month") return `${month} ${match[1].slice(2)}`;
   return `${Number(match[3] ?? 1)} ${month}`;
 }
@@ -74,11 +75,11 @@ export function netBreakdown(summary: SellerDashboardSummary): NetBreakdown {
   };
 }
 
-export function viewsLabel(views: number, conversionPct: number | null): string {
-  const base = `${views.toLocaleString("en-US")} view${views === 1 ? "" : "s"}`;
-  return conversionPct === null ? base : `${base} · ${conversionPct}% conversion`;
+export function viewsLabel(views: number, conversionPct: number | null, t: Translate = translateEnglish): string {
+  const base = t(views === 1 ? "mkt.dash.viewsOne" : "mkt.dash.viewsMany", { count: views.toLocaleString("en-US") });
+  return conversionPct === null ? base : t("mkt.dash.viewsConversion", { base, pct: conversionPct });
 }
 
-export function salesCsvTitle(period: SellerPeriod): string {
-  return `Oaziland sales (${periodLabel(period)})`;
+export function salesCsvTitle(period: SellerPeriod, t: Translate = translateEnglish): string {
+  return t("mkt.dash.csvTitle", { period: periodLabel(period, t) });
 }
