@@ -166,7 +166,7 @@ class ManageCourseViewSet(viewsets.ModelViewSet):
         program = self.get_object()
         rows = (
             AssignmentSubmission.objects.filter(enrollment__program=program)
-            .select_related("enrollment__student", "lesson", "reviewed_by")
+            .select_related("enrollment__student", "lesson", "reviewed_by").prefetch_related("peer_reviews")
         )
         wanted = request.query_params.get("status")
         if wanted:
@@ -178,6 +178,9 @@ class ManageCourseViewSet(viewsets.ModelViewSet):
                 "status": s.status, "feedback": s.feedback, "submitted_at": s.submitted_at,
                 "reviewed_by": s.reviewed_by.full_name or s.reviewed_by.username if s.reviewed_by else None,
                 "reviewed_at": s.reviewed_at,
+                "peer_review": s.lesson.peer_review,
+                # Anonymous classmates' verdicts, so staff can see what was said before they decide.
+                "peer_reviews": [{"decision": r.decision, "feedback": r.feedback} for r in s.peer_reviews.all()],
             }
             for s in rows
         ])

@@ -136,6 +136,13 @@ export default function ListPropertyPage() {
       .catch(() => {});
   }, []);
 
+  // Warn signed-out visitors before they fill in the wizard, not after the last step.
+  const [signedOut, setSignedOut] = useState(false);
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    void Promise.resolve().then(() => setSignedOut(!token));
+  }, []);
+
   useEffect(() => {
     if (!quarterId) return;
     listPointsOfInterest(quarterId)
@@ -408,6 +415,13 @@ export default function ListPropertyPage() {
             </div>
           </div>
         </div>
+
+        {signedOut && (
+          <div role="alert" className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <span>{t("signInBanner")}</span>
+            <Link href="/login" className="self-start sm:self-auto rounded-xl bg-slate-900 px-4 py-2 text-white text-xs font-bold">{t("signInBannerLink")}</Link>
+          </div>
+        )}
 
         {/* Stepper Navigation */}
         <div className="mb-8 bg-white border border-slate-200/90 rounded-2xl p-4 shadow-sm">

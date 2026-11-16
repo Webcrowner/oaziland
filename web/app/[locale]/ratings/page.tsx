@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 import { useState, useEffect, useCallback } from "react";
 import { getMyRatings, type MyRatingsResult } from "@/lib/api";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
@@ -7,6 +8,7 @@ import Button from "@/components/ui/Button";
 import { IconStar } from "@/components/Icons";
 
 export default function RatingsPage() {
+  const tSignIn = useTranslations("SignInPrompt");
   const [data, setData] = useState<MyRatingsResult | null>(null);
   const [status, setStatus] = useState<"loading" | "signedOut" | "ready">("loading");
 
@@ -32,8 +34,8 @@ export default function RatingsPage() {
     return (
       <AccountSidebarLayout activeHref="/ratings">
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
-          <p className="text-slate-600 mb-4 font-semibold text-sm">Sign in to view your ratings.</p>
-          <Button href="/login">Sign In</Button>
+          <p className="text-slate-600 mb-4 font-semibold text-sm">{tSignIn("ratings")}</p>
+          <Button href="/login">{tSignIn("button")}</Button>
         </div>
       </AccountSidebarLayout>
     );

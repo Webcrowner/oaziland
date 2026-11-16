@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { getGuestHouse } from "@/lib/api";
 import AssetDetailView from "@/components/AssetDetailView";
+import HotelRoomBooking from "@/components/HotelRoomBooking";
 
 export default async function GuestHouseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,13 +12,15 @@ export default async function GuestHouseDetailPage({ params }: { params: Promise
 
   const facts = [{ label: t("finish"), value: guestHouse.finish_level ? guestHouse.finish_level.toLowerCase() : "-" }];
   if (guestHouse.is_coastal_leisure) facts.push({ label: t("coastal"), value: "✓" });
+  if (guestHouse.total_rooms > 0) facts.unshift({ label: t("rooms"), value: String(guestHouse.total_rooms) });
+  const title = guestHouse.name || t("guestHouseIn", { quarter: guestHouse.quarter_name });
 
   return (
     <AssetDetailView
       backHref="/guest-houses"
       backLabel={t("backToGuestHouses")}
-      title={t("guestHouseIn", { quarter: guestHouse.quarter_name })}
-      shareTitle="guest house"
+      title={title}
+      shareTitle={title}
       location={guestHouse.quarter_name}
       photos={guestHouse.photos}
       listerRole={guestHouse.lister_role}
@@ -26,12 +29,14 @@ export default async function GuestHouseDetailPage({ params }: { params: Promise
       description={guestHouse.description}
       amenities={guestHouse.amenities}
       facts={facts}
+      detailsSlot={<HotelRoomBooking hotel={guestHouse} title={title} endpoint="guest-houses" />}
       latitude={guestHouse.latitude}
       longitude={guestHouse.longitude}
       sharePath={`/guest-houses/${guestHouse.id}`}
       report={{ kind: "guest_house", id: String(guestHouse.id) }}
       mediaEndpoint="guest-houses"
       assetId={guestHouse.id}
+      sharePrice={guestHouse.from_price_xaf ? Number(guestHouse.from_price_xaf).toLocaleString() : undefined}
     />
   );
 }

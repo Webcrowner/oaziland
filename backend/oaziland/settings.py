@@ -54,6 +54,30 @@ DEBUG = env.bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
+# The secret key signs every login token: a deployment must never run on the published development key.
+if not DEBUG and SECRET_KEY.startswith(("django-insecure", "replace-with")):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("Set DJANGO_SECRET_KEY to a long random value (DEBUG is off, so the development key is refused).")
+
+# Error monitoring: every unhandled error (including failed webhooks and payments) is reported once SENTRY_DSN is set.
+if env("SENTRY_DSN", default=""):
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=env("SENTRY_DSN"), environment=env("SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development"),
+        traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
+        # Never attach personal data (names, phone numbers, tokens) to error reports.
+        send_default_pii=False,
+    )
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "root": {"handlers": ["console"], "level": env("LOG_LEVEL", default="INFO")},
+    "loggers": {"django.request": {"handlers": ["console"], "level": "WARNING", "propagate": False}},
+}
+
 
 # Application definition
 
@@ -66,6 +90,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    # Lets a password change or reset cancel the person's other logins (identity.services.revoke_sessions).
+    'rest_framework_simplejwt.token_blacklist',
     'drf_spectacular',
     'django_filters',
     'corsheaders',
@@ -245,6 +271,8 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_REFERRER_POLICY = 'same-origin'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # WHY this exists: the Flyer feature generates real image files
@@ -261,8 +289,21 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # the three CLOUDINARY_* env vars below) once real production
 # credentials exist — see uploads.providers.get_active_provider().
 MEDIA_STORAGE_PROVIDER = env('MEDIA_STORAGE_PROVIDER', default='LOCAL')
+# Content moderation: with a key, the real provider checks text and images (see trust_safety/openai_moderation.py).
+OPENAI_API_KEY = env('OPENAI_API_KEY', default='')
+# Marketplace search-by-photo (marketplace/search_assist.py): without a key the endpoint answers 503.
+GOOGLE_CLOUD_VISION_API_KEY = env('GOOGLE_CLOUD_VISION_API_KEY', default='')
+# With the real moderation provider, videos can't be looked at by software: 1 sends every video to the admin
+# review queue (it stays online meanwhile); 0 lets them through unchecked.
+MODERATION_FLAG_UNSCANNED_VIDEOS = env.bool('MODERATION_FLAG_UNSCANNED_VIDEOS', default=True)
 # Lets uploads.services.is_platform_media_url recognise files stored on Cloudinary.
 CLOUDINARY_CLOUD_NAME = env('CLOUDINARY_CLOUD_NAME', default='')
+
+# Rate limits and the once-an-hour view count live in the cache. Per-process memory would give every worker its own
+# counters, so in production (REDIS_URL set, DEBUG off) they are shared through Redis. If Redis is down the cache
+# fails open (see oaziland/cache.py) rather than failing requests.
+if env('REDIS_URL', default='') and not DEBUG:
+    CACHES = {'default': {'BACKEND': 'oaziland.cache.FailOpenRedisCache', 'LOCATION': env('REDIS_URL')}}
 
 # ---------------------------------------------------------------------------
 # Django REST Framework — Prompt 16.
@@ -287,19 +328,27 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_THROTTLE_CLASSES': [
         'oaziland.throttling.RoleAwareUserRateThrottle',
-        'rest_framework.throttling.AnonRateThrottle',
+        'oaziland.throttling.AnonReadAwareRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'user': '300/hour',
+        # Signed-in users. Set well above what a person can use (dashboards, chat and video have their own buckets too):
+        # the limit only exists to stop scripts hammering the API with a stolen or scripted account.
+        'user': '5000/hour',
         # Admins working the console (see oaziland/throttling.py).
         'admin': '5000/hour',
+        # Signed-out writes (the default for anonymous POSTs, and endpoints like registration that use it explicitly).
         'anon': '60/hour',
+        # Signed-out browsing (GET), per IP: several reads per page view, and mobile carriers put many phones behind
+        # one shared IP, so this must cover a whole crowd of visitors while still stopping bulk scraping.
+        'anon_read': '10000/hour',
         # A higher rate for search specifically — browsing listings is
         # the platform's single most common action and shouldn't be
         # rate-limited as tightly as, say, account creation.
         'search': '600/hour',
         # Marketplace browsing: the "All" tab issues one request per category on every load or filter change.
         'marketplace_browse': '3000/hour',
+        # Search by photo: each request is a paid Google Vision call.
+        'marketplace_image_search': '20/hour',
         # Public certificate verification pages and their PDF/image (careers.views.CertificateView).
         'certificate_view': '1200/hour',
         # A dedicated, tighter bucket for login attempts specifically —
@@ -310,10 +359,18 @@ REST_FRAMEWORK = {
         # Presence heartbeats get their own bucket so a 30s keep-alive
         # can't exhaust the general per-user budget.
         'presence': '400/hour',
+        # OaziGo price quotes (each may be a paid Google Routes request).
+        'ride_quote': '120/hour',
         # The inbox polls messages/typing every few seconds while open.
         'chat': '4000/hour',
         # Scrolling the video feed fires a page fetch plus a view ping per clip.
         'videos': '3000/hour',
+        # Creating things people see: a new account can't flood the feed or fill the storage.
+        'post_create': '30/hour',
+        'comment_create': '120/hour',
+        'media_upload': '80/hour',
+        # Sending and guessing one-time codes.
+        'otp': '30/hour',
         # Anonymous page-view pings from the website (visitor analytics).
         'visitor_tracking': '1500/hour',
     },

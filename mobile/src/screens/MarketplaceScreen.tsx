@@ -1,7 +1,11 @@
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import MarketplaceUnifiedSearch from "../components/MarketplaceUnifiedSearch";
+import { getMarketplaceCart } from "../lib/api";
+import { cartBadge } from "../lib/marketplaceCart";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Marketplace">;
 
@@ -10,6 +14,7 @@ const CATEGORIES = [
   { key: "Stores" as const, icon: "🏬", label: "Stores", desc: "Retail shopfronts, for rent or sale." },
   { key: "Businesses" as const, icon: "💼", label: "Businesses", desc: "Going concerns for sale." },
   { key: "Cars" as const, icon: "🚗", label: "Cars", desc: "Vehicles for sale or rent." },
+  { key: "Goods" as const, icon: "📦", label: "Goods", desc: "New and used items, with pickup or delivery." },
 ];
 
 /**
@@ -19,10 +24,36 @@ const CATEGORIES = [
  * transaction, not a listing category.
  */
 export default function MarketplaceScreen({ navigation }: Props) {
+  const [cartCount, setCartCount] = useState(0);
+
+  const loadCartCount = useCallback(async () => {
+    const token = await SecureStore.getItemAsync("access_token");
+    if (!token) {
+      setCartCount(0);
+      return;
+    }
+    getMarketplaceCart().then((cart) => setCartCount(cart.item_count)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadCartCount();
+    return navigation.addListener("focus", loadCartCount);
+  }, [loadCartCount, navigation]);
+
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <MarketplaceUnifiedSearch onOpen={(result) => navigation.navigate("MarketplaceListingDetail", { category: result.category, listingId: result.id })} />
-      <Text style={styles.subtitle}>Beyond real estate: browse or list warehouses, stores, businesses, and cars.</Text>
+
+      <View style={styles.quickRow}>
+        <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate("MarketplaceCart")} accessibilityLabel={`Cart, ${cartCount} items`}>
+          <Text style={styles.quickText}>🛒 Cart</Text>
+          {cartCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{cartBadge(cartCount)}</Text></View>}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate("MarketplaceDeals")}>
+          <Text style={styles.quickText}>⚡ Flash deals</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.subtitle}>Beyond real estate: browse or list warehouses, stores, businesses and cars, and browse goods.</Text>
 
       {CATEGORIES.map((category) => (
         <TouchableOpacity key={category.key} style={styles.card} onPress={() => navigation.navigate(category.key)}>
@@ -39,9 +70,24 @@ export default function MarketplaceScreen({ navigation }: Props) {
         <Text style={styles.cardDesc}>Track what you bought or sold, confirm receipt, or report a problem.</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceOffers")}>
+        <Text style={styles.cardLabel}>My offers</Text>
+        <Text style={styles.cardDesc}>Offers you made, and offers on your listings to accept, decline or counter.</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceSellerDashboard")}>
+        <Text style={styles.cardLabel}>Seller dashboard</Text>
+        <Text style={styles.cardDesc}>Your sales, fees, earnings, payouts and top listings, with a CSV export.</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MyMarketplaceListings")}>
         <Text style={styles.cardLabel}>My listings</Text>
-        <Text style={styles.cardDesc}>Edit, pause, mark as sold or delete what you have posted.</Text>
+        <Text style={styles.cardDesc}>Edit, boost, renew, pause, mark as sold or delete what you have posted.</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.ordersCard} onPress={() => navigation.navigate("MarketplaceShopSettings")}>
+        <Text style={styles.cardLabel}>My shop</Text>
+        <Text style={styles.cardDesc}>Your storefront, policies, vacation mode, discount codes and staff.</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.ridesCard} onPress={() => navigation.navigate("OaziGo")}>
@@ -55,6 +101,11 @@ export default function MarketplaceScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { padding: 16 },
+  quickRow: { flexDirection: "row", gap: 12, marginBottom: 16 },
+  quickButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#1B2A4A", borderRadius: 10, paddingVertical: 12 },
+  quickText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  badge: { backgroundColor: "#C9A227", borderRadius: 10, minWidth: 20, height: 20, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
+  badgeText: { color: "#1B2A4A", fontSize: 11, fontWeight: "700" },
   subtitle: { color: "#6B7280", marginBottom: 20, fontSize: 14 },
   card: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB", padding: 16, marginBottom: 12 },
   icon: { fontSize: 28, marginRight: 14 },

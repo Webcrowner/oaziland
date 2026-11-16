@@ -101,7 +101,7 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
         {[1, 2, 3, 4, 5].map((star) => (
           <button
             key={star} onMouseEnter={() => setHoveredStar(star)} onClick={() => handleRate(star)}
-            className={`text-lg leading-none transition-colors ${star <= hoveredStar ? "text-[var(--gold)]" : "text-gray-300"}`}
+            className={`px-1 py-2 text-2xl leading-none transition-colors md:py-0.5 md:text-lg ${star <= hoveredStar ? "text-[var(--gold)]" : "text-gray-300"}`}
             aria-label={`${star} stars`}
           >
             ★

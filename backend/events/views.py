@@ -81,7 +81,9 @@ class VenueViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             user = self.request.user
             if user.is_authenticated and hasattr(user, "admin_profile"):
-                return Venue.objects.all().select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos").order_by("-created_at")
+                everything = Venue.objects.all().select_related("owner__agent_profile").prefetch_related("spaces", "asset_photos").order_by("-created_at")
+                # The review queue asks for only the venues still waiting, so they aren't buried past page 1.
+                return everything.filter(verified=False) if self.request.query_params.get("verified") == "false" else everything
             from django.db.models import Q
             base = Q(verified=True, deleted_at__isnull=True)
             if user.is_authenticated:
@@ -218,54 +220,82 @@ class EventBookingViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="pay-deposit")
     def pay_deposit(self, request, pk=None):
-        """The real payment step this booking previously never had —
-        pays the 30% deposit through the shared Booking/PaymentEscrow flow."""
-        from .services import confirm_event_booking_deposit
-        from transactions.locks import get_booking_lock_client
-        from payments.gateways import get_active_gateway
-
-        event_booking = self.get_object()
-        phone_number = request.data.get("phone_number")
-        if not phone_number:
-            return Response({"detail": "phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        event_booking, _escrow = confirm_event_booking_deposit(
-            event_booking=event_booking, lock_client=get_booking_lock_client(),
-            payment_gateway=get_active_gateway(), phone_number=phone_number,
-        )
-        return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)
+        """Pays the 30% deposit through the shared Booking/PaymentEscrow flow. 200 once confirmed (sandbox);
+        202 while the payer approves on their phone and the provider's webhook confirms it."""
+        return self._pay(request, "deposit")
 
     @action(detail=True, methods=["post"], url_path="pay-balance")
     def pay_balance(self, request, pk=None):
-        """Collects the remaining balance — the real gap this closes:
-        the balance amount was computed but had no reachable payment step."""
-        from .services import confirm_event_booking_balance
+        """Collects the remaining balance; same 200 / 202 behaviour as pay-deposit."""
+        return self._pay(request, "balance")
+
+    def _pay(self, request, part):
+        from .services import confirm_event_booking_deposit, confirm_event_booking_balance, EventPaymentError
         from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
 
         event_booking = self.get_object()
+        if event_booking.organiser_id != request.user.id:
+            return Response({"detail": "Only the organiser can pay for this booking."}, status=status.HTTP_403_FORBIDDEN)
         phone_number = request.data.get("phone_number")
         if not phone_number:
             return Response({"detail": "phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        event_booking, _escrow = confirm_event_booking_balance(
-            event_booking=event_booking, lock_client=get_booking_lock_client(),
-            payment_gateway=get_active_gateway(), phone_number=phone_number,
+        pay = confirm_event_booking_deposit if part == "deposit" else confirm_event_booking_balance
+        try:
+            event_booking, escrow = pay(
+                event_booking=event_booking, lock_client=get_booking_lock_client(),
+                payment_gateway=get_active_gateway(), phone_number=phone_number,
+            )
+        except EventPaymentError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response(
+            EventBookingSerializer(event_booking, context={"request": request}).data,
+            status=status.HTTP_200_OK if escrow is not None else status.HTTP_202_ACCEPTED,
         )
-        return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
-        """Venue-owner-only — settles the event AND releases both real
-        escrows so the venue actually gets paid."""
-        from .services import complete_event_booking, EventNotFullyPaidError
+        """Venue-owner-only, once the event is over: settles the event and releases both payments to the venue's
+        wallet. (If the owner does nothing, they are paid automatically 48 hours after the event ends.)"""
+        from .lifecycle import complete_as_owner, EventStateError
 
         event_booking = self.get_object()
         if event_booking.venue_space.venue.owner_id != request.user.id:
             return Response({"detail": "Only this venue's own owner can mark an event complete."}, status=status.HTTP_403_FORBIDDEN)
+        return self._lifecycle(request, lambda: complete_as_owner(event_booking, owner=request.user))
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        """The organiser cancels (free until 7 days before the event, or within 15 minutes of paying; later the
+        venue keeps the deposit), or the venue owner cancels and the organiser is refunded in full."""
+        from .lifecycle import cancel_event_booking
+
+        event_booking = self.get_object()
+        return self._lifecycle(request, lambda: cancel_event_booking(event_booking, by=request.user))
+
+    @action(detail=True, methods=["post"], url_path="confirm-event")
+    def confirm_event(self, request, pk=None):
+        """The organiser confirms the event went well, paying the venue at once."""
+        from .lifecycle import confirm_event
+
+        event_booking = self.get_object()
+        return self._lifecycle(request, lambda: confirm_event(event_booking, organiser=request.user))
+
+    @action(detail=True, methods=["post"])
+    def dispute(self, request, pk=None):
+        """The organiser reports a problem with the event: the held money is frozen until an admin decides."""
+        from .lifecycle import dispute_event
+
+        event_booking = self.get_object()
+        reason = request.data.get("reason", "")
+        return self._lifecycle(request, lambda: dispute_event(event_booking, organiser=request.user, reason=reason))
+
+    def _lifecycle(self, request, run):
+        from .lifecycle import EventStateError
 
         try:
-            event_booking, _escrows = complete_event_booking(event_booking=event_booking)
-        except EventNotFullyPaidError as e:
+            event_booking = run()
+        except EventStateError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(EventBookingSerializer(event_booking).data, status=status.HTTP_200_OK)
+        event_booking.refresh_from_db()
+        return Response(EventBookingSerializer(event_booking, context={"request": request}).data, status=status.HTTP_200_OK)

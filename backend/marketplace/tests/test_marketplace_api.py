@@ -15,6 +15,10 @@ from marketplace.models import WarehouseListing, CarListing, RideStatus
 from student_hostels.models import OwnerProfile
 
 
+# Bastos to Mvan, Yaoundé. Rides are booked with map points; the road distance comes from the server.
+RIDE_POINTS = {"pickup_latitude": "3.8800000", "pickup_longitude": "11.5210000", "dropoff_latitude": "3.8200000", "dropoff_longitude": "11.5200000"}
+
+
 def _auth_client(user):
     client = APIClient()
     token = RefreshToken.for_user(user)
@@ -117,20 +121,24 @@ def test_creating_a_listing_requires_authentication(quarter):
 # payment gateway exactly like every other transaction.
 # ---------------------------------------------------------------------
 @pytest.mark.django_db
-def test_requesting_a_ride_computes_a_real_fare_server_side():
+def test_requesting_a_ride_computes_a_real_fare_server_side(road):
     """A real gap this closes: the client could otherwise just claim
     any fare — estimate_ride_fare()'s real formula is applied
-    server-side from distance, never trusted from the request body."""
+    server-side to the road distance between the two map points; a
+    distance or fare sent by the client is ignored."""
     rider = _verify(User.objects.create(username="mp_ride_rider", phone="+237699777705"))
     client = _auth_client(rider)
+    road.km = Decimal("12.5")
 
     response = client.post("/api/rides/", {
-        "pickup_description": "Bastos Roundabout", "dropoff_description": "Yaoundé Airport", "distance_km": "12.5",
+        "pickup_description": "Bastos Roundabout", "dropoff_description": "Yaoundé Airport", **RIDE_POINTS,
+        "distance_km": "0.1", "fare_estimate_xaf": "1",
     })
 
     assert response.status_code == 201
     # 500 base + 12.5 * 150 = 2375
     assert Decimal(response.data["fare_estimate_xaf"]) == Decimal("2375.00")
+    assert Decimal(response.data["distance_km"]) == Decimal("12.5")
     assert response.data["status"] == "REQUESTED"
 
 
@@ -158,7 +166,7 @@ def test_the_full_real_ride_lifecycle_settles_through_the_real_payment_gateway()
     vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Toyota", "model": "Corolla", "plate_number": "LT-002-CD"})
     assert vehicle_response.status_code == 201
 
-    create_response = rider_client.post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    create_response = rider_client.post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
     ride_id = create_response.data["id"]
 
     accept_response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
@@ -187,7 +195,7 @@ def test_only_the_rides_own_driver_can_start_it():
     _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
     vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Nissan", "model": "Almera", "plate_number": "LT-008-OP"})
 
-    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
     ride_id = create_response.data["id"]
     accept_response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
     assert accept_response.status_code == 200
@@ -210,7 +218,7 @@ def test_cannot_accept_a_ride_thats_already_accepted():
     _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
     vehicle_response = driver_a_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Honda", "model": "Civic", "plate_number": "LT-007-MN"})
 
-    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
     ride_id = create_response.data["id"]
     first_accept = driver_a_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
     assert first_accept.status_code == 200
@@ -233,7 +241,7 @@ def test_only_the_rider_can_complete_and_pay_for_their_own_ride():
     _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
     vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Hyundai", "model": "Accent", "plate_number": "LT-009-QR"})
 
-    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
     ride_id = create_response.data["id"]
     assert driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]}).status_code == 200
     assert driver_client.post(f"/api/rides/{ride_id}/start/").status_code == 200
@@ -258,7 +266,7 @@ def test_ride_private_chat_between_rider_and_driver():
     vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Toyota", "model": "Yaris", "plate_number": "LT-333-AB"})
 
     rider_client = _auth_client(rider)
-    create_response = rider_client.post("/api/rides/", {"pickup_description": "Mvan Tropicana", "dropoff_description": "Bastos", "distance_km": "7"})
+    create_response = rider_client.post("/api/rides/", {"pickup_description": "Mvan Tropicana", "dropoff_description": "Bastos", **RIDE_POINTS})
     ride_id = create_response.data["id"]
 
     # Stranger cannot view or send messages
@@ -455,7 +463,7 @@ def test_an_unverified_driver_cannot_accept_a_ride():
     driver_client.post("/api/my-driver-profile/", {"license_number": "CM-DL-11112"})
     vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "STANDARD", "make": "Kia", "model": "Rio", "plate_number": "LT-003-EF"})
 
-    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
     ride_id = create_response.data["id"]
 
     response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
@@ -466,7 +474,7 @@ def test_an_unverified_driver_cannot_accept_a_ride():
 def test_a_non_registered_user_cannot_accept_a_ride_at_all():
     rider = _verify(User.objects.create(username="ride_noreg_rider", phone="+237699888804"))
     stranger = User.objects.create(username="ride_noreg_stranger", phone="+237699888805")
-    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5"})
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
     ride_id = create_response.data["id"]
 
     response = _auth_client(stranger).post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": "1"})
@@ -485,7 +493,7 @@ def test_a_moto_only_vehicle_cannot_accept_a_ride_requesting_a_standard_car():
     _auth_client(admin_user).post(f"/api/admin/drivers/{profile_response.data['id']}/verify/")
     vehicle_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "MOTO", "make": "Bajaj", "model": "Boxer", "plate_number": "LT-004-GH"})
 
-    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5", "ride_category": "STANDARD"})
+    create_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS, "ride_category": "STANDARD"})
     ride_id = create_response.data["id"]
 
     response = driver_client.post(f"/api/rides/{ride_id}/accept/", {"vehicle_id": vehicle_response.data["id"]})
@@ -506,7 +514,7 @@ def test_a_cargo_ride_requires_a_van_or_truck_not_a_car():
     van_response = driver_client.post("/api/my-vehicles/", {"vehicle_category": "VAN", "make": "Toyota", "model": "Hiace", "plate_number": "LT-006-KL"})
 
     create_response = _auth_client(rider).post("/api/rides/", {
-        "pickup_description": "Property A", "dropoff_description": "Property B", "distance_km": "8",
+        "pickup_description": "Property A", "dropoff_description": "Property B", **RIDE_POINTS,
         "transport_type": "CARGO", "cargo_description": "20 bags of cement and roofing sheets",
     })
     ride_id = create_response.data["id"]
@@ -522,7 +530,7 @@ def test_a_cargo_ride_requires_a_van_or_truck_not_a_car():
 def test_a_cargo_ride_without_a_description_is_rejected():
     rider = _verify(User.objects.create(username="ride_cargo_nodesc_rider", phone="+237699888812"))
     response = _auth_client(rider).post("/api/rides/", {
-        "pickup_description": "A", "dropoff_description": "B", "distance_km": "5", "transport_type": "CARGO",
+        "pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS, "transport_type": "CARGO",
     })
     assert response.status_code == 400
 
@@ -531,7 +539,7 @@ def test_a_cargo_ride_without_a_description_is_rejected():
 def test_luggage_and_ride_category_are_real_and_reflected_on_the_ride():
     rider = _verify(User.objects.create(username="ride_luggage_rider", phone="+237699888813"))
     response = _auth_client(rider).post("/api/rides/", {
-        "pickup_description": "Airport", "dropoff_description": "Hotel", "distance_km": "12",
+        "pickup_description": "Airport", "dropoff_description": "Hotel", **RIDE_POINTS,
         "ride_category": "COMFORT", "has_luggage": True,
     })
     assert response.status_code == 201
@@ -544,7 +552,7 @@ def test_riders_can_describe_and_photograph_their_luggage_and_drivers_see_it(set
     rider = _verify(User.objects.create(username="ride_bags_rider", phone="+237699888815"))
     photo = f"{settings.BACKEND_BASE_URL.rstrip('/')}/media/luggage/bag.jpg"
     body = {
-        "pickup_description": "Airport", "dropoff_description": "Hotel", "distance_km": "12", "has_luggage": True,
+        "pickup_description": "Airport", "dropoff_description": "Hotel", **RIDE_POINTS, "has_luggage": True,
         "luggage_count": 2, "luggage_size": "LARGE", "luggage_photo_urls": [photo],
     }
     response = _auth_client(rider).post("/api/rides/", body, format="json")
@@ -562,8 +570,8 @@ def test_riders_can_describe_and_photograph_their_luggage_and_drivers_see_it(set
 @pytest.mark.django_db
 def test_moto_and_comfort_fares_are_genuinely_different_not_one_formula_for_everyone():
     rider = _verify(User.objects.create(username="ride_fare_rider", phone="+237699888814"))
-    moto_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "10", "ride_category": "MOTO"})
-    comfort_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "10", "ride_category": "COMFORT"})
+    moto_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS, "ride_category": "MOTO"})
+    comfort_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS, "ride_category": "COMFORT"})
 
     assert Decimal(moto_response.data["fare_estimate_xaf"]) < Decimal(comfort_response.data["fare_estimate_xaf"])
 

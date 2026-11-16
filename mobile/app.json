@@ -11,7 +11,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.glorentech.oaziland",
       "infoPlist": {
-        "NSCameraUsageDescription": "Oaziland uses your camera to photograph properties you're listing.",
+        "NSCameraUsageDescription": "Oaziland uses your camera to photograph properties you're listing and, when you verify your identity, your ID and a selfie.",
         "NSPhotoLibraryUsageDescription": "Oaziland needs access to your photos to attach them to a property listing.",
         "NSFaceIDUsageDescription": "Use Face ID to sign in to Oaziland quickly and securely."
       }
@@ -24,7 +24,13 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["CAMERA", "READ_MEDIA_IMAGES", "USE_BIOMETRIC", "USE_FINGERPRINT"],
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -34,7 +40,7 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Oaziland uses your camera to photograph properties you're listing."
+          "cameraPermission": "Oaziland uses your camera to photograph properties you're listing and, when you verify your identity, your ID and a selfie."
         }
       ],
       [
@@ -46,9 +52,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Oaziland uses your location to share it in an emergency during a ride and to show technicians where a job is."
+          "locationWhenInUsePermission": "Oaziland uses your location to send nearby ride requests while you drive with OaziGo, to share it in an emergency during a ride and to show technicians where a job is."
         }
-      ]
+      ],
+      "expo-video"
     ]
   }
 }

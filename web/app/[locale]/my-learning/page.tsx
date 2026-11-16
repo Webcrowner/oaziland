@@ -5,6 +5,7 @@ import { Link } from "@/i18n/navigation";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import { getMyEnrollments, type TrainingEnrollmentItem } from "@/lib/api";
 import { loginHref } from "@/lib/authRedirect";
+import { relativeTime } from "@/lib/relativeTime";
 import { trainingTheme } from "@/lib/trainingCategories";
 
 type Tab = "active" | "completed";
@@ -115,9 +116,25 @@ export default function MyLearningPage() {
                       ) : progress && progress.total > 0 ? (
                         <div>
                           <p className="mb-1 text-xs font-medium text-slate-600">{tp("progressLabel", { done: progress.done, total: progress.total, percent: progress.percent })}</p>
-                          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}>
+                          <div
+                            className="h-2 w-full overflow-hidden rounded-full bg-slate-100"
+                            role="progressbar"
+                            aria-label={tp("progressBarLabel", { title: program.title })}
+                            aria-valuetext={tp("progressLabel", { done: progress.done, total: progress.total, percent: progress.percent })}
+                            aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}
+                          >
                             <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600" style={{ width: `${progress.percent}%` }} />
                           </div>
+                          <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+                            {enrollment.next_lesson && (
+                              <li>▶ {t("nextLesson")} <span className="font-semibold text-slate-900">{enrollment.next_lesson.title}</span></li>
+                            )}
+                            <li className="text-slate-500">
+                              🕒 {enrollment.last_activity_at
+                                ? t("lastStudied", { when: relativeTime(enrollment.last_activity_at, locale) })
+                                : t("notStartedYet")}
+                            </li>
+                          </ul>
                         </div>
                       ) : (
                         <p className="text-sm text-slate-600">{tp("trainerConfirms")}</p>

@@ -97,6 +97,13 @@ class StudentHostel(Building):
     are expected to set both consistently (see services.py's
     create_student_hostel helper, which does this for you)."""
     owner_profile = models.ForeignKey(OwnerProfile, on_delete=models.PROTECT, related_name="hostels")
+    # What students see on the card, e.g. "Résidence Les Palmiers". Optional: cards fall back to "Hostel in <quarter>".
+    name = models.CharField(max_length=120, blank=True)
+    # The agent who listed this hostel for its landlord (who stays the owner and is the one paid). Empty when
+    # the owner listed it themselves.
+    listed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="hostels_listed_for_landlords",
+    )
     property_type = models.CharField(max_length=25, choices=HostelPropertyType.choices, default=HostelPropertyType.BLOCK)
     institution_partnerships = models.ManyToManyField(PartnerInstitution, blank=True, related_name="partner_hostels")
 
@@ -192,11 +199,64 @@ class AmenityTier(models.TextChoices):
     PREMIUM = "PREMIUM", "Premium"
 
 
+class HostelPricePeriod(models.TextChoices):
+    MONTH = "MONTH", "Per month"
+    SEMESTER = "SEMESTER", "Per semester"
+    YEAR = "YEAR", "Per academic year"
+
+
+# The most periods a student can pay for in one booking.
+MAX_PERIODS_PER_BOOKING = {HostelPricePeriod.MONTH: 12, HostelPricePeriod.SEMESTER: 2, HostelPricePeriod.YEAR: 1}
+
+
+class HostelRoomType(models.Model):
+    """What students browse and book, like a room type on Booking.com or Student.com: "Self-contain with
+    private bathroom — 40,000 XAF/month", with its own photos. The physical rooms (A-101, A-102...) are
+    HostelUnits pointing at it; the owner places a booked student in one of them. price_xaf is per bed for a
+    PER_BED type and per whole room for a PER_UNIT type."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    hostel = models.ForeignKey(StudentHostel, on_delete=models.CASCADE, related_name="room_types")
+    name = models.CharField(max_length=120)
+    unit_type = models.CharField(max_length=25, choices=HostelUnitType.choices)
+    occupancy_model = models.CharField(max_length=10, choices=OccupancyModel.choices, default=OccupancyModel.PER_UNIT)
+    beds_per_room = models.PositiveSmallIntegerField(default=1)
+    price_xaf = models.DecimalField(max_digits=12, decimal_places=2)
+    price_period = models.CharField(max_length=10, choices=HostelPricePeriod.choices, default=HostelPricePeriod.MONTH)
+    size_sqm = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
+    private_bathroom = models.BooleanField(default=False)
+    furnished = models.BooleanField(default=False)
+    description = models.TextField(blank=True)
+    # Hidden from students (and not bookable) without deleting it, e.g. while rooms are renovated.
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "hostel_room_types"
+        ordering = ["price_xaf", "name"]
+
+    @property
+    def owner(self):
+        """Who is paid for a booking of this room type (transactions.services.resolve_target_owner reads it)."""
+        return self.hostel.owner
+
+
+class HostelRoomTypePhoto(models.Model):
+    room_type = models.ForeignKey(HostelRoomType, on_delete=models.CASCADE, related_name="photos")
+    url = models.URLField(max_length=500)
+    position = models.PositiveSmallIntegerField(default=0)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "hostel_room_type_photos"
+        ordering = ["position", "id"]
+
+
 class HostelUnit(Unit):
     unit_type = models.CharField(max_length=25, choices=HostelUnitType.choices)
     occupancy_model = models.CharField(max_length=10, choices=OccupancyModel.choices, default=OccupancyModel.PER_BED)
     amenity_tier = models.CharField(max_length=10, choices=AmenityTier.choices, default=AmenityTier.BASE)
     bed_capacity = models.PositiveSmallIntegerField(default=1)  # meaningful for SHARED_ROOM; 1 for per-unit types
+    room_type = models.ForeignKey(HostelRoomType, on_delete=models.SET_NULL, null=True, blank=True, related_name="units")
 
     class Meta:
         db_table = "hostel_units"

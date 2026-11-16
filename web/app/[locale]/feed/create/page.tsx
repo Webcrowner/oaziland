@@ -5,6 +5,7 @@ import { useRouter } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
 import { createPost, CreatePostError, type MediaUploadResult } from "@/lib/api";
 import MediaUploader from "@/components/MediaUploader";
+import Button from "@/components/ui/Button";
 
 const MAX_CAPTION_LENGTH = 2200;
 const MAX_TAGS = 20;
@@ -38,6 +39,13 @@ function CreatePostForm() {
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [serverMessage, setServerMessage] = useState("");
+  // null until checked, so signed-out visitors never start a post they can't send.
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    void Promise.resolve().then(() => setLoggedIn(Boolean(token)));
+  }, []);
 
   // The author's own posts are not in the main feed, so land on "My posts" to show the new post.
   useEffect(() => {
@@ -83,33 +91,45 @@ function CreatePostForm() {
 
   const busy = status === "posting" || status === "posted";
 
+  if (loggedIn === null) return null;
+  if (!loggedIn) {
+    return (
+      <main className="max-w-xl mx-auto px-4 py-16 text-center">
+        <h1 className="font-[family-name:var(--font-display)] text-2xl md:text-3xl font-black tracking-tight text-slate-900 mb-3">{t("title")}</h1>
+        <p className="mb-6 text-slate-600">{t("signInRequired")}</p>
+        <Button href="/login">{t("signIn")}</Button>
+      </main>
+    );
+  }
+
   return (
-    <main className="max-w-lg mx-auto px-4 py-12">
-      <h1 className="text-2xl font-bold text-[var(--navy)] mb-6">{t("title")}</h1>
+    <main className="max-w-xl mx-auto px-4 py-10">
+      <h1 className="font-[family-name:var(--font-display)] text-2xl md:text-3xl font-black tracking-tight text-slate-900 mb-6">{t("title")}</h1>
 
       {linkedListingId && (
-        <p className="text-sm bg-[var(--gold)]/10 text-[#8A6D14] rounded px-3 py-2 mb-4">{t("linkedToListing")}</p>
+        <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">{t("linkedToListing")}</p>
       )}
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 rounded-3xl border border-slate-200/90 bg-white p-5 shadow-sm sm:p-6">
         <div>
           <textarea
-            required={media.length === 0} rows={4} maxLength={MAX_CAPTION_LENGTH} placeholder={t("captionPlaceholder")}
+            required={media.length === 0} rows={5} maxLength={MAX_CAPTION_LENGTH} placeholder={t("captionPlaceholder")}
             aria-label={t("captionPlaceholder")} value={caption} onChange={(e) => setCaption(e.target.value)}
-            className="w-full border rounded px-3 py-2"
+            className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-[15px] outline-none placeholder:text-slate-400 focus:border-amber-400 focus:ring-4 focus:ring-amber-400/15"
           />
-          <p className="text-xs text-gray-400 text-right">{caption.length}/{MAX_CAPTION_LENGTH}</p>
+          <p className="mt-1 text-right text-xs font-semibold text-slate-400">{caption.length}/{MAX_CAPTION_LENGTH}</p>
         </div>
         <input
           type="text" placeholder={t("tagsPlaceholder")} aria-label={t("tagsPlaceholder")} value={tagsInput}
-          onChange={(e) => setTagsInput(e.target.value)} className="border rounded px-3 py-2"
+          onChange={(e) => setTagsInput(e.target.value)}
+          className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none placeholder:text-slate-400 focus:border-amber-400 focus:ring-4 focus:ring-amber-400/15"
         />
 
         {media.length < MAX_MEDIA && <MediaUploader folder="posts" onUploaded={handleMediaUploaded} label={t("addPhotoOrVideo")} />}
         {media.length > 0 && (
-          <ul className="flex flex-wrap gap-2">
+          <ul className="flex flex-wrap gap-3">
             {media.map((item, index) => (
-              <li key={item.url} className="relative h-20 w-20 overflow-hidden rounded border bg-gray-100 text-xs text-gray-500 flex items-center justify-center">
+              <li key={item.url} className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 text-xs text-slate-500">
                 {item.media_type === "VIDEO" ? (
                   <span>🎬</span>
                 ) : (
@@ -118,7 +138,7 @@ function CreatePostForm() {
                 )}
                 <button
                   type="button" onClick={() => setMedia((prev) => prev.filter((_, i) => i !== index))}
-                  aria-label={t("removeMedia")} className="absolute right-0 top-0 bg-black/60 px-1.5 text-white"
+                  aria-label={t("removeMedia")} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900/70 text-white hover:bg-slate-900"
                 >
                   ×
                 </button>
@@ -127,14 +147,14 @@ function CreatePostForm() {
           </ul>
         )}
 
-        {status === "blocked" && <p role="alert" className="text-red-600 text-sm">{t("blocked")}</p>}
-        {status === "invalid" && <p role="alert" className="text-red-600 text-sm">{serverMessage || t("failed")}</p>}
-        {status === "failed" && <p role="alert" className="text-red-600 text-sm">{t("failed")}</p>}
-        {status === "posted" && <p role="status" className="text-green-700 text-sm">{t("posted")}</p>}
+        {status === "blocked" && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t("blocked")}</p>}
+        {status === "invalid" && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{serverMessage || t("failed")}</p>}
+        {status === "failed" && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t("failed")}</p>}
+        {status === "posted" && <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">{t("posted")}</p>}
 
-        <button type="submit" disabled={busy} className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-2 rounded hover:opacity-90 disabled:opacity-50">
+        <Button type="submit" size="lg" disabled={busy}>
           {status === "posting" ? t("posting") : t("post")}
-        </button>
+        </Button>
       </form>
     </main>
   );

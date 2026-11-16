@@ -5,7 +5,10 @@ import { useRouter } from "@/i18n/navigation";
 import { acceptRide, listOpenRides, setDriverLocation, type OpenRideItem } from "@/lib/api";
 import Badge from "@/components/ui/Badge";
 import EmptyState from "@/components/ui/EmptyState";
-import { IconMapPin, IconChevronRight, IconAlertCircle } from "@/components/Icons";
+import Button from "@/components/ui/Button";
+import PushToggle from "@/components/PushToggle";
+import { enablePush } from "@/lib/push";
+import { IconMapPin, IconChevronRight, IconAlertCircle, IconCar, IconCompass } from "@/components/Icons";
 import { useOaziGo } from "@/components/oazigo/OaziGoProvider";
 import { cardCls, inputCls, solidBtnCls } from "@/components/oazigo/styles";
 import LuggageDetails from "@/components/oazigo/LuggageDetails";
@@ -29,6 +32,7 @@ export default function OaziGoRequestsPage() {
   const [error, setError] = useState("");
   const [vehicleByRide, setVehicleByRide] = useState<Record<string, number>>({});
   const [toggling, setToggling] = useState(false);
+  const [pushKey, setPushKey] = useState(0);
 
   const verified = Boolean(driverProfile?.is_verified);
   const online = Boolean(driverProfile?.is_online);
@@ -58,6 +62,10 @@ export default function OaziGoRequestsPage() {
   async function toggleOnline() {
     const token = localStorage.getItem("access_token");
     if (!token) return;
+    // Going online is the moment a driver needs notifications, and the click lets the browser ask.
+    if (!online && typeof Notification !== "undefined" && Notification.permission === "default") {
+      void enablePush(token).catch(() => "off").finally(() => setPushKey((k) => k + 1));
+    }
     setToggling(true);
     try {
       await setDriverLocation({ is_online: !online }, token);
@@ -84,7 +92,18 @@ export default function OaziGoRequestsPage() {
   }
 
   if (status === "loading") return null;
-  if (!verified) return <EmptyState icon="🚗" title={t("requestsDriversOnly")} />;
+  if (!verified) return <EmptyState icon={<IconCar size={28} />} title={t("requestsDriversOnly")} />;
+  // Requests are filtered by vehicle type, so with no vehicle the list is always empty; say why instead.
+  if (vehicles.length === 0) {
+    return (
+      <EmptyState
+        icon={<IconCar size={28} />}
+        title={t("requestsNeedVehicle")}
+        description={t("requestsNeedVehicleHint")}
+        action={<Button variant="dark" href="/oazigo/drive">{t("addVehicle")}</Button>}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -92,6 +111,7 @@ export default function OaziGoRequestsPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-black tracking-tight text-slate-900">{t("navRequests")}</h1>
           <p className="mt-0.5 text-sm text-slate-500">{online ? t("onlineHint") : t("offlineHint")}</p>
+          <p className="mt-1 text-xs text-slate-400">{t("requestsFallbackHint")}</p>
         </div>
         <button
           type="button" onClick={toggleOnline} disabled={toggling} aria-pressed={online}
@@ -100,6 +120,8 @@ export default function OaziGoRequestsPage() {
           {online ? `● ${t("youAreOnline")}` : t("goOnline")}
         </button>
       </div>
+
+      <PushToggle key={pushKey} variant="driver" />
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("radiusLabel")}</span>
@@ -130,7 +152,7 @@ export default function OaziGoRequestsPage() {
           {t("loadingRequests")}
         </div>
       ) : rides.length === 0 ? (
-        <EmptyState icon="📡" title={t("noOpenRequests")} />
+        <EmptyState icon={<IconCompass size={28} />} title={t("noOpenRequests")} />
       ) : (
         rides.map((ride) => {
           const fitting = vehicles.filter((v) => canServe(v.vehicle_category, ride));

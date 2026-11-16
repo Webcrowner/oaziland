@@ -418,6 +418,12 @@ class FapshiGateway(PaymentGateway):
             return DisbursementResult(success=False, provider_reference="", raw_provider_response={"error": str(e)})
 
 
+def confirms_instantly(gateway) -> bool:
+    """True for the development stand-in, which has no phone approval step: a payment started with it can be
+    confirmed on the spot. Every real gateway confirms later, by webhook, once the payer approves on their phone."""
+    return isinstance(gateway, SandboxGateway)
+
+
 def get_active_gateway() -> PaymentGateway:
     """The ONE place that decides which gateway is actually in use.
     Supports FAPSHI (the premier gateway for Cameroon), CINETPAY,

@@ -130,6 +130,8 @@ def test_group_booking_links_individual_reservations(hotel, room_type):
     reservations from a rooming list, all linked back to it."""
     guest_a = User.objects.create(username="group_guest_a", phone="+237699222009")
     guest_b = User.objects.create(username="group_guest_b", phone="+237699222010")
+    Room.objects.create(hotel=hotel, room_type=room_type, room_number="201")
+    Room.objects.create(hotel=hotel, room_type=room_type, room_number="202")
 
     group = create_group_booking(hotel=hotel, group_name="ICT University Alumni Conference", arrival=date(2026, 9, 1), departure=date(2026, 9, 3), event_type="Conference")
     reservation_a = add_reservation_to_group(group_booking=group, guest=guest_a, room_type=room_type)

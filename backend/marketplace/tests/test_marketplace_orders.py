@@ -10,7 +10,9 @@ from django.utils import timezone
 from identity.models import User, KYCProfile, VerificationStatus
 from marketplace.models import WarehouseListing, MarketplaceOrder, MarketplaceOrderStatus
 from marketplace.serializers import MarketplaceOrderSerializer
-from marketplace.services import dispute_order, process_marketplace_orders
+from marketplace.services import cancel_order, confirm_receipt, dispute_order, process_marketplace_orders, OrderError
+from marketplace.models import MarketplaceOffer
+from marketplace.offers import make_offer, accept_offer, decline_offer, OfferError
 from monetization.models import PlatformFeePolicy, TransactionCategory, Wallet
 from notifications.models import Notification
 from property_management.services import resolve_dispute
@@ -285,6 +287,9 @@ def test_buyer_can_cancel_before_handover_and_is_refunded(deal):
     assert _auth_client(buyer).post(f"{base}/cancel/").status_code == 200
     order = MarketplaceOrder.objects.get(pk=order_id)
     assert order.status == MarketplaceOrderStatus.CANCELLED and order.booking.escrow.status == EscrowStatus.REFUNDED
+    # The money really went back: the full amount is in the buyer's wallet, nothing reached the seller.
+    assert Wallet.objects.get(owner=buyer).balance_xaf == Decimal("1000000")
+    assert not Wallet.objects.filter(owner=seller, balance_xaf__gt=0).exists()
     assert _status(listing_id) == "AVAILABLE"
     # The listing can be bought again afterwards.
     assert _order(_auth_client(buyer), listing_id).status_code == 200
@@ -313,6 +318,7 @@ def test_seller_can_decline_and_the_buyer_is_refunded(deal):
     assert _auth_client(buyer).post(f"{base}/decline/").status_code == 403
     assert _auth_client(seller).post(f"{base}/decline/").status_code == 200
     assert MarketplaceOrder.objects.get(pk=order_id).booking.escrow.status == EscrowStatus.REFUNDED
+    assert Wallet.objects.get(owner=buyer).balance_xaf == Decimal("1000000")
     assert _status(listing_id) == "AVAILABLE"
     assert Notification.objects.filter(recipient=buyer, notification_type="MARKETPLACE_ORDER", title="Your order was declined").exists()
 
@@ -380,7 +386,9 @@ def test_sweep_refunds_unfulfilled_orders_and_releases_unconfirmed_handovers(dea
     assert silent.status == MarketplaceOrderStatus.CANCELLED and _status(listing_id) == "AVAILABLE"
     assert handed.status == MarketplaceOrderStatus.COMPLETED and _status(second_listing) == "UNAVAILABLE"
     assert Wallet.objects.get(owner=seller).balance_xaf == Decimal("190000.00")
+    assert Wallet.objects.get(owner=buyer).balance_xaf == Decimal("1000000")  # the order the seller never handed over
     assert process_marketplace_orders() == {"refunded": [], "released": [], "expired": [], "relisted": [], "deposits_returned": []}
+    assert Wallet.objects.get(owner=buyer).balance_xaf == Decimal("1000000")  # and a second sweep refunds nothing twice
 
 
 @pytest.mark.django_db
@@ -445,3 +453,50 @@ def test_orders_are_listed_by_role_and_hidden_from_outsiders(deal):
     assert _auth_client(stranger).get("/api/marketplace-orders/").data["results"] == []
     assert _auth_client(stranger).get(f"/api/marketplace-orders/{order_id}/").status_code == 404
     assert _auth_client(seller).get(f"/api/marketplace-orders/{order_id}/").status_code == 200
+
+
+def _stale(order_id):
+    """An order as a request loaded it, with its escrow cached, before another request changed it."""
+    order = MarketplaceOrder.objects.select_related("booking__escrow", "listing__lister_user").get(pk=order_id)
+    assert order.booking.escrow.status == EscrowStatus.HELD
+    return order
+
+
+@pytest.mark.django_db
+def test_a_confirmation_racing_the_auto_release_pays_the_seller_once(deal):
+    seller, buyer, listing_id = deal
+    order_id = _order(_auth_client(buyer), listing_id).data["id"]
+    _auth_client(seller).post(f"/api/marketplace-orders/{order_id}/hand-over/")
+    stale = _stale(order_id)
+    MarketplaceOrder.objects.filter(pk=order_id).update(handed_over_at=timezone.now() - timedelta(hours=80))
+    assert len(process_marketplace_orders()["released"]) == 1
+
+    with pytest.raises(OrderError):
+        confirm_receipt(order=stale, buyer=buyer)
+    assert Wallet.objects.get(owner=seller).balance_xaf == Decimal("950000.00")
+
+
+@pytest.mark.django_db
+def test_a_cancel_racing_the_handover_does_not_refund_a_handed_over_order(deal):
+    seller, buyer, listing_id = deal
+    order_id = _order(_auth_client(buyer), listing_id).data["id"]
+    stale = _stale(order_id)
+    assert _auth_client(seller).post(f"/api/marketplace-orders/{order_id}/hand-over/").status_code == 200
+
+    with pytest.raises(OrderError):
+        cancel_order(order=stale, buyer=buyer)
+    order = MarketplaceOrder.objects.get(pk=order_id)
+    assert order.status == MarketplaceOrderStatus.HANDED_OVER and order.booking.escrow.status == EscrowStatus.HELD
+
+
+@pytest.mark.django_db
+def test_an_offer_declined_from_a_stale_page_stays_accepted(deal):
+    seller, buyer, listing_id = deal
+    WarehouseListing.objects.filter(pk=listing_id).update(allow_offers=True)
+    offer = make_offer(listing=WarehouseListing.objects.get(pk=listing_id), buyer=buyer, amount_xaf=Decimal("800000"))
+    stale = MarketplaceOffer.objects.get(pk=offer.pk)
+    accept_offer(offer=offer, seller=seller)
+
+    with pytest.raises(OfferError):
+        decline_offer(offer=stale, seller=seller)
+    assert MarketplaceOffer.objects.get(pk=offer.pk).status == "ACCEPTED"

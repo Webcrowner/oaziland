@@ -23,6 +23,7 @@ class ListerRole(models.TextChoices):
     TENANT_SUBLET = "TENANT_SUBLET", "Tenant (Sublet Rights)"
     AGENT = "AGENT", "Agent"
     AGENCY = "AGENCY", "Agency"
+    PLATFORM = "PLATFORM", "Oaziland (official)"
 
 
 class PriceBasis(models.TextChoices):
@@ -73,10 +74,31 @@ class MarketplaceListingBase(models.Model):
     allow_offers = models.BooleanField(default=True)
     # A paid "TOP" boost: shown first, with a badge, until this moment (see marketplace/boosts.py).
     boosted_until = models.DateTimeField(null=True, blank=True)
+    # A flash sale (goods only): between sale_starts_at and sale_ends_at buyers pay sale_price_xaf instead of price_xaf.
+    sale_price_xaf = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    sale_starts_at = models.DateTimeField(null=True, blank=True)
+    sale_ends_at = models.DateTimeField(null=True, blank=True)
+
+    def on_sale(self, now=None) -> bool:
+        now = now or timezone.now()
+        return bool(
+            self.sale_price_xaf is not None and self.sale_ends_at and self.sale_ends_at > now
+            and (self.sale_starts_at is None or self.sale_starts_at <= now)
+        )
+
+    def current_price_xaf(self, now=None):
+        """What a buyer pays for one unit right now: the sale price while a flash sale runs, else the listed price."""
+        return self.sale_price_xaf if self.on_sale(now) else self.price_xaf
 
     class Meta:
         db_table = "marketplace_listings"
-        indexes = [models.Index(fields=["availability_status", "quarter"])]
+        indexes = [
+            models.Index(fields=["availability_status", "quarter"]),
+            # Public browsing: live listings, newest / recently renewed first; TOP boosts first.
+            models.Index(fields=["availability_status", "removed_by_moderation", "-renewed_at"], name="idx_mkt_listing_live_renewed"),
+            models.Index(fields=["availability_status", "-created_at"], name="idx_mkt_listing_live_created"),
+            models.Index(fields=["boosted_until"], name="idx_mkt_listing_boosted"),
+        ]
 
 
 class WarehouseListing(MarketplaceListingBase):
@@ -236,7 +258,8 @@ class GoodsCondition(models.TextChoices):
 
 class GoodsListing(MarketplaceListingBase):
     """An everyday item for sale — a phone, a sofa, a sack of rice. Always a sale (never a rental), so the
-    price basis is fixed by the serializer; the item's own details are the category, condition and quantity,
+    price basis is fixed by the serializer; the item's own details are the category, condition and quantity (units in
+    stock: each paid order takes its units, and the listing is sold out at 0),
     plus category-specific attributes (a phone's storage, a dress's size…) checked by goods_attributes.py.
 
     How the buyer gets it: any mix of pickup, delivery by the seller (for a fee, to the areas they name) and
@@ -253,9 +276,43 @@ class GoodsListing(MarketplaceListingBase):
     courier_shipping = models.BooleanField(default=False)
     courier_fee_xaf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     courier_note = models.CharField(max_length=200, blank=True)
+    # The "was" price shown struck through next to the price (display only, must be above the price).
+    compare_at_price_xaf = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
     class Meta:
         db_table = "goods_listings"
+
+    def live_variants(self) -> list:
+        """The variants buyers can choose from (uses the prefetch when the list was loaded with one)."""
+        return [v for v in self.variants.all() if v.is_active]
+
+    def has_variants(self) -> bool:
+        return bool(self.live_variants())
+
+
+class GoodsVariant(models.Model):
+    """One purchasable version of a goods listing (Red / XL): its own stock, optional price difference and SKU.
+    While a listing has live variants its quantity is the sum of their stock, so the sold-out and browse logic keep
+    working unchanged; every sale takes units from both."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    listing = models.ForeignKey(GoodsListing, on_delete=models.CASCADE, related_name="variants")
+    options = models.JSONField(default=dict, blank=True)
+    label = models.CharField(max_length=120)
+    sku = models.CharField(max_length=40, blank=True)
+    # Added to the listing's current price (flash sales included); may be negative for a cheaper version.
+    price_delta_xaf = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    quantity = models.PositiveIntegerField(default=0)
+    photo_url = models.URLField(max_length=500, blank=True)
+    position = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "goods_variants"
+        ordering = ["position", "label"]
+        constraints = [models.UniqueConstraint(fields=["listing", "label"], name="uq_goods_variant_label")]
+
+    def unit_price_xaf(self, now=None):
+        return self.listing.current_price_xaf(now) + self.price_delta_xaf
 
 
 class DeliveryMethod(models.TextChoices):
@@ -295,7 +352,11 @@ class MarketplaceOffer(models.Model):
     class Meta:
         db_table = "marketplace_offers"
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["listing", "status"])]
+        indexes = [
+            models.Index(fields=["listing", "status"]),
+            # The expiry sweep scans open offers by status.
+            models.Index(fields=["status", "pay_by"], name="idx_mkt_offer_status_payby"),
+        ]
 
     @property
     def agreed_amount_xaf(self):
@@ -386,6 +447,12 @@ class MarketplaceOrderStatus(models.TextChoices):
     DISPUTED = "DISPUTED", "Disputed"
 
 
+class ShipmentStatus(models.TextChoices):
+    IN_TRANSIT = "IN_TRANSIT", "On its way"
+    OUT_FOR_DELIVERY = "OUT_FOR_DELIVERY", "Out for delivery"
+    DELIVERED = "DELIVERED", "Delivered"
+
+
 class DepositStatus(models.TextChoices):
     NONE = "NONE", "No deposit"
     HELD = "HELD", "Held"
@@ -436,12 +503,177 @@ class MarketplaceOrder(models.Model):
     offer = models.ForeignKey("MarketplaceOffer", on_delete=models.SET_NULL, null=True, blank=True, related_name="orders")
     # Goods only: how the buyer gets the item. The fee is part of amount_xaf and goes to the seller with the price.
     delivery_method = models.CharField(max_length=10, choices=DeliveryMethod.choices, blank=True)
+    # Goods: how many units the buyer ordered, and how many are still taken out of the listing's stock for this order
+    # (put back, and set to 0, if the order is cancelled or refunded; kept once the sale completes).
+    quantity = models.PositiveIntegerField(default=1)
+    stock_taken = models.PositiveIntegerField(default=0)
     delivery_fee_xaf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     delivery_address = models.CharField(max_length=300, blank=True)
+    # A seller's coupon applied to this order: the discount comes off the item price (not delivery) and the seller bears it.
+    coupon = models.ForeignKey("MarketplaceCoupon", on_delete=models.SET_NULL, null=True, blank=True, related_name="orders")
+    discount_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # Bought through the cart: all of one seller's items share one payment (charged on the lead order) and are then
+    # split into one order and escrow per item.
+    checkout = models.ForeignKey("MarketplaceCheckout", on_delete=models.SET_NULL, null=True, blank=True, related_name="orders")
+    checkout_lead = models.BooleanField(default=False)
+    # Goods with options: which version was bought (the label is kept in case the seller later renames or removes it).
+    variant = models.ForeignKey("GoodsVariant", on_delete=models.SET_NULL, null=True, blank=True, related_name="orders")
+    variant_label = models.CharField(max_length=120, blank=True)
+    # Goods delivered by the seller or sent with a courier: where the parcel is. Blank until the seller posts the first update.
+    courier_name = models.CharField(max_length=80, blank=True)
+    tracking_number = models.CharField(max_length=60, blank=True)
+    shipment_status = models.CharField(max_length=20, choices=ShipmentStatus.choices, blank=True)
+    shipped_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    # A photo of the delivered parcel (a URL already produced by /api/media/upload/) and a free note ("left with the guard").
+    delivery_proof_url = models.URLField(max_length=500, blank=True)
+    delivery_note = models.CharField(max_length=300, blank=True)
+    # The tracking timeline: [{"status", "note", "at"}], oldest first.
+    shipment_events = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "marketplace_orders"
         ordering = ["-created_at"]
+        indexes = [
+            # Buyers' / sellers' order lists and the scheduled settlement sweep filter by status and these dates.
+            models.Index(fields=["buyer", "-created_at"], name="idx_mkt_order_buyer_created"),
+            models.Index(fields=["status", "created_at"], name="idx_mkt_order_status_created"),
+            models.Index(fields=["status", "handed_over_at"], name="idx_mkt_order_status_handover"),
+            models.Index(fields=["status", "rental_ends_on"], name="idx_mkt_order_status_rentend"),
+        ]
+
+
+class ReturnKind(models.TextChoices):
+    REFUND = "REFUND", "Full refund"
+    PARTIAL_REFUND = "PARTIAL_REFUND", "Partial refund"
+    REPLACEMENT = "REPLACEMENT", "Replacement"
+
+
+class ReturnReason(models.TextChoices):
+    NOT_AS_DESCRIBED = "NOT_AS_DESCRIBED", "Not as described"
+    DAMAGED = "DAMAGED", "Damaged or broken"
+    WRONG_ITEM = "WRONG_ITEM", "Wrong item"
+    MISSING_PARTS = "MISSING_PARTS", "Missing parts"
+    NOT_WORKING = "NOT_WORKING", "Does not work"
+    OTHER = "OTHER", "Other"
+
+
+class ReturnStatus(models.TextChoices):
+    REQUESTED = "REQUESTED", "Waiting for the seller"
+    ACCEPTED = "ACCEPTED", "Accepted"
+    REJECTED = "REJECTED", "Rejected by the seller"
+    ESCALATED = "ESCALATED", "Sent to support"
+    WITHDRAWN = "WITHDRAWN", "Withdrawn"
+    CLOSED = "CLOSED", "Closed"
+
+
+class MarketplaceReturnRequest(models.Model):
+    """A buyer asking for a refund, a partial refund or a replacement while the payment is still held in escrow (after
+    the handover, before they confirm). The seller accepts or rejects; a rejected or unanswered request can go to
+    support as a dispute. While one is open the payment is not released automatically."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey(MarketplaceOrder, on_delete=models.CASCADE, related_name="return_requests")
+    kind = models.CharField(max_length=15, choices=ReturnKind.choices)
+    reason = models.CharField(max_length=20, choices=ReturnReason.choices)
+    description = models.TextField()
+    evidence_urls = models.JSONField(default=list, blank=True)
+    # PARTIAL_REFUND only: what the buyer asks to get back.
+    requested_amount_xaf = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=10, choices=ReturnStatus.choices, default=ReturnStatus.REQUESTED)
+    seller_note = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "marketplace_return_requests"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "created_at"], name="idx_mkt_return_status")]
+
+
+class CouponKind(models.TextChoices):
+    PERCENT = "PERCENT", "Percentage off"
+    FIXED = "FIXED", "Fixed amount off"
+
+
+class MarketplaceCoupon(models.Model):
+    """A discount code a seller creates for their own shop. The discount comes off the price of the items in the order
+    (never the delivery fee) and is paid by the seller: the buyer is simply charged less, and the platform fee is taken
+    on what was charged."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="marketplace_coupons")
+    code = models.CharField(max_length=30)
+    kind = models.CharField(max_length=8, choices=CouponKind.choices)
+    value = models.DecimalField(max_digits=14, decimal_places=2)
+    min_order_xaf = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    max_uses = models.PositiveIntegerField(null=True, blank=True)
+    uses = models.PositiveIntegerField(default=0)
+    starts_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "marketplace_coupons"
+        ordering = ["-created_at"]
+        constraints = [models.UniqueConstraint(fields=["seller", "code"], name="uq_mkt_coupon_seller_code")]
+
+
+class MarketplaceCheckout(models.Model):
+    """One cart checkout with one seller: a single payment covering several items (see marketplace/cart.py)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="marketplace_checkouts")
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    total_xaf = models.DecimalField(max_digits=14, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "marketplace_checkouts"
+
+
+class CartItem(models.Model):
+    """A goods listing in a buyer's cart. Prices are never stored: the cart always shows what the listing costs now."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="marketplace_cart")
+    listing = models.ForeignKey(GoodsListing, on_delete=models.CASCADE, related_name="cart_items")
+    variant = models.ForeignKey(GoodsVariant, on_delete=models.CASCADE, null=True, blank=True, related_name="cart_items")
+    quantity = models.PositiveIntegerField(default=1)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "marketplace_cart_items"
+        ordering = ["added_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "listing"], condition=models.Q(variant__isnull=True), name="uq_mkt_cart_user_listing"),
+            models.UniqueConstraint(fields=["user", "listing", "variant"], condition=models.Q(variant__isnull=False), name="uq_mkt_cart_user_listing_variant"),
+        ]
+
+
+class ShopProfile(models.Model):
+    """The public face of a seller's shop: name, banner, policies, an announcement and vacation mode. Sellers without
+    one still have a storefront, built from their name."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="shop_profile")
+    name = models.CharField(max_length=80, blank=True)
+    tagline = models.CharField(max_length=140, blank=True)
+    description = models.TextField(blank=True, max_length=2000)
+    logo_url = models.URLField(max_length=500, blank=True)
+    banner_url = models.URLField(max_length=500, blank=True)
+    shipping_policy = models.TextField(blank=True, max_length=1500)
+    return_policy = models.TextField(blank=True, max_length=1500)
+    announcement = models.CharField(max_length=200, blank=True)
+    # Vacation mode hides the shop's listings from browsing and pauses buying, offers and carts until it is switched
+    # off (or on_vacation_until passes).
+    on_vacation = models.BooleanField(default=False)
+    vacation_message = models.CharField(max_length=200, blank=True)
+    vacation_until = models.DateField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "marketplace_shop_profiles"
+
+    def vacation_active(self, today=None) -> bool:
+        today = today or timezone.localdate()
+        return self.on_vacation and (self.vacation_until is None or self.vacation_until >= today)
 
 
 class RideStatus(models.TextChoices):
@@ -482,6 +714,28 @@ class TransportType(models.TextChoices):
     cargo_description onto a passenger trip."""
     PASSENGER = "PASSENGER", "Passenger"
     CARGO = "CARGO", "Cargo / Building Materials"
+
+
+class RideCancelReason(models.TextChoices):
+    """Why a ride ended before it started. NO_DRIVER_FOUND is set by the system when a request expires."""
+    CHANGED_PLANS = "CHANGED_PLANS", "Plans changed"
+    WAITED_TOO_LONG = "WAITED_TOO_LONG", "Waited too long"
+    DRIVER_ASKED_TO_CANCEL = "DRIVER_ASKED_TO_CANCEL", "Driver asked me to cancel"
+    DRIVER_NOT_MOVING = "DRIVER_NOT_MOVING", "Driver isn't moving towards me"
+    WRONG_PICKUP = "WRONG_PICKUP", "Wrong pickup or destination"
+    FOUND_OTHER_TRANSPORT = "FOUND_OTHER_TRANSPORT", "Found other transport"
+    OTHER = "OTHER", "Other"
+    NO_DRIVER_FOUND = "NO_DRIVER_FOUND", "No driver accepted in time"
+
+
+class RideReleaseReason(models.TextChoices):
+    """Why an assigned driver pulled out of an accepted ride."""
+    RIDER_UNREACHABLE = "RIDER_UNREACHABLE", "Rider unreachable"
+    PICKUP_TOO_FAR = "PICKUP_TOO_FAR", "Pickup is too far"
+    VEHICLE_PROBLEM = "VEHICLE_PROBLEM", "Vehicle problem"
+    LOAD_DOES_NOT_FIT = "LOAD_DOES_NOT_FIT", "Luggage or load won't fit"
+    SAFETY_CONCERN = "SAFETY_CONCERN", "Safety concern"
+    OTHER = "OTHER", "Other"
 
 
 class DriverProfile(models.Model):
@@ -552,6 +806,16 @@ class RideBooking(models.Model):
     booking = models.OneToOneField("transactions.Booking", on_delete=models.SET_NULL, null=True, blank=True, related_name="ride_booking")
     requested_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.CharField(max_length=30, choices=RideCancelReason.choices, blank=True)
+    cancellation_note = models.CharField(max_length=300, blank=True)
+    # The last driver's reason for pulling out, shown to the rider while the request is open again.
+    # Cleared when another driver accepts so it never reaches the next driver.
+    release_reason = models.CharField(max_length=30, choices=RideReleaseReason.choices, blank=True)
+    release_note = models.CharField(max_length=300, blank=True)
+    # A new request is first offered to nearby drivers one at a time (see RideOffer). Set once no nearby
+    # driver is left to ask; from then on it is listed for every suitable driver to take.
+    matching_ended_at = models.DateTimeField(null=True, blank=True)
     # Set when the rider or the driver presses SOS during a trip; admins are alerted.
     sos_raised_at = models.DateTimeField(null=True, blank=True)
     sos_raised_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
@@ -578,6 +842,33 @@ class RideMessage(models.Model):
         ordering = ["created_at"]
 
 
+class RideOfferStatus(models.TextChoices):
+    OFFERED = "OFFERED", "Offered"
+    ACCEPTED = "ACCEPTED", "Accepted"
+    DECLINED = "DECLINED", "Declined"
+    EXPIRED = "EXPIRED", "No answer in time"
+    WITHDRAWN = "WITHDRAWN", "Withdrawn"
+
+
+class RideOffer(models.Model):
+    """One driver being asked to take one request, for a short time, the way Yango and similar apps dispatch:
+    the nearest suitable driver first, then the next. Every answer is kept, so acceptance rates can be
+    measured later. A driver is never offered the same request twice."""
+    ride = models.ForeignKey(RideBooking, on_delete=models.CASCADE, related_name="offers")
+    driver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ride_offers")
+    status = models.CharField(max_length=10, choices=RideOfferStatus.choices, default=RideOfferStatus.OFFERED)
+    pickup_distance_km = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    offered_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "ride_offers"
+        ordering = ["offered_at"]
+        constraints = [models.UniqueConstraint(fields=["ride", "driver"], name="one_offer_per_driver_per_ride")]
+        indexes = [models.Index(fields=["driver", "status"])]
+
+
 class RideEmergencyContact(models.Model):
     """Someone a user wants told when they press SOS on a ride. One per user, chosen by the user themselves."""
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ride_emergency_contact")
@@ -587,3 +878,43 @@ class RideEmergencyContact(models.Model):
 
     class Meta:
         db_table = "ride_emergency_contacts"
+
+
+class RideIssueCategory(models.TextChoices):
+    FARE = "FARE", "Fare or payment problem"
+    ROUTE = "ROUTE", "Route or drop-off problem"
+    DRIVER_BEHAVIOUR = "DRIVER_BEHAVIOUR", "Driver behaviour"
+    RIDER_BEHAVIOUR = "RIDER_BEHAVIOUR", "Rider behaviour"
+    VEHICLE = "VEHICLE", "Vehicle didn't match or was unsafe"
+    LOST_ITEM = "LOST_ITEM", "Lost item"
+    DAMAGE = "DAMAGE", "Damage to luggage or cargo"
+    OTHER = "OTHER", "Other"
+
+
+class RideIssueStatus(models.TextChoices):
+    OPEN = "OPEN", "Open"
+    RESOLVED = "RESOLVED", "Resolved"
+
+
+class RideIssueReport(models.Model):
+    """A rider or driver reports a problem with a trip for the Oaziland team to look into. It never moves money:
+    ride fares are released to the driver when the rider pays, so an admin resolves a report with notes and,
+    where needed, follows up through the user tools (warnings, suspension) or a manual wallet adjustment."""
+    ride = models.ForeignKey(RideBooking, on_delete=models.CASCADE, related_name="issue_reports")
+    reported_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ride_issue_reports")
+    category = models.CharField(max_length=20, choices=RideIssueCategory.choices)
+    description = models.TextField(max_length=1000)
+    status = models.CharField(max_length=10, choices=RideIssueStatus.choices, default=RideIssueStatus.OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    resolution_notes = models.CharField(max_length=1000, blank=True)
+
+    class Meta:
+        db_table = "ride_issue_reports"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ride", "reported_by"], condition=models.Q(status="OPEN"), name="one_open_ride_issue_per_reporter",
+            ),
+        ]

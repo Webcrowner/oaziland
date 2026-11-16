@@ -7,6 +7,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import Button from "@/components/ui/Button";
 import DirectChatButton from "@/components/DirectChatButton";
 import DisputeChat from "@/components/DisputeChat";
+import StaysPanel from "@/components/StaysPanel";
+import EventBookingsPanel from "@/components/EventBookingsPanel";
 import { getMyProfile } from "@/lib/api";
 import {
   IconFileText,
@@ -205,6 +207,9 @@ export default function BookingsPage() {
           )}
         </div>
       </section>
+
+      <StaysPanel mode="guest" />
+      <EventBookingsPanel />
 
       {status === "ready" && bookings.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-5">

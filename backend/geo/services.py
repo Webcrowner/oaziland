@@ -21,9 +21,8 @@ def haversine_distance_km(lat1, lon1, lat2, lon2) -> Decimal:
     Directions API) for every single calculation, which costs money and
     time at scale. Straight-line distance is free, instant, computed
     locally, and close enough for search/filtering and "roughly how far"
-    displays. `road_network_distance_km` below is the documented upgrade
-    path once a routing API is connected (Prompt 3's Google Maps
-    Platform option).
+    displays. Real road distance (used for ride fares) comes from
+    geo.routing.driving_route, which calls Google's Routes API.
     """
     lat1, lon1, lat2, lon2 = float(lat1), float(lon1), float(lat2), float(lon2)
     earth_radius_km = 6371.0
@@ -37,22 +36,6 @@ def haversine_distance_km(lat1, lon1, lat2, lon2) -> Decimal:
          + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2)
     c = 2 * math.asin(math.sqrt(a))
     return Decimal(str(round(earth_radius_km * c, 3)))
-
-
-def road_network_distance_km(lat1, lon1, lat2, lon2) -> Decimal:
-    """Placeholder for real road-network distance via an external routing
-    API (e.g. OSRM or Google Directions). NOT YET CONNECTED to a real
-    service — falls back to the straight-line distance, multiplied by a
-    rough 'roads aren't straight' correction factor, so callers get a
-    more realistic estimate than a pure straight line until a real
-    routing API is wired in.
-
-    This is flagged clearly rather than silently pretending to be exact:
-    do not treat this number as precise until a real routing API replaces
-    this fallback."""
-    straight_line = haversine_distance_km(lat1, lon1, lat2, lon2)
-    ROAD_WINDING_FACTOR = Decimal("1.3")  # rough real-world roads-aren't-straight correction
-    return round(straight_line * ROAD_WINDING_FACTOR, 3)
 
 
 def nearest_point_of_interest(property_asset, poi_type: str):

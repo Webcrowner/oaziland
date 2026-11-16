@@ -4,10 +4,14 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
   listMyMarketplaceListings, updateMarketplaceListing, setMarketplaceListingStatus, deleteMarketplaceListing, listQuarters,
-  renewMarketplaceListing, type ListingStats, type MarketplaceCategory, type MarketplaceAvailability, type Quarter, type VehicleSpec, type GoodsCategory, type GoodsCondition,
+  renewMarketplaceListing, type ListingStats, type MarketplaceCategory, type MarketplaceAvailability, type Quarter, type VehicleSpec, type GoodsCategory, type GoodsCondition, type GoodsVariant,
   GOODS_CATEGORIES, GOODS_CONDITIONS,
 } from "@/lib/api";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
+import { isoToLocalInput, localInputToIso } from "@/lib/flashSale";
+import CompareAtPrice from "@/components/CompareAtPrice";
+import MarketplaceVariantEditor from "@/components/MarketplaceVariantEditor";
+import MarketplaceBoostPanel from "@/components/MarketplaceBoostPanel";
 import QuarterOptions from "@/components/QuarterOptions";
 import MarketplaceConditionsFields, {
   EMPTY_CONDITIONS, conditionsChanged, loadConditionsDraft, saveConditions, type ConditionsDraft,
@@ -44,6 +48,17 @@ interface MyListing {
   stats?: ListingStats;
   expires_at?: string;
   is_expired?: boolean;
+  allow_offers?: boolean;
+  is_boosted?: boolean;
+  boosted_until?: string | null;
+  sale_price_xaf?: string | null;
+  sale_starts_at?: string | null;
+  sale_ends_at?: string | null;
+  on_sale?: boolean;
+  compare_at_price_xaf?: string | null;
+  has_variants?: boolean;
+  price_from_xaf?: string | null;
+  variants?: GoodsVariant[];
 }
 
 interface Draft {
@@ -52,6 +67,9 @@ interface Draft {
   goodwill: boolean; inventory: boolean;
   make: string; model: string; year: string; mileage: string; engine: string;
   itemCategory: string; condition: string; quantity: string;
+  compareAt: string; hasVariants: boolean;
+  allowOffers: boolean;
+  salePrice: string; saleStart: string; saleEnd: string;
 }
 
 const text = (value: string | number | null | undefined) => (value === null || value === undefined ? "" : String(value));
@@ -65,7 +83,19 @@ function draftFrom(listing: MyListing): Draft {
     revenue: text(listing.annual_revenue_xaf), goodwill: Boolean(listing.includes_goodwill), inventory: Boolean(listing.includes_inventory),
     make: text(spec?.make), model: text(spec?.model), year: text(spec?.year), mileage: text(spec?.mileage_km), engine: text(spec?.engine_size_cc),
     itemCategory: text(listing.item_category), condition: text(listing.condition), quantity: text(listing.quantity),
+    compareAt: listing.compare_at_price_xaf ? String(Number(listing.compare_at_price_xaf)) : "", hasVariants: Boolean(listing.has_variants),
+    allowOffers: listing.allow_offers ?? true,
+    salePrice: listing.sale_price_xaf ? String(Number(listing.sale_price_xaf)) : "",
+    saleStart: isoToLocalInput(listing.sale_starts_at), saleEnd: isoToLocalInput(listing.sale_ends_at),
   };
+}
+
+const saleChanged = (a: Draft, b: Draft) => a.salePrice !== b.salePrice || a.saleStart !== b.saleStart || a.saleEnd !== b.saleEnd;
+
+/** All three fields null clears the sale. */
+function salePayload(d: Draft): Record<string, unknown> {
+  if (!d.salePrice) return { sale_price_xaf: null, sale_starts_at: null, sale_ends_at: null };
+  return { sale_price_xaf: d.salePrice, sale_starts_at: localInputToIso(d.saleStart), sale_ends_at: localInputToIso(d.saleEnd) };
 }
 
 /** Only the fields that exist for this category; blank optional numbers are sent as null so they can be cleared. */
@@ -74,6 +104,7 @@ function payloadFrom(category: MarketplaceCategory, d: Draft): Record<string, un
     title: d.title, description: d.description, price_xaf: d.price, price_basis: d.priceBasis, quarter: d.quarter || null,
     // A deposit only exists for rentals; switching a listing to a sale clears it.
     security_deposit_xaf: d.priceBasis === "SALE" ? "0" : d.deposit || "0",
+    allow_offers: d.allowOffers,
   };
   if (category === "warehouses") payload.size_sqm = d.sizeSqm;
   if (category === "stores") {
@@ -90,7 +121,9 @@ function payloadFrom(category: MarketplaceCategory, d: Draft): Record<string, un
   if (category === "goods") {
     payload.item_category = d.itemCategory;
     payload.condition = d.condition;
-    payload.quantity = Number(d.quantity) || 1;
+    payload.compare_at_price_xaf = d.compareAt || null;
+    // With options the stock is the total of the versions and the server refuses to change it directly.
+    if (!d.hasVariants) payload.quantity = Number(d.quantity) || 1;
   }
   if (category === "cars") {
     payload.vehicle_spec = {
@@ -104,6 +137,7 @@ function payloadFrom(category: MarketplaceCategory, d: Draft): Record<string, un
 /** The lister's own marketplace listings across all four categories: edit, pause or mark sold, and delete. */
 export default function MyMarketplaceListingsPage() {
   const t = useTranslations("MyMarketplaceListingsPage");
+  const tf = useTranslations("FlashSale");
   const tg = useTranslations("MarketplaceGoods");
   const [rows, setRows] = useState<Record<MarketplaceCategory, MyListing[]>>({ warehouses: [], stores: [], businesses: [], cars: [], goods: [] });
   const [state, setState] = useState<"loading" | "signedOut" | "ready">("loading");
@@ -114,6 +148,8 @@ export default function MyMarketplaceListingsPage() {
   // null until the listing's saved conditions have loaded, so an unloaded editor can never overwrite them.
   const [savedConditions, setSavedConditions] = useState<ConditionsDraft | null>(null);
   const [quarters, setQuarters] = useState<Quarter[]>([]);
+  const [boostingId, setBoostingId] = useState<string | null>(null);
+  const [saleError, setSaleError] = useState("");
 
   useEffect(() => {
     listQuarters().then(setQuarters).catch(() => {});
@@ -161,6 +197,7 @@ export default function MyMarketplaceListingsPage() {
   async function startEdit(category: MarketplaceCategory, listing: MyListing) {
     setEditingId(listing.id);
     setDraft(draftFrom(listing));
+    setSaleError("");
     setConditions(EMPTY_CONDITIONS);
     setSavedConditions(null);
     const loaded = await loadConditionsDraft(category, listing.id).catch(() => null);
@@ -169,10 +206,43 @@ export default function MyMarketplaceListingsPage() {
     setSavedConditions(loaded);
   }
 
+  async function saveSale(id: string, d: Draft): Promise<boolean> {
+    const token = localStorage.getItem("access_token");
+    if (!token) return false;
+    setSaleError("");
+    try {
+      await updateMarketplaceListing("goods", id, salePayload(d), token);
+      await load();
+      return true;
+    } catch (err) {
+      setSaleError(err instanceof Error ? err.message : t("saleFailed"));
+      return false;
+    }
+  }
+
+  async function clearSale(listing: MyListing) {
+    if (!draft) return;
+    const cleared = { ...draft, salePrice: "", saleStart: "", saleEnd: "" };
+    setDraft(cleared);
+    setSaleError("");
+    if (listing.sale_price_xaf) await saveSale(listing.id, cleared);
+  }
+
   async function saveEdit(category: MarketplaceCategory, id: string) {
     if (!draft) return;
+    const original = category === "goods" ? rows.goods.find((row) => row.id === id) : undefined;
+    if (category === "goods" && draft.compareAt !== "" && !(Number(draft.compareAt) > Number(draft.price))) {
+      setError(t("compareAtInvalid"));
+      return;
+    }
+    const sale = original ? saleChanged(draftFrom(original), draft) : false;
+    if (sale && draft.salePrice && !draft.saleEnd) {
+      setSaleError(t("saleEndRequired"));
+      return;
+    }
     // Stay in the editor on failure so the lister can correct the rejected value.
     if (!(await run((token) => updateMarketplaceListing(category, id, payloadFrom(category, draft), token)))) return;
+    if (sale && !(await saveSale(id, draft))) return;
     // Conditions are only sent when changed: they are locked while an order is active, and unchanged ones must not trip that.
     if (savedConditions && conditionsChanged(category, savedConditions, conditions)) {
       if (!(await run((token) => saveConditions(category, id, conditions, token)))) return;
@@ -191,7 +261,12 @@ export default function MyMarketplaceListingsPage() {
     <AccountSidebarLayout activeHref="/marketplace/my-listings">
       <div className="flex items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-black tracking-tight text-slate-900">{t("title")}</h1>
-        <Link href="/marketplace/sell" className="text-sm font-semibold text-[var(--navy)] underline">{t("postNew")}</Link>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Link href="/marketplace/shop-settings" className="inline-flex min-h-10 items-center text-sm font-semibold text-[var(--navy)] underline">{t("myShop")}</Link>
+          <Link href="/marketplace/dashboard" className="text-sm font-semibold text-[var(--navy)] underline">{t("sellerDashboard")}</Link>
+          <Link href="/marketplace/offers" className="text-sm font-semibold text-[var(--navy)] underline">{t("viewOffers")}</Link>
+          <Link href="/marketplace/sell" className="text-sm font-semibold text-[var(--navy)] underline">{t("postNew")}</Link>
+        </div>
       </div>
 
       {error && <p className="mb-4 rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">{error}</p>}
@@ -258,12 +333,65 @@ export default function MyMarketplaceListingsPage() {
                             <select value={draft.condition} onChange={(e) => setDraft({ ...draft, condition: e.target.value })} aria-label={t("fieldCondition")} className="border rounded-lg px-3 py-2 text-sm">
                               {GOODS_CONDITIONS.map((c) => <option key={c} value={c}>{tg(`cond_${c}`)}</option>)}
                             </select>
-                            <input type="number" min="1" max="100000" step="1" value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: e.target.value })} required aria-label={t("fieldQuantity")} placeholder={t("fieldQuantity")} className="border rounded-lg px-3 py-2 text-sm" />
+                            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                              {t("fieldQuantity")}
+                              <input
+                                type="number" min="1" max="100000" step="1" value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: e.target.value })}
+                                required={!draft.hasVariants} disabled={draft.hasVariants} aria-describedby={draft.hasVariants ? `qty-note-${listing.id}` : undefined}
+                                placeholder={t("fieldQuantity")} className="border rounded-lg px-3 py-2 text-sm font-normal disabled:bg-slate-100 disabled:text-slate-500"
+                              />
+                              {draft.hasVariants && <span id={`qty-note-${listing.id}`} className="font-normal text-slate-500">{t("quantityFromOptions")}</span>}
+                            </label>
+                            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                              {t("fieldCompareAt")}
+                              <input
+                                type="number" inputMode="numeric" min="1" step="any" value={draft.compareAt} onChange={(e) => setDraft({ ...draft, compareAt: e.target.value })}
+                                aria-invalid={draft.compareAt !== "" && !(Number(draft.compareAt) > Number(draft.price))}
+                                className="border rounded-lg px-3 py-2 text-sm font-normal"
+                              />
+                              <span className={`font-normal ${draft.compareAt !== "" && !(Number(draft.compareAt) > Number(draft.price)) ? "text-red-700" : "text-slate-500"}`}>
+                                {draft.compareAt !== "" && !(Number(draft.compareAt) > Number(draft.price)) ? t("compareAtInvalid") : t("compareAtHint")}
+                              </span>
+                            </label>
+                            <div className="md:col-span-2">
+                              <MarketplaceVariantEditor
+                                listingId={listing.id} basePriceXaf={Number(draft.price) || 0}
+                                onSaved={(result) => {
+                                  setDraft((current) => (current ? { ...current, hasVariants: result.variants.length > 0, quantity: String(result.quantity) } : current));
+                                  void load();
+                                }}
+                              />
+                            </div>
+                            <fieldset className="flex flex-col gap-2 rounded-xl border border-red-100 bg-red-50/40 p-3 md:col-span-2">
+                              <legend className="px-1 text-sm font-bold text-red-700">⚡ {tf("sectionTitle")}</legend>
+                              <p className="text-xs text-slate-600">{tf("sectionHelp")}</p>
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                                  {tf("salePrice")}
+                                  <input type="number" inputMode="numeric" min="1" step="1" value={draft.salePrice} onChange={(e) => setDraft({ ...draft, salePrice: e.target.value })} className="min-h-11 rounded-lg border px-3 py-2 text-sm font-normal" />
+                                </label>
+                                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                                  {tf("saleStart")}
+                                  <input type="datetime-local" value={draft.saleStart} onChange={(e) => setDraft({ ...draft, saleStart: e.target.value })} className="min-h-11 rounded-lg border px-3 py-2 text-sm font-normal" />
+                                </label>
+                                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                                  {tf("saleEnd")}
+                                  <input type="datetime-local" value={draft.saleEnd} onChange={(e) => setDraft({ ...draft, saleEnd: e.target.value })} className="min-h-11 rounded-lg border px-3 py-2 text-sm font-normal" />
+                                </label>
+                              </div>
+                              {(draft.salePrice || draft.saleStart || draft.saleEnd || listing.sale_price_xaf) && (
+                                <button type="button" onClick={() => clearSale(listing)} className="min-h-10 self-start text-sm font-semibold text-red-700 underline cursor-pointer">{tf("clearSale")}</button>
+                              )}
+                              {saleError && <p role="alert" className="text-sm text-red-700">{saleError}</p>}
+                            </fieldset>
                           </>
                         )}
                         {savedConditions && category !== "goods" && (
                           <MarketplaceConditionsFields category={category} value={conditions} onChange={setConditions} className="md:col-span-2" />
                         )}
+                        <label className="flex items-center gap-2 text-sm text-slate-700 md:col-span-2">
+                          <input type="checkbox" checked={draft.allowOffers} onChange={(e) => setDraft({ ...draft, allowOffers: e.target.checked })} /> {t("fieldAllowOffers")}
+                        </label>
                         <div className="flex gap-3 md:col-span-2">
                           <Button onClick={() => saveEdit(category, listing.id)}>{t("save")}</Button>
                           <button onClick={() => setEditingId(null)} className="text-sm font-semibold text-slate-500 cursor-pointer">{t("cancel")}</button>
@@ -274,10 +402,35 @@ export default function MyMarketplaceListingsPage() {
                         <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
                           <div className="min-w-0">
                             <Link href={`/marketplace/${category}/${listing.id}`} className="font-semibold text-[var(--navy)] hover:underline">{listing.title}</Link>
-                            <p className="text-sm text-slate-600">{Number(listing.price_xaf).toLocaleString()} XAF</p>
+                            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-slate-600">
+                              <span>
+                                {listing.has_variants && listing.price_from_xaf
+                                  ? t("priceFrom", { price: Number(listing.price_from_xaf).toLocaleString() })
+                                  : `${Number(listing.price_xaf).toLocaleString()} XAF`}
+                              </span>
+                              {category === "goods" && (
+                                <CompareAtPrice
+                                  compareAtXaf={listing.compare_at_price_xaf} compact showUnit={false}
+                                  shownPrice={Number(listing.has_variants && listing.price_from_xaf ? listing.price_from_xaf : listing.price_xaf)}
+                                />
+                              )}
+                            </p>
+                            {category === "goods" && listing.has_variants && (
+                              <p className="mt-0.5 text-xs text-slate-500">{t("optionsSummary", { count: listing.variants?.length ?? 0, stock: listing.quantity ?? 0 })}</p>
+                            )}
+                            {listing.on_sale && listing.sale_price_xaf && listing.sale_ends_at && (
+                              <p className="mt-0.5 text-xs font-semibold text-red-700">
+                                ⚡ {tf("runningUntil", { price: Number(listing.sale_price_xaf).toLocaleString(), date: new Date(listing.sale_ends_at).toLocaleString() })}
+                              </p>
+                            )}
                             {listing.stats && (
                               <p className="mt-0.5 text-xs text-slate-500">
                                 👁 {t("statViews", { count: listing.stats.views })} · ♥ {t("statSaves", { count: listing.stats.saves })} · 💬 {t("statChats", { count: listing.stats.chats })}
+                              </p>
+                            )}
+                            {listing.is_boosted && listing.boosted_until && (
+                              <p className="mt-0.5 text-xs font-semibold text-amber-700">
+                                ⭐ {t("boostedUntil", { date: new Date(listing.boosted_until).toLocaleDateString() })}
                               </p>
                             )}
                             {listing.expires_at && !listing.removed_by_moderation && listing.availability_status === "AVAILABLE" && (
@@ -307,14 +460,30 @@ export default function MyMarketplaceListingsPage() {
                           ) : (
                             <button onClick={() => startEdit(category, listing)} className="text-sm font-semibold text-[var(--navy)] underline cursor-pointer">{t("edit")}</button>
                           )}
+                          {category === "goods" && !listing.removed_by_moderation && (
+                            <button onClick={() => startEdit(category, listing)} className="min-h-10 text-sm font-semibold text-[var(--navy)] underline cursor-pointer">
+                              {listing.has_variants ? t("manageOptions") : t("addOptions")}
+                            </button>
+                          )}
                           <Link href={`/marketplace/${category}/${listing.id}`} className="text-sm font-semibold text-[var(--navy)] underline">{t("managePhotos")}</Link>
                           {!listing.removed_by_moderation && listing.availability_status === "AVAILABLE" && (
                             <button onClick={() => run((token) => renewMarketplaceListing(category, listing.id, token))} className="text-sm font-semibold text-green-700 underline cursor-pointer">
                               {listing.is_expired ? t("renewExpired") : t("renew")}
                             </button>
                           )}
+                          {!listing.removed_by_moderation && listing.availability_status === "AVAILABLE" && !listing.is_expired && (
+                            <button onClick={() => setBoostingId(boostingId === listing.id ? null : listing.id)} className="text-sm font-semibold text-amber-700 underline cursor-pointer">
+                              {listing.is_boosted ? t("boostExtend") : t("boost")}
+                            </button>
+                          )}
                           <button onClick={() => confirmDelete(category, listing.id)} className="text-sm font-semibold text-red-700 underline cursor-pointer">{t("delete")}</button>
                         </div>
+                        {boostingId === listing.id && (
+                          <MarketplaceBoostPanel
+                            category={category} listingId={listing.id}
+                            onBoosted={() => { void load(); }} onClose={() => setBoostingId(null)}
+                          />
+                        )}
                       </>
                     )}
                   </div>

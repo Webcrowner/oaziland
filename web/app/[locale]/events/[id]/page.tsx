@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { getVenue } from "@/lib/api";
 import AssetDetailView from "@/components/AssetDetailView";
+import VenueSpacesBooking from "@/components/VenueSpacesBooking";
 
 export default async function VenueDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,7 +19,7 @@ export default async function VenueDetailPage({ params }: { params: Promise<{ id
       backHref="/events"
       backLabel={t("backToVenues")}
       title={t("venueIn", { quarter: venue.quarter_name })}
-      shareTitle="event venue"
+      shareTitle={venue.spaces.map((s) => s.space_name).filter(Boolean).join(", ") || t("venueIn", { quarter: venue.quarter_name })}
       location={venue.quarter_name}
       photos={venue.photos}
       listerRole={venue.lister_role}
@@ -28,18 +29,7 @@ export default async function VenueDetailPage({ params }: { params: Promise<{ id
       description={venue.description}
       amenities={venue.amenities}
       facts={[{ label: t("spaces"), value: String(venue.spaces.length) }]}
-      sectionTitle={t("eventSpaces")}
-      rows={venue.spaces.map((s) => ({
-        primary: s.space_name,
-        secondary: [
-          s.capacity_theatre ? `${s.capacity_theatre} ${t("theatre")}` : "",
-          s.capacity_banquet ? `${s.capacity_banquet} ${t("banquet")}` : "",
-          s.capacity_cocktail ? `${s.capacity_cocktail} ${t("cocktail")}` : "",
-          s.capacity_classroom ? `${s.capacity_classroom} ${t("classroom")}` : "",
-          s.catering_policy ? s.catering_policy.replace(/_/g, " ").toLowerCase() : "",
-        ].filter(Boolean).join(" · "),
-        right: `${Number(s.base_price_per_hour_xaf).toLocaleString()} XAF ${t("perHour")}`,
-      }))}
+      detailsSlot={<VenueSpacesBooking venue={venue} />}
       latitude={venue.latitude}
       longitude={venue.longitude}
       sharePath={`/events/${venue.id}`}

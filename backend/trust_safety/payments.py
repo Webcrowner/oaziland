@@ -71,10 +71,10 @@ def _describe(booking, fallback: dict) -> dict:
 
     elif kind == "hotels.Reservation":
         from hotels.models import Reservation
-        reservation = Reservation.objects.select_related("hotel__owner").filter(pk=target_id).first()
+        reservation = Reservation.objects.select_related("hotel__owner", "guest_house__owner").filter(pk=target_id).first()
         if reservation:
-            hotel = reservation.hotel
-            return {"title": hotel.name or str(hotel), "payee": _person(hotel.owner), "note": ""}
+            place = reservation.place
+            return {"title": place.name or str(place), "payee": _person(place.owner), "note": ""}
 
     elif kind == "events.EventBooking":
         from events.models import EventBooking

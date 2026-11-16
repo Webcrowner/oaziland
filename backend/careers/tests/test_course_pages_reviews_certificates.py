@@ -45,10 +45,10 @@ def test_the_course_page_shows_the_syllabus_but_never_lesson_content(course):
     data = APIClient().get(f"/api/trainings/{program.id}/").data
 
     assert data["syllabus"] == [{
-        "id": str(program.modules.get().id), "title": "Week 1",
+        "id": str(program.modules.get().id), "title": "Week 1", "due_after_days": None,
         "lessons": [
-            {"id": str(program.modules.get().lessons.get(title="Leases").id), "title": "Leases", "kind": "TEXT"},
-            {"id": str(program.modules.get().lessons.get(title="Deposits").id), "title": "Deposits", "kind": "VIDEO"},
+            {"id": str(program.modules.get().lessons.get(title="Leases").id), "title": "Leases", "kind": "TEXT", "is_preview": False},
+            {"id": str(program.modules.get().lessons.get(title="Deposits").id), "title": "Deposits", "kind": "VIDEO", "is_preview": False},
         ],
     }]
     assert "Secret lesson body" not in str(data) and "example.com" not in str(data)

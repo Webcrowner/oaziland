@@ -28,6 +28,16 @@ def exception_handler(exc, context):
     Django 500 page instead of a JSON error the frontend can read."""
     response = drf_exception_handler(exc, context)
 
+    if response is None:
+        from transactions.locks import LockUnavailableError
+
+        if isinstance(exc, LockUnavailableError):
+            logger.error("Booking lock service unavailable: %s", exc)
+            return Response(
+                {"detail": "Payments are temporarily unavailable. Nothing was charged. Please try again in a few minutes."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
     if response is not None:
         return response
 

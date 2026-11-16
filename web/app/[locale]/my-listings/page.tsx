@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "@/i18n/navigation";
 import {
@@ -39,6 +40,7 @@ const actionBtn =
   "px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50 cursor-pointer";
 
 export default function MyListingsPage() {
+  const tSignIn = useTranslations("SignInPrompt");
   const [role, setRole] = useState<"landlord" | "agent">("landlord");
   const [token, setToken] = useState<string | null>(null);
   const [tab, setTab] = useState("");
@@ -104,8 +106,8 @@ export default function MyListingsPage() {
     return (
       <DashboardLayout {...layoutProps}>
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
-          <p className="text-slate-600 mb-4 font-semibold text-sm">Please sign in to manage your listings.</p>
-          <Button href="/login">Sign in</Button>
+          <p className="text-slate-600 mb-4 font-semibold text-sm">{tSignIn("myListings")}</p>
+          <Button href="/login">{tSignIn("button")}</Button>
         </div>
       </DashboardLayout>
     );

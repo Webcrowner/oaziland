@@ -7,6 +7,7 @@ import {
   type SocialPost, type PostComment, type PostReportReason,
 } from "@/lib/api";
 import ReportContentButton from "@/components/ReportContentButton";
+import { IconCheckCircle, IconHome, IconMessageCircle } from "@/components/Icons";
 
 const EMOJIS: Record<string, string> = { LIKE: "👍", LOVE: "❤️", LAUGH: "😂", WOW: "😮", SAD: "😢" };
 const REPORT_REASONS: PostReportReason[] = ["INAPPROPRIATE_CONTENT", "SCAM_SUSPECTED", "HARASSMENT", "OTHER"];
@@ -139,33 +140,45 @@ export default function PostCard({ post, onDeleted, onTagClick }: PostCardProps)
   const postedAt = post.published_at || post.created_at;
 
   return (
-    <article className="border rounded-lg bg-white overflow-hidden">
-      <div className="p-4">
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
-          <span className="font-semibold text-[var(--navy)] text-sm">{post.author_name}</span>
-          {post.is_verified_creator && (
-            <span className="text-xs bg-[var(--navy)] text-white px-2 py-0.5 rounded-full">✓ {t("verifiedBadge")}</span>
-          )}
-          {post.is_sponsored && (
-            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{t("sponsoredBadge")}</span>
-          )}
-          {post.linked_listing_id && (
-            <Link href={`/listing/${post.linked_listing_id}`} className="text-xs bg-[var(--gold)]/20 text-[#8A6D14] px-2 py-0.5 rounded font-semibold">
-              🏠 {t("realEstateBadge")}
-            </Link>
-          )}
-          {post.status !== "PUBLISHED" && (
-            <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">{t("notPublishedBadge")}</span>
-          )}
-          <time dateTime={postedAt} className="text-xs text-gray-400 ml-auto">
-            {new Date(postedAt).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })}
-          </time>
+    <article className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-sm transition-shadow hover:shadow-md">
+      <div className="p-5">
+        <div className="mb-3 flex items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-base font-black text-amber-300" aria-hidden="true">
+            {(post.author_name.charAt(0) || "?").toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="truncate text-sm font-black text-slate-900">{post.author_name}</span>
+              {post.is_verified_creator && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white">
+                  <IconCheckCircle size={11} /> {t("verifiedBadge")}
+                </span>
+              )}
+              {post.is_sponsored && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">{t("sponsoredBadge")}</span>
+              )}
+              {post.status !== "PUBLISHED" && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">{t("notPublishedBadge")}</span>
+              )}
+            </div>
+            <time dateTime={postedAt} className="text-xs font-medium text-slate-400">
+              {new Date(postedAt).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })}
+            </time>
+          </div>
         </div>
-        {post.caption && <p className="text-gray-800 text-sm mb-2 whitespace-pre-line break-words">{post.caption}</p>}
+        {post.linked_listing_id && (
+          <Link
+            href={`/listing/${post.linked_listing_id}`}
+            className="mb-3 inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-900 transition-colors hover:bg-amber-100"
+          >
+            <IconHome size={14} /> {t("realEstateBadge")}
+          </Link>
+        )}
+        {post.caption && <p className="whitespace-pre-line break-words text-[15px] leading-relaxed text-slate-800">{post.caption}</p>}
         {post.tag_names.length > 0 && (
-          <p className="text-xs text-[var(--navy)] mb-2 flex flex-wrap gap-x-2">
+          <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-sm font-semibold text-amber-700">
             {post.tag_names.map((tag) => (
-              <button key={tag} type="button" onClick={() => onTagClick?.(tag)} className="hover:underline cursor-pointer">
+              <button key={tag} type="button" onClick={() => onTagClick?.(tag)} className="cursor-pointer hover:underline">
                 #{tag}
               </button>
             ))}
@@ -174,7 +187,7 @@ export default function PostCard({ post, onDeleted, onTagClick }: PostCardProps)
       </div>
 
       {post.media.length > 0 && (
-        <div className="flex flex-col gap-1 bg-gray-100">
+        <div className="flex flex-col gap-1 bg-slate-100">
           {post.media.map((item) =>
             item.media_type === "VIDEO" ? (
               <video key={item.id} src={item.file_url} controls preload="metadata" playsInline className="w-full max-h-[32rem] bg-black" />
@@ -188,67 +201,73 @@ export default function PostCard({ post, onDeleted, onTagClick }: PostCardProps)
         </div>
       )}
 
-      <div className="p-4 border-t flex items-center justify-between gap-2 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3">
         <div className="flex gap-1">
           {Object.entries(EMOJIS).map(([key, emoji]) => (
             <button
               key={key} type="button" onClick={() => handleReact(key)} disabled={busy}
               aria-pressed={myReaction === key} aria-label={t(`reaction.${key}`)} title={t(`reaction.${key}`)}
-              className={`text-lg rounded-full px-1.5 hover:scale-110 transition-transform disabled:opacity-60 ${myReaction === key ? "bg-[var(--gold)]/25 ring-1 ring-[var(--gold)]" : ""}`}
+              className={`flex items-center rounded-full px-2 py-1 text-lg transition-all hover:scale-110 disabled:opacity-60 ${myReaction === key ? "bg-amber-100 ring-1 ring-amber-400" : "hover:bg-slate-100"}`}
             >
               {emoji}
-              {reactionCounts[key] > 0 && <span className="text-xs text-gray-500 ml-0.5">{reactionCounts[key]}</span>}
+              {reactionCounts[key] > 0 && <span className="ml-1 text-xs font-bold text-slate-500">{reactionCounts[key]}</span>}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={toggleComments} aria-expanded={showComments} className="text-sm text-gray-500 hover:text-[var(--navy)]">
-            💬 {t("comments", { count: commentCount })}
+          <button
+            type="button" onClick={toggleComments} aria-expanded={showComments}
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          >
+            <IconMessageCircle size={16} /> {t("comments", { count: commentCount })}
           </button>
           {post.is_mine ? (
-            <button type="button" onClick={handleDeletePost} className="text-xs text-red-600 hover:underline">{t("deletePost")}</button>
+            <button type="button" onClick={handleDeletePost} className="text-xs font-semibold text-red-600 hover:underline">{t("deletePost")}</button>
           ) : reported ? (
-            <span className="text-xs text-gray-400">{t("reportSent")}</span>
+            <span className="text-xs text-slate-400">{t("reportSent")}</span>
           ) : (
-            <button type="button" onClick={() => setReporting((v) => !v)} className="text-xs text-gray-400 hover:text-red-600">{t("report")}</button>
+            <button type="button" onClick={() => setReporting((v) => !v)} className="text-xs font-semibold text-slate-400 hover:text-red-600">{t("report")}</button>
           )}
         </div>
       </div>
 
       {reporting && (
-        <form onSubmit={handleReport} className="px-4 pb-4 flex items-center gap-2 flex-wrap">
+        <form onSubmit={handleReport} className="flex flex-wrap items-center gap-2 px-4 pb-4">
           <label htmlFor={`report-${post.id}`} className="sr-only">{t("reportReasonLabel")}</label>
           <select
             id={`report-${post.id}`} value={reportReason} onChange={(e) => setReportReason(e.target.value as PostReportReason)}
-            className="border rounded px-2 py-1 text-sm"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
           >
             {REPORT_REASONS.map((reason) => (
               <option key={reason} value={reason}>{t(`reportReason.${reason}`)}</option>
             ))}
           </select>
-          <button type="submit" disabled={busy} className="bg-red-600 text-white text-sm font-semibold px-3 py-1 rounded disabled:opacity-50">{t("reportSubmit")}</button>
-          <button type="button" onClick={() => setReporting(false)} className="text-sm text-gray-500">{t("cancel")}</button>
+          <button type="submit" disabled={busy} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{t("reportSubmit")}</button>
+          <button type="button" onClick={() => setReporting(false)} className="text-sm font-semibold text-slate-500">{t("cancel")}</button>
         </form>
       )}
 
-      {error && <p role="alert" className="text-red-600 text-xs px-4 pb-2">{error}</p>}
+      {error && <p role="alert" className="px-4 pb-3 text-xs text-red-600">{error}</p>}
 
       {showComments && (
-        <div className="p-4 border-t bg-gray-50">
+        <div className="border-t border-slate-100 bg-slate-50/70 p-4">
           {commentsLoading ? (
-            <p className="text-sm text-gray-500 mb-3">{t("loading")}</p>
+            <p className="mb-3 text-sm text-slate-500">{t("loading")}</p>
           ) : comments.length === 0 ? (
-            <p className="text-sm text-gray-500 mb-3">{t("noComments")}</p>
+            <p className="mb-3 text-sm text-slate-500">{t("noComments")}</p>
           ) : (
-            <div className="flex flex-col gap-2 mb-3">
+            <div className="mb-3 flex flex-col gap-2.5">
               {comments.map((c) => (
-                <div key={c.id} className="text-sm flex flex-wrap items-start justify-between gap-2">
-                  <p className="break-words min-w-0">
-                    <span className="font-semibold text-[var(--navy)]">{c.author_name}</span>{" "}
-                    <span className="text-gray-700">{c.text}</span>
+                <div key={c.id} className="flex items-start gap-2.5 text-sm">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-xs font-black text-slate-700" aria-hidden="true">
+                    {(c.author_name.charAt(0) || "?").toUpperCase()}
+                  </span>
+                  <p className="min-w-0 flex-1 break-words rounded-2xl rounded-tl-md bg-white px-3 py-2 shadow-sm">
+                    <span className="font-bold text-slate-900">{c.author_name}</span>{" "}
+                    <span className="text-slate-700">{c.text}</span>
                   </p>
                   {c.is_mine ? (
-                    <button type="button" onClick={() => handleDeleteComment(c.id)} className="text-xs text-red-600 hover:underline shrink-0">
+                    <button type="button" onClick={() => handleDeleteComment(c.id)} className="shrink-0 pt-2 text-xs font-semibold text-red-600 hover:underline">
                       {t("deleteComment")}
                     </button>
                   ) : (
@@ -262,9 +281,9 @@ export default function PostCard({ post, onDeleted, onTagClick }: PostCardProps)
             <input
               type="text" value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} maxLength={MAX_COMMENT_LENGTH}
               placeholder={t("commentPlaceholder")} aria-label={t("commentPlaceholder")}
-              className="flex-1 border rounded px-3 py-1 text-sm"
+              className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-400/15"
             />
-            <button type="submit" disabled={busy || !commentDraft.trim()} aria-label={t("sendComment")} className="bg-[var(--navy)] text-white text-sm font-semibold px-3 py-1 rounded disabled:opacity-50">→</button>
+            <button type="submit" disabled={busy || !commentDraft.trim()} aria-label={t("sendComment")} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-slate-800 disabled:opacity-50">→</button>
           </form>
         </div>
       )}

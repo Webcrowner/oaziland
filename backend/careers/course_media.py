@@ -5,6 +5,7 @@ They're served only through short-lived signed links (`/api/course-media/<token>
 to enrolled learners and course staff. A <video> or a PDF tab can't send the login token, so the signature carries
 who the link was issued to, and access is re-checked on every request: a learner who drops the course or whose
 payment is refunded loses access as soon as their link is used again, and a link stops working after a few hours.
+The one exception is a lesson marked as a free preview in a published course: anyone holding its link can open it.
 """
 import mimetypes
 import re
@@ -22,9 +23,12 @@ CHUNK = 512 * 1024
 
 def media_url(request, lesson, kind: str, user) -> str:
     """A signed link to the lesson's uploaded `kind` ("video" or "pdf") for user, or "" if there's no such file."""
-    if not getattr(lesson, FIELDS[kind]) or not (user and user.is_authenticated):
+    if not getattr(lesson, FIELDS[kind]):
         return ""
-    token = signing.dumps({"l": str(lesson.pk), "k": kind, "u": str(user.pk)}, salt=SALT, compress=True)
+    authenticated = bool(user and user.is_authenticated)
+    if not authenticated and not lesson.is_preview:  # a preview lesson's files are open to visitors who haven't signed in
+        return ""
+    token = signing.dumps({"l": str(lesson.pk), "k": kind, "u": str(user.pk) if authenticated else ""}, salt=SALT, compress=True)
     url = reverse("course-media", args=[token])
     return request.build_absolute_uri(url) if request is not None else url
 
@@ -102,11 +106,15 @@ def course_media_view(request, token: str):
         data = signing.loads(token, salt=SALT, max_age=MAX_AGE_SECONDS)
     except signing.BadSignature:  # also covers an expired link
         raise Http404("This link has expired. Reopen the lesson to get a new one.")
-    lesson = Lesson.objects.select_related("module").filter(pk=data.get("l")).first()
-    user = User.objects.filter(pk=data.get("u"), is_active=True).first()
+    lesson = Lesson.objects.select_related("module__program").filter(pk=data.get("l")).first()
     kind = data.get("k")
-    if lesson is None or user is None or kind not in FIELDS or not may_access(user, lesson):
+    if lesson is None or kind not in FIELDS:
         raise Http404
+    is_open_preview = lesson.is_preview and lesson.module.program.is_published
+    if not is_open_preview:
+        user = User.objects.filter(pk=data.get("u"), is_active=True).first() if data.get("u") else None
+        if user is None or not may_access(user, lesson):
+            raise Http404
     field_file = getattr(lesson, FIELDS[kind])
     if not field_file:
         raise Http404

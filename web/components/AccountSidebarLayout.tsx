@@ -1,5 +1,6 @@
 "use client";
 import { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import SidebarFrame from "@/components/SidebarFrame";
 import NavIconImage, { NAV_ICON_BY_HREF } from "@/components/navIcons";
@@ -18,11 +19,14 @@ import {
   IconGift,
   IconSparkles,
   IconGraduationCap,
+  IconShoppingBag,
 } from "@/components/Icons";
 
 interface AccountNavItem {
   href: string;
   label: string;
+  /** Items that are translated pick their label from the matching namespace instead of `label`. */
+  labelKey?: "cart" | "shop";
   icon: React.ComponentType<{ size?: number; className?: string }>;
   badge?: number;
 }
@@ -52,6 +56,10 @@ const ACCOUNT_NAV_GROUPS: AccountNavGroup[] = [
       { href: "/ratings", label: "Ratings & Reviews", icon: IconStar },
       { href: "/marketplace/my-listings", label: "My Marketplace Listings", icon: IconFileText },
       { href: "/marketplace/orders", label: "Marketplace Orders", icon: IconCreditCard },
+      { href: "/marketplace/cart", label: "My Cart", labelKey: "cart", icon: IconShoppingBag },
+      { href: "/marketplace/shop-settings", label: "My Shop", labelKey: "shop", icon: IconShoppingBag },
+      { href: "/marketplace/dashboard", label: "Seller Dashboard", icon: IconSparkles },
+      { href: "/marketplace/offers", label: "Marketplace Offers", icon: IconFileText },
       { href: "/hostel-rooms", label: "Hostel Rooms", icon: IconFileText },
       { href: "/agent-profile", label: "Agent Profile & Video", icon: IconUser },
       { href: "/staff-access", label: "Staff & Team Access", icon: IconLock },
@@ -92,6 +100,9 @@ interface AccountSidebarLayoutProps {
  * island only reachable from the /account hub's link grid.
  */
 export default function AccountSidebarLayout({ activeHref, children }: AccountSidebarLayoutProps) {
+  const tCart = useTranslations("MarketplaceCart");
+  const tShop = useTranslations("ShopSettings");
+  const translatedLabels = { cart: tCart("sidebarLabel"), shop: tShop("sidebarLabel") };
   const sidebar = (
     <div className="flex flex-col gap-4">
             <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800/80 text-white relative overflow-hidden">
@@ -141,7 +152,7 @@ export default function AccountSidebarLayout({ activeHref, children }: AccountSi
                           >
                             {iconSrc ? <NavIconImage src={iconSrc} size={32} /> : <Icon size={32} />}
                           </div>
-                          <span className="flex-1 truncate tracking-tight">{item.label}</span>
+                          <span className="flex-1 truncate tracking-tight">{item.labelKey ? translatedLabels[item.labelKey] : item.label}</span>
                         </Link>
                       );
                     })}

@@ -317,7 +317,8 @@ class VenueSpace(models.Model):
 
 class GuestHouseLodge(PropertyAsset):
     """Auberge: hospitality/leisure property, popular in coastal tourist
-    towns like Kribi and Limbe."""
+    towns like Kribi and Limbe. Its bookable rooms are hotels.RoomType rows (the same engine hotels use)."""
+    name = models.CharField(max_length=200, blank=True, default="")
     is_coastal_leisure = models.BooleanField(default=False)
 
     class Meta:
@@ -448,6 +449,8 @@ class Listing(models.Model):
         requirement: some people specifically want to deal directly
         with an owner, others prefer an agent or agency — this is what
         makes that distinction real and visible, not guessed."""
+        if getattr(self.listed_by, "is_platform_account", False):
+            return "PLATFORM"
         if hasattr(self.listed_by, "agent_profile"):
             return "AGENCY" if self.listed_by.agent_profile.agency else "AGENT"
         return "OWNER"

@@ -568,6 +568,35 @@ class AdminUserManagementViewSet(viewsets.ReadOnlyModelViewSet):
         user.refresh_from_db()
         return Response(self.get_serializer(user).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="admin-access")
+    def admin_access(self, request, pk=None):
+        """Sets how much an existing administrator may do. {level: "full" | "limited", platform_listings: bool}.
+        A limited admin cannot grant roles or read the audit log; `platform_listings` lets them manage Oaziland's
+        own offers. Full-access administrators only, never on yourself, never leaving the platform without one."""
+        from identity.platform_account import PLATFORM_PERMISSION
+        from identity.services import is_super_admin
+
+        user = self.get_object()
+        audit_note(request, target_label=user.username, target_type="user")
+        if not is_super_admin(request.user):
+            return self._refuse(ADMIN_ROLE_RESERVED)
+        profile = getattr(user, "admin_profile", None)
+        if profile is None:
+            return Response({"detail": "This user is not an administrator."}, status=status.HTTP_400_BAD_REQUEST)
+        if user.pk == request.user.pk:
+            return self._refuse("You cannot change your own admin access.")
+        level = request.data.get("level", "limited")
+        if level not in ("full", "limited"):
+            return Response({"detail": "level must be 'full' or 'limited'."}, status=status.HTTP_400_BAD_REQUEST)
+        if level == "full":
+            profile.permissions = []
+        else:
+            profile.permissions = ["limited"] + ([PLATFORM_PERMISSION] if request.data.get("platform_listings") else [])
+        profile.save(update_fields=["permissions"])
+        audit_note(request, level=level, platform_listings=PLATFORM_PERMISSION in profile.permissions)
+        user.refresh_from_db()
+        return Response(self.get_serializer(user).data)
+
     @action(detail=True, methods=["post"], url_path="remove-role")
     def remove_role(self, request, pk=None):
         """The reverse of assign_role — lets an admin correct a

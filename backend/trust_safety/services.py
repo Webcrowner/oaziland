@@ -31,19 +31,24 @@ def score_text(text: str, *, target_post=None, target_listing_id=None, target_co
     absence of records for content that happened to be fine."""
     provider = get_active_moderation_provider()
     scores = provider.analyze_text(text)
-    return [_save_result(s, target_post, target_listing_id, target_comment) for s in scores]
+    return [_save_result(s, target_post, target_listing_id, target_comment, provider) for s in scores]
 
 
 def score_image(image_url: str, *, target_post=None, target_listing_id=None, target_comment=None) -> list:
     provider = get_active_moderation_provider()
     scores = provider.analyze_image(image_url)
-    return [_save_result(s, target_post, target_listing_id, target_comment) for s in scores]
+    return [_save_result(s, target_post, target_listing_id, target_comment, provider) for s in scores]
 
 
-def _save_result(score, target_post, target_listing_id, target_comment) -> AIModerationResult:
+def score_video(video_url: str, *, target_post=None) -> list:
+    provider = get_active_moderation_provider()
+    return [_save_result(s, target_post, None, None, provider) for s in provider.analyze_video(video_url)]
+
+
+def _save_result(score, target_post, target_listing_id, target_comment, provider=None) -> AIModerationResult:
     return AIModerationResult.objects.create(
         category=score.category, confidence_score=score.confidence_score, action=score.action,
-        model_version="sandbox-v1", target_post=target_post,
+        model_version=getattr(provider, "model_version", "sandbox-v1"), target_post=target_post,
         target_listing_id=target_listing_id, target_comment=target_comment,
     )
 
@@ -73,9 +78,15 @@ def publish_post_with_moderation(post):
 
     image_results = []
     for media in post.media.all():
-        image_results.extend(score_image(media.file_url, target_post=post))
+        if media.media_type == "VIDEO":
+            image_results.extend(score_video(media.file_url, target_post=post))
+        else:
+            image_results.extend(score_image(media.file_url, target_post=post))
 
-    worst = _worst_action(text_results + image_results)
+    tag_text = " ".join(tag.name for tag in post.tags.all())
+    tag_results = score_text(tag_text, target_post=post) if tag_text else []
+
+    worst = _worst_action(text_results + tag_results + image_results)
     if worst == ModerationAction.AUTO_REMOVE:
         raise ContentBlockedError(
             "This post was automatically blocked by content moderation and cannot be published."
@@ -83,6 +94,27 @@ def publish_post_with_moderation(post):
 
     post.publish()
     return worst  # caller can still see FLAG_FOR_REVIEW/ESCALATE_ADMIN even though it published
+
+
+def moderate_comment(comment):
+    """Checks a just-saved comment. A clear violation deletes it and raises ContentBlockedError; a borderline
+    one stays up and is reported to the admins by the platform account (the report queue is where comments
+    are reviewed, and confirming it deletes the comment and strikes its author)."""
+    results = score_text(comment.text, target_comment=comment)
+    worst = _worst_action(results)
+    if worst == ModerationAction.AUTO_REMOVE:
+        comment.delete()
+        raise ContentBlockedError("This comment was blocked by content moderation and cannot be posted.")
+    if worst in (ModerationAction.FLAG_FOR_REVIEW, ModerationAction.ESCALATE_ADMIN):
+        from identity.platform_account import get_platform_account
+        from .models import ReportReason
+
+        file_content_report(
+            reported_by=get_platform_account(), reason=ReportReason.INAPPROPRIATE_CONTENT,
+            notes="Flagged by the automatic content check for a person to review.",
+            target_kind="comment", target_object_id=str(comment.pk),
+        )
+    return worst
 
 
 def publish_listing_with_moderation(listing):
@@ -428,6 +460,8 @@ def file_content_report(
             raise ValueError("You have already reported this. Our team is reviewing it.")
     if target_post is not None and target_post.author_id == reported_by.id:
         raise CannotReportSelfError("You cannot report your own post.")
+    if target_post is not None and open_reports.filter(target_post=target_post).exists():
+        raise ValueError("You have already reported this. Our team is reviewing it.")
     if target_listing_id:
         from marketplace.models import MarketplaceListingBase
         from property.models import Listing

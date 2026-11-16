@@ -4,6 +4,7 @@ from typing import Optional
 from .models import (
     WarehouseListing, StoreListing, BusinessListing, CarListing, GoodsListing, VehicleSpec, MarketplaceMedia, RideBooking, RideMessage, ListingCondition,
     RideCategory, TransportType, Vehicle, DriverProfile, AvailabilityStatus, MarketplaceOrder, RideEmergencyContact, LuggageSize, CarBlockedPeriod, MarketplaceOffer,
+    RideCancelReason, RideReleaseReason, RideIssueReport, RideIssueCategory, RideIssueStatus, RideStatus,
 )
 
 MAX_LUGGAGE_PHOTOS = 3
@@ -27,7 +28,20 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
     expires_at = serializers.SerializerMethodField()
     is_expired = serializers.SerializerMethodField()
     is_boosted = serializers.SerializerMethodField()
+    on_sale = serializers.SerializerMethodField()
+    current_price_xaf = serializers.SerializerMethodField()
+    seller_on_vacation = serializers.SerializerMethodField()
 
+    def get_on_sale(self, obj) -> bool:
+        return obj.on_sale()
+
+    def get_current_price_xaf(self, obj) -> str:
+        return str(obj.current_price_xaf())
+
+    def get_seller_on_vacation(self, obj) -> bool:
+        # with_listing_related() loads the profile with the lister, so lists cost no query per row.
+        profile = getattr(obj.lister_user, "shop_profile", None)
+        return bool(profile and profile.vacation_active())
     def get_is_boosted(self, obj) -> bool:
         from django.utils import timezone
         return bool(obj.boosted_until and obj.boosted_until > timezone.now())
@@ -49,7 +63,8 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
             "id", "lister_user", "lister_name", "lister_role", "title", "description",
             "price_basis", "price_xaf", "security_deposit_xaf", "quarter", "quarter_name", "latitude", "longitude",
             "availability_status", "removed_by_moderation", "created_at", "media", "distance_km", "expires_at", "is_expired",
-            "allow_offers", "is_boosted", "boosted_until",
+            "allow_offers", "is_boosted", "boosted_until", "sale_price_xaf", "sale_starts_at", "sale_ends_at", "on_sale",
+            "current_price_xaf", "seller_on_vacation",
         ]
         read_only_fields = ["lister_user", "lister_role", "availability_status", "removed_by_moderation", "created_at", "boosted_until"]
         extra_kwargs = {
@@ -65,6 +80,20 @@ class BaseMarketplaceListingSerializer(serializers.ModelSerializer):
         deposit = attrs.get("security_deposit_xaf", getattr(self.instance, "security_deposit_xaf", Decimal("0")))
         if deposit and deposit > 0 and basis not in RENTAL_PRICE_BASES:
             raise serializers.ValidationError({"security_deposit_xaf": "A security deposit only applies to rentals."})
+        if any(key in attrs for key in ("sale_price_xaf", "sale_starts_at", "sale_ends_at")):
+            from .promotions import validate_sale
+
+            def current(field):
+                return attrs[field] if field in attrs else getattr(self.instance, field, None)
+
+            if self.Meta.model is not GoodsListing:
+                raise serializers.ValidationError({"sale_price_xaf": "Flash sales are only available on goods."})
+            problem = validate_sale(
+                price=attrs.get("price_xaf", getattr(self.instance, "price_xaf", None)), sale_price=current("sale_price_xaf"),
+                starts_at=current("sale_starts_at"), ends_at=current("sale_ends_at"),
+            )
+            if problem:
+                raise serializers.ValidationError({"sale_price_xaf": problem})
         return attrs
 
 
@@ -258,12 +287,17 @@ class GoodsListingSerializer(BaseMarketplaceListingSerializer):
         "courier_shipping", "courier_fee_xaf", "courier_note",
     ]
 
+    variants = serializers.SerializerMethodField()
+    has_variants = serializers.SerializerMethodField()
+    price_from_xaf = serializers.SerializerMethodField()
+
     class Meta(BaseMarketplaceListingSerializer.Meta):
         model = GoodsListing
         fields = BaseMarketplaceListingSerializer.Meta.fields + [
             "item_category", "condition", "quantity", "attributes",
             "pickup_available", "seller_delivery", "seller_delivery_fee_xaf", "seller_delivery_areas",
             "courier_shipping", "courier_fee_xaf", "courier_note",
+            "compare_at_price_xaf", "variants", "has_variants", "price_from_xaf",
         ]
         extra_kwargs = {
             **BaseMarketplaceListingSerializer.Meta.extra_kwargs,
@@ -271,13 +305,42 @@ class GoodsListingSerializer(BaseMarketplaceListingSerializer):
             "quantity": {"min_value": 1, "max_value": 100000},
             "seller_delivery_fee_xaf": {"min_value": Decimal("0"), "max_value": Decimal("1000000")},
             "courier_fee_xaf": {"min_value": Decimal("0"), "max_value": Decimal("1000000")},
+            "compare_at_price_xaf": {"min_value": Decimal("0.01")},
         }
+
+    def get_variants(self, obj) -> list:
+        from .variants import public_variant
+        return [public_variant(v, obj) for v in obj.live_variants()]
+
+    def get_has_variants(self, obj) -> bool:
+        return obj.has_variants()
+
+    def get_price_from_xaf(self, obj) -> Optional[str]:
+        from .variants import price_from
+        value = price_from(obj)
+        return None if value is None else str(value.quantize(Decimal("1")))
+
+    def update(self, instance, validated_data):
+        # Restocking a sold-out item puts it back on sale (an admin take-down still keeps it hidden).
+        from .models import AvailabilityStatus
+        was_sold_out = instance.quantity == 0
+        instance = super().update(instance, validated_data)
+        if was_sold_out and instance.quantity > 0 and not instance.removed_by_moderation and instance.availability_status != AvailabilityStatus.AVAILABLE:
+            GoodsListing.objects.filter(pk=instance.pk).update(availability_status=AvailabilityStatus.AVAILABLE)
+            instance.availability_status = AvailabilityStatus.AVAILABLE
+        return instance
 
     def validate(self, attrs):
         from .goods_attributes import clean_attributes, AttributeError_
         attrs = super().validate(attrs)
         if attrs.get("price_basis", "SALE") != "SALE":
             raise serializers.ValidationError({"price_basis": "Goods can only be listed for sale."})
+        compare_at = attrs.get("compare_at_price_xaf", getattr(self.instance, "compare_at_price_xaf", None))
+        price = attrs.get("price_xaf", getattr(self.instance, "price_xaf", None))
+        if compare_at is not None and price is not None and compare_at <= price:
+            raise serializers.ValidationError({"compare_at_price_xaf": "The original price must be higher than the selling price."})
+        if self.instance is not None and "quantity" in attrs and self.instance.has_variants():
+            raise serializers.ValidationError({"quantity": "This item has options: set the stock of each option instead."})
 
         def current(field, default=None):
             return attrs.get(field, getattr(self.instance, field, default))
@@ -323,6 +386,7 @@ class RideBookingSerializer(serializers.ModelSerializer):
     driver_name = serializers.CharField(source="driver.full_name", read_only=True, default=None)
     vehicle_details = RideVehicleSerializer(source="vehicle", read_only=True)
     distance_km = serializers.SerializerMethodField()
+    matching = serializers.SerializerMethodField()
 
     class Meta:
         model = RideBooking
@@ -333,8 +397,16 @@ class RideBookingSerializer(serializers.ModelSerializer):
             "fare_estimate_xaf", "distance_km", "status", "ride_category", "transport_type", "has_luggage",
             "luggage_count", "luggage_size", "luggage_photo_urls", "cargo_description",
             "requested_at", "completed_at", "sos_raised_at",
+            "cancelled_at", "cancellation_reason", "cancellation_note", "release_reason", "release_note", "matching",
         ]
-        read_only_fields = ["rider", "driver", "vehicle", "fare_estimate_xaf", "distance_km", "status", "requested_at", "completed_at", "sos_raised_at"]
+        read_only_fields = [
+            "rider", "driver", "vehicle", "fare_estimate_xaf", "distance_km", "status", "requested_at", "completed_at", "sos_raised_at",
+            "cancelled_at", "cancellation_reason", "cancellation_note", "release_reason", "release_note",
+        ]
+
+    def get_matching(self, obj) -> bool:
+        """True while the request is being offered to nearby drivers one at a time."""
+        return obj.status == RideStatus.REQUESTED and obj.matching_ended_at is None
 
     def get_distance_km(self, obj) -> str:
         if obj.distance_km is not None:
@@ -350,17 +422,17 @@ class RideBookingSerializer(serializers.ModelSerializer):
 
 class RideRequestSerializer(serializers.Serializer):
     """Write-only input — fare_estimate_xaf is CALCULATED server-side
-    from distance and ride_category via estimate_ride_fare(), never
-    trusted from the client (a real person could otherwise just claim
-    any fare). cargo_description is only meaningful when
-    transport_type is CARGO — validated together below."""
+    from the road route between the two map points and ride_category,
+    never trusted from the client (a real person could otherwise just
+    claim any fare or distance). cargo_description is only meaningful
+    when transport_type is CARGO — validated together below."""
     pickup_description = serializers.CharField()
     dropoff_description = serializers.CharField()
-    distance_km = serializers.DecimalField(max_digits=6, decimal_places=2, min_value=0)
-    pickup_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
-    pickup_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
-    dropoff_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
-    dropoff_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    # Optional here so a missing point gets one clear message (see RideViewSet.create) instead of four field errors.
+    pickup_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-90, max_value=90)
+    pickup_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-180, max_value=180)
+    dropoff_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-90, max_value=90)
+    dropoff_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-180, max_value=180)
     ride_category = serializers.ChoiceField(choices=RideCategory.choices, default=RideCategory.STANDARD)
     transport_type = serializers.ChoiceField(choices=TransportType.choices, default=TransportType.PASSENGER)
     has_luggage = serializers.BooleanField(default=False)
@@ -382,6 +454,22 @@ class RideRequestSerializer(serializers.Serializer):
             if any(not is_platform_media_url(url) for url in data.get("luggage_photo_urls", [])):
                 raise serializers.ValidationError({"luggage_photo_urls": "Upload the luggage photos through Oaziland."})
         return data
+
+
+class RideQuoteSerializer(serializers.Serializer):
+    """The rider's two map points, for a price before booking."""
+    pickup_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, min_value=-90, max_value=90)
+    pickup_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, min_value=-180, max_value=180)
+    dropoff_latitude = serializers.DecimalField(max_digits=10, decimal_places=7, min_value=-90, max_value=90)
+    dropoff_longitude = serializers.DecimalField(max_digits=10, decimal_places=7, min_value=-180, max_value=180)
+
+
+class RideQuoteResultSerializer(serializers.Serializer):
+    distance_km = serializers.DecimalField(max_digits=8, decimal_places=2)
+    duration_minutes = serializers.IntegerField()
+    polyline = serializers.CharField(help_text="Google encoded polyline of the road route; empty when estimated.")
+    source = serializers.ChoiceField(choices=["google", "estimate"], help_text="'estimate' = straight line x1.3, used when Google is unavailable.")
+    fares = serializers.DictField(child=serializers.DecimalField(max_digits=10, decimal_places=2), help_text="Fare in XAF per ride category.")
 
 
 class DriverRegistrationSerializer(serializers.Serializer):
@@ -505,6 +593,126 @@ class CompleteRideSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
 
 
+# NO_DRIVER_FOUND is only ever set by the expiry job, never chosen by a rider.
+RIDER_CANCEL_REASONS = [choice for choice in RideCancelReason.choices if choice[0] != RideCancelReason.NO_DRIVER_FOUND]
+
+
+class RideCancelSerializer(serializers.Serializer):
+    # Optional so older app versions that send no body keep working.
+    reason = serializers.ChoiceField(choices=RIDER_CANCEL_REASONS, required=False, allow_blank=True, default="")
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300, default="")
+
+
+class RideReleaseSerializer(serializers.Serializer):
+    reason = serializers.ChoiceField(choices=RideReleaseReason.choices, required=False, allow_blank=True, default="")
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300, default="")
+
+
+class RideIssueInputSerializer(serializers.Serializer):
+    category = serializers.ChoiceField(choices=RideIssueCategory.choices)
+    description = serializers.CharField(min_length=10, max_length=1000)
+
+
+class RideIssueReportSerializer(serializers.ModelSerializer):
+    reported_by = serializers.SerializerMethodField()
+    reporter_role = serializers.SerializerMethodField()
+    resolved_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RideIssueReport
+        fields = [
+            "id", "ride", "reported_by", "reporter_role", "category", "description", "status",
+            "created_at", "resolved_at", "resolved_by_name", "resolution_notes",
+        ]
+        read_only_fields = fields
+
+    def get_reported_by(self, report) -> Optional[dict]:
+        return _person(report.reported_by)
+
+    def get_reporter_role(self, report) -> str:
+        return "RIDER" if report.reported_by_id == report.ride.rider_id else "DRIVER"
+
+    def get_resolved_by_name(self, report) -> Optional[str]:
+        user = report.resolved_by
+        return (user.full_name or user.username) if user else None
+
+
+class AdminRideIssueSerializer(RideIssueReportSerializer):
+    """A report plus the trip it's about, so the queue can be read without opening each ride."""
+    ride_summary = serializers.SerializerMethodField()
+
+    class Meta(RideIssueReportSerializer.Meta):
+        fields = RideIssueReportSerializer.Meta.fields + ["ride_summary"]
+        read_only_fields = fields
+
+    def get_ride_summary(self, report) -> dict:
+        ride = report.ride
+        return {
+            "pickup_description": ride.pickup_description, "dropoff_description": ride.dropoff_description,
+            "status": ride.status, "fare_estimate_xaf": str(ride.fare_estimate_xaf), "requested_at": ride.requested_at,
+        }
+
+
+class AdminRideSerializer(serializers.ModelSerializer):
+    """One row of the admin trip search."""
+    rider = serializers.SerializerMethodField()
+    driver = serializers.SerializerMethodField()
+    open_issue_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RideBooking
+        fields = [
+            "id", "status", "ride_category", "transport_type", "pickup_description", "dropoff_description",
+            "fare_estimate_xaf", "requested_at", "completed_at", "cancelled_at", "sos_raised_at", "sos_resolved_at",
+            "rider", "driver", "open_issue_count",
+        ]
+        read_only_fields = fields
+
+    def get_rider(self, ride) -> Optional[dict]:
+        return _person(ride.rider)
+
+    def get_driver(self, ride) -> Optional[dict]:
+        return _person(ride.driver)
+
+    def get_open_issue_count(self, ride) -> int:
+        annotated = getattr(ride, "open_issues", None)
+        return annotated if annotated is not None else ride.issue_reports.filter(status=RideIssueStatus.OPEN).count()
+
+
+class AdminRideDetailSerializer(AdminRideSerializer):
+    """Everything about one trip for an admin investigating it: route, people, vehicle, payment, cancellation,
+    SOS, the in-trip chat and every problem report."""
+    vehicle_details = RideVehicleSerializer(source="vehicle", read_only=True)
+    payment = serializers.SerializerMethodField()
+    messages = RideMessageSerializer(many=True, read_only=True)
+    issue_reports = RideIssueReportSerializer(many=True, read_only=True)
+    sos_raised_by = serializers.SerializerMethodField()
+
+    class Meta(AdminRideSerializer.Meta):
+        fields = AdminRideSerializer.Meta.fields + [
+            "vehicle_details", "distance_km", "has_luggage", "luggage_count", "luggage_size", "cargo_description",
+            "pickup_latitude", "pickup_longitude", "dropoff_latitude", "dropoff_longitude",
+            "cancellation_reason", "cancellation_note", "release_reason", "release_note",
+            "sos_raised_by", "sos_latitude", "sos_longitude", "sos_note",
+            "payment", "messages", "issue_reports",
+        ]
+        read_only_fields = fields
+
+    def get_sos_raised_by(self, ride) -> Optional[dict]:
+        return _person(ride.sos_raised_by)
+
+    def get_payment(self, ride) -> Optional[dict]:
+        booking = ride.booking
+        if booking is None:
+            return None
+        escrow = getattr(booking, "escrow", None)
+        return {
+            "booking_id": str(booking.id), "booking_status": booking.status, "amount_xaf": str(booking.amount_xaf),
+            "escrow_status": escrow.status if escrow else None,
+            "provider_reference": escrow.provider_reference if escrow else None,
+        }
+
+
 class ListingConditionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ListingCondition
@@ -574,10 +782,47 @@ class PlaceOrderSerializer(serializers.Serializer):
     # Goods: how the buyer gets the item.
     delivery_method = serializers.ChoiceField(choices=["PICKUP", "SELLER", "COURIER"], required=False, allow_blank=True)
     delivery_address = serializers.CharField(required=False, allow_blank=True, max_length=300)
+    # Goods: how many units to buy (at most what is in stock).
+    quantity = serializers.IntegerField(required=False, default=1, min_value=1, max_value=1000)
+    # Goods: a seller's discount code.
+    coupon_code = serializers.CharField(required=False, allow_blank=True, max_length=30, default="")
+    # Goods with options (size, colour...): the chosen version.
+    variant_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class OrderDisputeSerializer(serializers.Serializer):
     reason = serializers.CharField(min_length=5, max_length=2000)
+
+
+class OrderReviewSerializer(serializers.Serializer):
+    score = serializers.IntegerField(min_value=1, max_value=5)
+    text = serializers.CharField(required=False, allow_blank=True, max_length=2000, default="")
+
+
+class ShipmentUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=["IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"])
+    courier_name = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+    tracking_number = serializers.CharField(required=False, allow_blank=True, max_length=60, default="")
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300, default="")
+    proof_url = serializers.URLField(required=False, allow_blank=True, max_length=500, default="")
+
+
+class ReturnRequestSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(choices=["REFUND", "PARTIAL_REFUND", "REPLACEMENT"])
+    reason = serializers.ChoiceField(choices=["NOT_AS_DESCRIBED", "DAMAGED", "WRONG_ITEM", "MISSING_PARTS", "NOT_WORKING", "OTHER"])
+    description = serializers.CharField(min_length=10, max_length=2000)
+    evidence_urls = serializers.ListField(child=serializers.URLField(max_length=500), required=False, max_length=5, default=list)
+    requested_amount_xaf = serializers.DecimalField(max_digits=14, decimal_places=0, min_value=Decimal("1"), required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs["kind"] == "PARTIAL_REFUND" and not attrs.get("requested_amount_xaf"):
+            raise serializers.ValidationError({"requested_amount_xaf": "Enter how much you want back."})
+        return attrs
+
+
+class ReturnResponseSerializer(serializers.Serializer):
+    decision = serializers.ChoiceField(choices=["ACCEPT", "REJECT"])
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500, default="")
 
 
 class MarketplaceOrderSerializer(serializers.ModelSerializer):
@@ -593,6 +838,13 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
     deposit_return_by = serializers.SerializerMethodField()
     free_cancellation_until = serializers.SerializerMethodField()
     approval_deadline = serializers.SerializerMethodField()
+    can_review = serializers.SerializerMethodField()
+    my_review = serializers.SerializerMethodField()
+    is_tracked = serializers.SerializerMethodField()
+    return_request = serializers.SerializerMethodField()
+    can_request_return = serializers.SerializerMethodField()
+    receipt_available = serializers.SerializerMethodField()
+    coupon_code = serializers.SerializerMethodField()
 
     class Meta:
         model = MarketplaceOrder
@@ -602,9 +854,68 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
             "deposit_xaf", "deposit_status", "deposit_settled_at", "deposit_return_by", "total_xaf",
             "rental_starts_on", "rental_ends_on", "booked_dates", "rental_days", "with_driver", "delivery_requested",
             "price_breakdown", "free_cancellation_until", "needs_approval", "owner_approved_at", "approval_deadline",
-            "offer", "delivery_method", "delivery_fee_xaf", "delivery_address",
+            "offer", "delivery_method", "delivery_fee_xaf", "delivery_address", "quantity", "can_review", "my_review",
+            "courier_name", "tracking_number", "shipment_status", "shipped_at", "delivered_at", "delivery_proof_url",
+            "delivery_note", "shipment_events", "is_tracked", "return_request", "can_request_return", "receipt_available",
+            "discount_xaf", "coupon_code", "checkout", "variant_label",
         ]
         read_only_fields = fields
+
+    def get_coupon_code(self, obj) -> str:
+        breakdown = obj.price_breakdown if isinstance(obj.price_breakdown, dict) else {}
+        return breakdown.get("coupon_code", "")
+
+    def get_is_tracked(self, obj) -> bool:
+        from .fulfilment import is_tracked
+        return is_tracked(obj)
+
+    def get_receipt_available(self, obj) -> bool:
+        from .receipts import receipt_available
+        return receipt_available(obj)
+
+    def _return(self, obj):
+        # The viewset passes each order's latest return request in the context, so listing costs no query per order.
+        return (self.context.get("order_returns") or {}).get(obj.pk)
+
+    def get_return_request(self, obj) -> Optional[dict]:
+        from .fulfilment import respond_by, buyer_decide_by
+        request = self._return(obj)
+        if request is None:
+            return None
+        return {
+            "id": str(request.id), "kind": request.kind, "reason": request.reason, "description": request.description,
+            "evidence_urls": request.evidence_urls, "requested_amount_xaf": str(request.requested_amount_xaf) if request.requested_amount_xaf is not None else None,
+            "status": request.status, "seller_note": request.seller_note, "created_at": request.created_at,
+            "responded_at": request.responded_at, "respond_by": respond_by(request), "buyer_decide_by": buyer_decide_by(request),
+        }
+
+    def get_can_request_return(self, obj) -> bool:
+        from .fulfilment import OPEN_RETURN_STATUSES
+        from .services import is_rental
+        request = self.context.get("request")
+        if request is None or not request.user.is_authenticated or "order_returns" not in self.context:
+            return False
+        if request.user.id != obj.buyer_id or obj.status != "HANDED_OVER" or obj.booked_dates or is_rental(obj.listing):
+            return False
+        if obj.shipment_status and obj.shipment_status != "DELIVERED":
+            return False
+        existing = self._return(obj)
+        return existing is None or existing.status not in OPEN_RETURN_STATUSES
+
+    def _my_review(self, obj):
+        # The viewset passes the caller's reviews in the context, so listing orders costs no query per order.
+        return (self.context.get("my_reviews") or {}).get(obj.booking_id)
+
+    def get_my_review(self, obj) -> Optional[dict]:
+        review = self._my_review(obj)
+        return {"score": review.score, "text": review.text, "created_at": review.created_at} if review else None
+
+    def get_can_review(self, obj) -> bool:
+        from .reviews import can_review
+        request = self.context.get("request")
+        if request is None or not request.user.is_authenticated or "my_reviews" not in self.context:
+            return False
+        return can_review(obj, request.user) and self._my_review(obj) is None
 
     # People who never filled in a name are shown by username instead of as a blank.
     def get_buyer_name(self, obj) -> str:
@@ -639,12 +950,10 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
         return ""
 
     def get_auto_release_at(self, obj) -> str:
-        # When the payment is released if the buyer stays silent after the handover.
-        from datetime import timedelta
-        from .services import ORDER_AUTO_RELEASE_HOURS
-        if obj.status != "HANDED_OVER" or obj.handed_over_at is None:
-            return None
-        return (obj.handed_over_at + timedelta(hours=ORDER_AUTO_RELEASE_HOURS)).isoformat()
+        # When the payment is released if the buyer stays silent after the handover (later for a parcel still on its way).
+        from .fulfilment import auto_release_at
+        moment = auto_release_at(obj)
+        return moment.isoformat() if moment else None
 
     def get_approval_deadline(self, obj) -> str:
         # When an unanswered booking request expires and the renter is refunded.

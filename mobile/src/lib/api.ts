@@ -7,6 +7,7 @@
  * (not localhost, since a phone/emulator is a separate device).
  */
 import * as SecureStore from "expo-secure-store";
+import { imageSearchError } from "./marketplaceSearchAssist";
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -29,7 +30,7 @@ export interface Listing {
   status: string;
   price_xaf: string;
   published_at: string | null;
-  lister_role: "OWNER" | "AGENT" | "AGENCY";
+  lister_role: "OWNER" | "AGENT" | "AGENCY" | "PLATFORM";
   lister_display_name: string;
   lister_agency_name: string | null;
   lister_id: string;
@@ -84,13 +85,18 @@ export async function listQuarters(): Promise<Quarter[]> {
 
 export type SignupRole = "renter" | "landlord" | "agent" | "student" | "technician" | "driver";
 
-export async function registerUser(payload: { username: string; phone: string; password: string; role?: SignupRole }) {
+export async function registerUser(payload: { username: string; phone: string; password: string; accept_terms: boolean; role?: SignupRole }) {
   const res = await fetch(`${API_BASE_URL}/api/auth/register/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || "Registration failed");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    // Field errors (a weak or taken password, a taken username) come back keyed by field, not as {detail}.
+    const firstFieldError = Object.values(data).flat().find((v) => typeof v === "string");
+    throw new Error(data.detail || firstFieldError || "Registration failed");
+  }
   return res.json();
 }
 
@@ -111,6 +117,9 @@ export async function loginUser(username: string, password: string): Promise<{ a
 }
 
 export async function logout() {
+  // Stop pushes to this phone before the sign-in is gone (removing the device needs it).
+  const { unregisterDeviceForPush } = await import("./pushNotifications");
+  await unregisterDeviceForPush().catch(() => {});
   await SecureStore.deleteItemAsync("access_token");
   await SecureStore.deleteItemAsync("refresh_token");
 }
@@ -264,7 +273,7 @@ export async function getMfaStatus(): Promise<{ mfa_enabled: boolean }> {
 // ---------------------------------------------------------------------------
 export interface SavedMarketplaceListing {
   id: string;
-  category: MarketplaceCategory;
+  category: BrowsableCategory;
   title: string;
   price_xaf: string;
   price_basis: string;
@@ -327,6 +336,57 @@ export async function searchHotels(): Promise<PaginatedResponse<Hotel>> {
   return res.json();
 }
 
+/** A hotel or guest-house reservation as the guest or the host sees it. The rules (free cancellation until 48 hours
+ * before check-in, the first night kept after that and for a no-show, automatic payout 24 hours after check-out
+ * unless the guest reports a problem) are enforced by the server; the app only shows what is possible. */
+export interface StayItem {
+  id: string;
+  guest_name: string;
+  place_name: string;
+  place_kind: "hotel" | "guest_house";
+  place_id: string;
+  room_type_name: string;
+  check_in: string;
+  check_out: string;
+  adults: number;
+  children: number;
+  rate_xaf: string;
+  status: "PENDING_PAYMENT" | "CONFIRMED" | "CHECKED_IN" | "CHECKED_OUT" | "CANCELLED" | "NO_SHOW";
+  payment_held: boolean;
+  payout_due_at: string | null;
+  cancellation: { free: boolean; free_until: string; fee_xaf: string; refund_xaf: string } | null;
+}
+
+export type StayActionName = "cancel" | "no-show" | "confirm-stay" | "dispute" | "check-in" | "checkout";
+
+async function stayJson<T>(res: Response, fallback: string): Promise<T> {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || fallback);
+  return data as T;
+}
+
+/** Every reservation the user made (role "guest") or received at the places they own (role "host"), all pages. */
+export async function listStays(role: "guest" | "host"): Promise<StayItem[]> {
+  const rows: StayItem[] = [];
+  let url: string | null = `${API_BASE_URL}/api/reservations/${role === "host" ? "?role=hosting" : ""}`;
+  for (let page = 0; url && page < 50; page += 1) {
+    const res: Response = await fetch(url, { headers: await authHeaders() });
+    const data = await stayJson<PaginatedResponse<StayItem>>(res, "Could not load your stays");
+    rows.push(...data.results);
+    url = data.next ?? null;
+  }
+  return rows;
+}
+
+export async function stayAction(id: string, action: StayActionName, reason?: string): Promise<StayItem> {
+  const res = await fetch(`${API_BASE_URL}/api/reservations/${id}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+  });
+  return stayJson<StayItem>(res, "That could not be done");
+}
+
 export interface VenueSpaceSummary {
   id: string;
   space_name: string;
@@ -347,6 +407,96 @@ export async function searchVenues(): Promise<PaginatedResponse<Venue>> {
   const res = await fetch(`${API_BASE_URL}/api/venues/`);
   if (!res.ok) throw new Error(`Venue search failed: ${res.status}`);
   return res.json();
+}
+
+/** A venue booking as the organiser or the venue's owner sees it. Money rules (free cancellation until 7 days
+ * before, the deposit kept after that, the balance deadline, automatic payout 48 hours after the event) are
+ * enforced by the server; this only displays them. */
+export interface EventBookingItem {
+  id: string;
+  venue_space: string;
+  venue_id: string;
+  space_name: string;
+  event_type: string;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  guest_count: number;
+  status: "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED";
+  total_cost_xaf: string;
+  deposit_amount_xaf: string;
+  balance_amount_xaf: string;
+  deposit_paid: boolean;
+  balance_paid: boolean;
+  is_organiser: boolean;
+  is_owner: boolean;
+  organiser_name: string;
+  owner_payout_xaf: string | null;
+  payment_held: boolean;
+  payout_due_at: string | null;
+  balance_due_at: string | null;
+  cancellation: { free: boolean; free_until: string | null; fee_xaf: string; refund_xaf: string } | null;
+}
+
+export type EventBookingActionName = "cancel" | "confirm-event" | "dispute" | "complete";
+
+async function eventBookingJson<T>(res: Response, fallback: string): Promise<T> {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : fallback));
+  }
+  return data as T;
+}
+
+/** Every venue booking the signed-in user made (role "organiser") or received at their venues (role "owner"). */
+export async function listEventBookings(role: "organiser" | "owner"): Promise<EventBookingItem[]> {
+  const rows: EventBookingItem[] = [];
+  let url: string | null = `${API_BASE_URL}/api/event-bookings/`;
+  for (let page = 0; url && page < 50; page += 1) {
+    const res: Response = await fetch(url, { headers: await authHeaders() });
+    const data = await eventBookingJson<PaginatedResponse<EventBookingItem>>(res, "Could not load your venue bookings");
+    rows.push(...data.results);
+    url = data.next ?? null;
+  }
+  return rows.filter((b) => (role === "organiser" ? b.is_organiser : b.is_owner && !b.is_organiser));
+}
+
+export async function getEventBooking(id: string): Promise<EventBookingItem> {
+  const res = await fetch(`${API_BASE_URL}/api/event-bookings/${id}/`, { headers: await authHeaders() });
+  return eventBookingJson<EventBookingItem>(res, "Could not check your venue booking");
+}
+
+export async function createEventBooking(payload: {
+  venue_space: string; event_type: string; event_date: string; start_time: string; end_time: string; guest_count: number;
+}): Promise<EventBookingItem> {
+  const res = await fetch(`${API_BASE_URL}/api/event-bookings/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  return eventBookingJson<EventBookingItem>(res, "Could not book this venue");
+}
+
+/** Starts the Mobile Money payment. `confirmed` is true when the money is already held (sandbox); otherwise the
+ * provider confirms it after the payer approves on their phone, so the caller checks the booking until it is. */
+export async function payEventBooking(id: string, part: "deposit" | "balance", phoneNumber: string): Promise<{ confirmed: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/event-bookings/${id}/pay-${part}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ phone_number: phoneNumber }),
+  });
+  await eventBookingJson<EventBookingItem>(res, "The payment could not be started");
+  return { confirmed: res.status === 200 };
+}
+
+export async function eventBookingAction(id: string, action: EventBookingActionName, reason?: string): Promise<EventBookingItem> {
+  const res = await fetch(`${API_BASE_URL}/api/event-bookings/${id}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+  });
+  return eventBookingJson<EventBookingItem>(res, "That action could not be completed");
 }
 
 export interface HostelUnitSummary {
@@ -415,6 +565,14 @@ export async function listWantedListings(): Promise<PaginatedResponse<WantedList
 // ---------------------------------------------------------------------------
 // Notifications inbox — mirrors the web app's real notifications API.
 // ---------------------------------------------------------------------------
+/** What a notification is about, so a tap can open it: `null` when there is nothing to open. */
+export interface NotificationTarget {
+  kind: string;
+  id?: string | number;
+  role?: string;
+  category?: string;
+}
+
 export interface AppNotification {
   id: string;
   notification_type: string;
@@ -424,6 +582,7 @@ export interface AppNotification {
   delivered: boolean;
   read_at: string | null;
   created_at: string;
+  target?: NotificationTarget | null;
 }
 
 export async function listMyNotifications(): Promise<PaginatedResponse<AppNotification>> {
@@ -650,7 +809,7 @@ export class CreatePostError extends Error {
   }
 }
 
-export async function createPost(payload: { caption: string; tags?: string[]; linked_listing_id?: string; media_urls?: string[] }) {
+export async function createPost(payload: { caption: string; post_type?: "REEL"; tags?: string[]; linked_listing_id?: string; media_urls?: string[] }) {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}/api/posts/`, {
@@ -732,6 +891,88 @@ export async function addPostComment(postId: string, text: string): Promise<Post
 export async function deletePostComment(commentId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/comments/${commentId}/`, { method: "DELETE", headers: await authHeaders() });
   if (!res.ok) throw new Error("Could not delete comment");
+}
+
+export async function reportComment(commentId: string, reason: PostReportReason = "HARASSMENT"): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ target_kind: "comment", target_id: String(commentId), reason }),
+  });
+  if (!res.ok) throw new Error("Could not file report");
+}
+
+// ---------------------------------------------------------------------------
+// Videos — the full-screen, TikTok-style feed (the same /api/posts/reels/ API the web app uses).
+// ---------------------------------------------------------------------------
+export interface ReelListingPreview {
+  id: string;
+  listing_type: string;
+  property_type: string;
+  price_xaf: string;
+  quarter: string;
+  cover_url: string | null;
+  is_available: boolean;
+}
+
+export interface ReelPost extends SocialPost {
+  author_username: string;
+  author_avatar: string | null;
+  is_following_author: boolean;
+  is_saved: boolean;
+  share_count: number;
+  view_count: number;
+  listing_preview: ReelListingPreview | null;
+}
+
+export type ReelScope = "for_you" | "following" | "trending" | "saved";
+
+export async function listReels(scope: ReelScope, page = 1, filters: { q?: string; tag?: string } = {}): Promise<PaginatedResponse<ReelPost>> {
+  const params = new URLSearchParams({ scope });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.tag) params.set("tag", filters.tag);
+  if (page > 1) params.set("page", String(page));
+  const url = `${API_BASE_URL}/api/posts/reels/?${params.toString()}`;
+  const headers = await authHeaders();
+  let res = await fetch(url, { headers });
+  // A dead session must not take down a public feed: retry as an anonymous visitor.
+  if (res.status === 401 && headers.Authorization) res = await fetch(url);
+  if (!res.ok) throw new Error("Could not load videos");
+  const data = await res.json();
+  return { count: data.count ?? 0, next: data.next ?? null, results: data.results ?? [] };
+}
+
+export async function recordReelView(postId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/api/posts/${postId}/view/`, { method: "POST", headers: await authHeaders() }).catch(() => undefined);
+}
+
+export async function toggleSaveReel(postId: string): Promise<{ saved: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/save/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not save video");
+  return res.json();
+}
+
+export async function recordReelShare(postId: string, channel: "WHATSAPP" | "IN_APP" = "IN_APP"): Promise<{ share_count: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/posts/${postId}/share/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ channel }),
+  });
+  if (!res.ok) throw new Error("Could not record share");
+  return res.json();
+}
+
+export interface FollowStatus {
+  is_following: boolean;
+  follower_count: number;
+  following_count: number;
+}
+
+export async function toggleFollow(userId: string): Promise<FollowStatus> {
+  const res = await fetch(`${API_BASE_URL}/api/users/${userId}/follow/`, { method: "POST", headers: await authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not update follow status");
+  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -944,6 +1185,16 @@ interface BaseMarketplaceListing {
   quarter: string | null;
   quarter_name: string | null;
   media: MarketplaceMediaItem[];
+  allow_offers: boolean;
+  is_boosted: boolean;
+  boosted_until: string | null;
+  // Flash sales exist for goods only, but every category now carries the same fields.
+  sale_price_xaf?: string | null;
+  sale_starts_at?: string | null;
+  sale_ends_at?: string | null;
+  on_sale?: boolean;
+  current_price_xaf?: string;
+  seller_on_vacation?: boolean;
 }
 
 export interface WarehouseListing extends BaseMarketplaceListing { size_sqm: string }
@@ -956,16 +1207,62 @@ export interface CarListing extends BaseMarketplaceListing { vehicle_spec: Vehic
 
 const MARKETPLACE_ENDPOINTS = { warehouses: "warehouses", stores: "stores", businesses: "businesses", cars: "cars" } as const;
 export type MarketplaceCategory = keyof typeof MARKETPLACE_ENDPOINTS;
+/** Goods (new and used items) can be browsed, bought and posted in the app. */
+export type BrowsableCategory = MarketplaceCategory | "goods";
+const BROWSE_ENDPOINTS: Record<BrowsableCategory, string> = { ...MARKETPLACE_ENDPOINTS, goods: "goods" };
 
-export async function listMarketplaceListings<T>(category: MarketplaceCategory, filters?: Record<string, string>): Promise<PaginatedResponse<T>> {
+/** One purchasable version of a goods listing ("Red / M"), with its own stock and final unit price. */
+export interface GoodsVariant {
+  id: string;
+  label: string;
+  options: Record<string, string>;
+  sku: string;
+  price_xaf: string;
+  price_delta_xaf: string;
+  quantity: number;
+  available: boolean;
+  photo_url: string | null;
+  is_active: boolean;
+}
+
+export interface GoodsListing extends BaseMarketplaceListing {
+  /** A display-only "was" price, always above price_xaf. */
+  compare_at_price_xaf: string | null;
+  has_variants: boolean;
+  /** The lowest price among versions in stock. */
+  price_from_xaf: string | null;
+  variants: GoodsVariant[];
+  item_category: string;
+  condition: string;
+  quantity: number;
+  pickup_available: boolean;
+  seller_delivery: boolean;
+  seller_delivery_fee_xaf: string | null;
+  seller_delivery_areas: string;
+  courier_shipping: boolean;
+  courier_fee_xaf: string | null;
+  courier_note: string;
+}
+
+export async function listMarketplaceListings<T>(category: BrowsableCategory, filters?: Record<string, string>): Promise<PaginatedResponse<T>> {
   const query = filters && Object.keys(filters).length > 0 ? `?${new URLSearchParams(filters).toString()}` : "";
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${query}`);
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${query}`);
   if (!res.ok) throw new Error(`${category} fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function getMarketplaceListing<T>(category: MarketplaceCategory, id: string): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, { headers: await authHeaders() });
+/** One row of the cross-category feed: the listing as its category serialises it, plus which category it is. */
+export type MarketplaceFeedListing = BaseMarketplaceListing & Partial<GoodsListing> & { category: BrowsableCategory };
+
+/** Every category in one list: `on_sale=1&ordering=ending_soon` for flash deals, `lister_id` for one shop. */
+export async function listMarketplaceFeed(filters: Record<string, string>): Promise<PaginatedResponse<MarketplaceFeedListing>> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-feed/?${new URLSearchParams(filters).toString()}`);
+  if (!res.ok) throw new Error(`Could not load the marketplace: ${res.status}`);
+  return res.json();
+}
+
+export async function getMarketplaceListing<T>(category: BrowsableCategory, id: string): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${id}/`, { headers: await authHeaders() });
   if (!res.ok) throw new Error(`Not found: ${res.status}`);
   return res.json();
 }
@@ -990,14 +1287,33 @@ export interface MyMarketplaceListing {
   includes_inventory?: boolean;
   annual_revenue_xaf?: string | null;
   vehicle_spec?: VehicleSpec;
+  quantity?: number;
+  compare_at_price_xaf?: string | null;
+  has_variants?: boolean;
+  expires_at?: string;
+  is_expired?: boolean;
+  is_boosted?: boolean;
+  boosted_until?: string | null;
+  sale_price_xaf?: string | null;
+  sale_starts_at?: string | null;
+  sale_ends_at?: string | null;
+  on_sale?: boolean;
+  stats?: MarketplaceListingStats;
+}
+
+/** Views, saves and chats on one of the caller's own listings. */
+export interface MarketplaceListingStats {
+  views: number;
+  saves: number;
+  chats: number;
 }
 
 // Everything the caller posted in one category, including sold or paused listings the public list hides.
 // The API pages at 20, so keep fetching until every listing is in.
-export async function listMyMarketplaceListings(category: MarketplaceCategory): Promise<MyMarketplaceListing[]> {
+export async function listMyMarketplaceListings(category: BrowsableCategory): Promise<MyMarketplaceListing[]> {
   const all: MyMarketplaceListing[] = [];
   for (let page = 1; page <= 10; page += 1) {
-    const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/mine/?page=${page}`, { headers: await authHeaders() });
+    const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/mine/?page=${page}`, { headers: await authHeaders() });
     if (!res.ok) throw new Error(`Could not load your ${category}`);
     const data: PaginatedResponse<MyMarketplaceListing> = await res.json();
     all.push(...data.results);
@@ -1012,8 +1328,8 @@ async function marketplaceMutationError(res: Response, fallback: string): Promis
   return new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : fallback));
 }
 
-export async function updateMarketplaceListing(category: MarketplaceCategory, id: string, payload: Record<string, unknown>) {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, {
+export async function updateMarketplaceListing(category: BrowsableCategory, id: string, payload: Record<string, unknown>) {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${id}/`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(payload),
@@ -1022,8 +1338,8 @@ export async function updateMarketplaceListing(category: MarketplaceCategory, id
   return res.json();
 }
 
-export async function setMarketplaceListingStatus(category: MarketplaceCategory, id: string, status: MarketplaceAvailability) {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/set-status/`, {
+export async function setMarketplaceListingStatus(category: BrowsableCategory, id: string, status: MarketplaceAvailability) {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${id}/set-status/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ status }),
@@ -1032,16 +1348,172 @@ export async function setMarketplaceListingStatus(category: MarketplaceCategory,
   return res.json();
 }
 
-export async function deleteMarketplaceListing(category: MarketplaceCategory, id: string) {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/`, { method: "DELETE", headers: await authHeaders() });
+export async function deleteMarketplaceListing(category: BrowsableCategory, id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${id}/`, { method: "DELETE", headers: await authHeaders() });
   if (!res.ok) throw await marketplaceMutationError(res, "Could not delete the listing");
+}
+
+/** One row of the set sent to replace a goods listing's versions: no id means a new version. */
+export interface GoodsVariantInput {
+  id?: string;
+  options: Record<string, string>;
+  price_delta_xaf: number;
+  quantity: number;
+  sku?: string;
+  photo_url?: string;
+  is_active?: boolean;
+}
+
+export interface GoodsVariantServerError {
+  index?: number;
+  field: string;
+  message: string;
+}
+
+/** The versions of one of the caller's goods listings, including hidden ones. */
+export async function getGoodsVariants(listingId: string): Promise<GoodsVariant[]> {
+  const res = await fetch(`${API_BASE_URL}/api/goods/${listingId}/variants/`, { headers: await authHeaders() });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not load the options");
+  return (await res.json()).variants;
+}
+
+/** Replaces the whole set; a rejected row comes back on the thrown error's `errors` (see variantServerErrors). */
+export async function saveGoodsVariants(listingId: string, variants: GoodsVariantInput[]): Promise<{ variants: GoodsVariant[]; quantity: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/goods/${listingId}/variants/`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ variants }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw Object.assign(new Error(typeof data.detail === "string" ? data.detail : "Could not save the options"), {
+      errors: Array.isArray(data.errors) ? (data.errors as GoodsVariantServerError[]) : [],
+    });
+  }
+  return data;
+}
+
+/** The per-row problems the server reported when saving options (empty for any other error). */
+export function variantServerErrors(error: unknown): GoodsVariantServerError[] {
+  const errors = (error as { errors?: unknown } | null)?.errors;
+  return Array.isArray(errors) ? (errors as GoodsVariantServerError[]) : [];
+}
+
+/** Puts a listing back on the marketplace for another listing lifetime ("Still available"). */
+export async function renewMarketplaceListing(category: BrowsableCategory, id: string): Promise<{ id: string; expires_at: string; is_expired: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${id}/renew/`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not renew the listing");
+  return res.json();
+}
+
+export type BoostUnit = "DAILY" | "MONTHLY";
+export type BoostPayWith = "WALLET" | "MOMO";
+
+export interface BoostOption {
+  duration_unit: BoostUnit;
+  unit_price_xaf: string;
+  max_quantity: number;
+}
+
+export async function getMarketplaceBoostOptions(): Promise<BoostOption[]> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-boost-options/`);
+  if (!res.ok) throw new Error("Could not load the boost prices");
+  return (await res.json()).options;
+}
+
+export async function boostMarketplaceListing(
+  category: BrowsableCategory, id: string,
+  purchase: { duration_unit: BoostUnit; quantity: number; pay_with: BoostPayWith; phone_number: string },
+): Promise<{ id: string; boosted_until: string; price_xaf: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${id}/boost/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(purchase),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not boost the listing");
+  return res.json();
+}
+
+export interface MarketplaceSellerSummary {
+  id: string;
+  name: string;
+  member_since: string;
+  id_verified: boolean;
+  rating_avg: number | null;
+  rating_count: number;
+  items_sold: number;
+  active_listings: number;
+  reply_rate_pct: number | null;
+  reply_time_hours: number | null;
+  last_seen_at: string | null;
+}
+
+export async function getMarketplaceSeller(userId: string): Promise<MarketplaceSellerSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-sellers/${userId}/`);
+  if (!res.ok) throw new Error("Could not load the seller");
+  return res.json();
+}
+
+export type MarketplaceOfferStatus = "PENDING" | "COUNTERED" | "ACCEPTED" | "PAID" | "DECLINED" | "WITHDRAWN" | "EXPIRED";
+
+export interface MarketplaceOffer {
+  id: string;
+  listing_id: string;
+  listing_title: string;
+  listing_price_xaf: string;
+  price_basis: string;
+  category: BrowsableCategory | "";
+  photo_url: string | null;
+  buyer: string;
+  buyer_name: string;
+  seller: string;
+  seller_name: string;
+  amount_xaf: string;
+  counter_amount_xaf: string | null;
+  agreed_amount_xaf: string | null;
+  message: string;
+  status: MarketplaceOfferStatus;
+  created_at: string;
+  responded_at: string | null;
+  accepted_at: string | null;
+  pay_by: string | null;
+  respond_by: string | null;
+}
+
+export async function makeMarketplaceOffer(category: BrowsableCategory, listingId: string, amountXaf: number, message?: string): Promise<MarketplaceOffer> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-offers/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ category, listing_id: listingId, amount_xaf: amountXaf, ...(message ? { message } : {}) }),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not send your offer");
+  return res.json();
+}
+
+export async function listMyMarketplaceOffers(role: "buying" | "selling", listingId?: string): Promise<PaginatedResponse<MarketplaceOffer>> {
+  const query = new URLSearchParams({ role, ...(listingId ? { listing_id: listingId } : {}) });
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-offers/?${query.toString()}`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your offers");
+  return res.json();
+}
+
+export type MarketplaceOfferActionName = "accept" | "decline" | "counter" | "withdraw";
+
+export async function marketplaceOfferAction(offerId: string, action: MarketplaceOfferActionName, amountXaf?: number): Promise<MarketplaceOffer> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-offers/${offerId}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(action === "counter" ? { amount_xaf: amountXaf } : {}),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "That action could not be completed");
+  return res.json();
 }
 
 export interface MarketplaceOrderItem {
   id: string;
   listing_id: string;
   listing_title: string;
-  category: MarketplaceCategory | "";
+  category: BrowsableCategory | "";
   buyer: string;
   buyer_name: string;
   seller: string;
@@ -1060,6 +1532,90 @@ export interface MarketplaceOrderItem {
   total_xaf: string;
   rental_starts_on: string | null;
   rental_ends_on: string | null;
+  can_review: boolean;
+  my_review: { score: number; text: string; created_at: string } | null;
+  quantity: number;
+  delivery_method: MarketplaceDeliveryMethod;
+  delivery_fee_xaf: string;
+  delivery_address: string;
+  price_breakdown: Record<string, unknown> | null;
+  courier_name: string;
+  tracking_number: string;
+  shipment_status: ShipmentStatus;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  delivery_proof_url: string;
+  delivery_note: string;
+  shipment_events: ShipmentEvent[];
+  is_tracked: boolean;
+  receipt_available: boolean;
+  return_request: ReturnRequest | null;
+  can_request_return: boolean;
+  discount_xaf?: string;
+  coupon_code?: string;
+  checkout?: string | null;
+  /** "Red / M" for an item with options, otherwise an empty string. */
+  variant_label: string;
+}
+
+export type MarketplaceDeliveryMethod = "PICKUP" | "SELLER" | "COURIER" | "";
+export type ShipmentStatus = "" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED";
+export type ShipmentStep = Exclude<ShipmentStatus, "">;
+
+export interface ShipmentEvent {
+  status: ShipmentStep | "REPLACEMENT";
+  note: string;
+  at: string;
+}
+
+export type ReturnKind = "REFUND" | "PARTIAL_REFUND" | "REPLACEMENT";
+export type ReturnReason = "NOT_AS_DESCRIBED" | "DAMAGED" | "WRONG_ITEM" | "MISSING_PARTS" | "NOT_WORKING" | "OTHER";
+export type ReturnStatus = "REQUESTED" | "ACCEPTED" | "REJECTED" | "ESCALATED" | "WITHDRAWN" | "CLOSED";
+
+export interface ReturnRequest {
+  id: string;
+  kind: ReturnKind;
+  reason: ReturnReason;
+  description: string;
+  evidence_urls: string[];
+  requested_amount_xaf: string | null;
+  status: ReturnStatus;
+  seller_note: string;
+  created_at: string;
+  responded_at: string | null;
+  respond_by: string | null;
+  buyer_decide_by: string | null;
+}
+
+export interface MarketplaceReview {
+  id: string | number;
+  author_name: string;
+  score: number;
+  text: string;
+  created_at: string;
+  verified_purchase: boolean;
+}
+
+export interface MarketplaceReviewSummary {
+  average: number | null;
+  count: number;
+  distribution: Record<string, number>;
+  results: MarketplaceReview[];
+}
+
+export async function getMarketplaceListingReviews(category: BrowsableCategory, id: string): Promise<MarketplaceReviewSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${id}/reviews/`);
+  if (!res.ok) throw new Error("Could not load the reviews");
+  return res.json();
+}
+
+export async function reviewMarketplaceOrder(orderId: string, score: number, text?: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/review/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ score, ...(text ? { text } : {}) }),
+  });
+  return marketplaceOrderResponse(res, "Could not publish your review");
 }
 
 async function marketplaceOrderResponse(res: Response, fallback: string): Promise<MarketplaceOrderItem> {
@@ -1071,13 +1627,256 @@ async function marketplaceOrderResponse(res: Response, fallback: string): Promis
   return data;
 }
 
-export async function placeMarketplaceOrder(category: MarketplaceCategory, listingId: string, phoneNumber: string) {
+export async function placeMarketplaceOrder(
+  category: BrowsableCategory, listingId: string, phoneNumber: string,
+  goods?: { quantity: number; delivery_method?: "PICKUP" | "SELLER" | "COURIER"; delivery_address?: string; variant_id?: string },
+  offerId?: string,
+  options?: { couponCode?: string },
+) {
   const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify({ category, listing_id: listingId, phone_number: phoneNumber }),
+    body: JSON.stringify({
+      category, listing_id: listingId, phone_number: phoneNumber, ...goods,
+      ...(offerId ? { offer_id: offerId } : {}), ...(options?.couponCode ? { coupon_code: options.couponCode } : {}),
+    }),
   });
   return marketplaceOrderResponse(res, "Could not place the order");
+}
+
+// ---------------------------------------------------------------------------
+// Cart: goods from one seller are paid with ONE Mobile Money payment and then split into one order per item.
+// ---------------------------------------------------------------------------
+export interface CartItem {
+  listing_id: string;
+  /** Set for items with options: the same listing can appear once per version. */
+  variant_id: string | null;
+  variant_label: string;
+  title: string;
+  photo_url: string | null;
+  unit_price_xaf: string;
+  list_price_xaf: string;
+  compare_at_price_xaf?: string | null;
+  on_sale: boolean;
+  sale_ends_at: string | null;
+  quantity: number;
+  stock: number;
+  available: boolean;
+  reason: string;
+  line_total_xaf: string;
+}
+
+export interface CartDeliveryOption {
+  method: "PICKUP" | "SELLER" | "COURIER";
+  fee_xaf: string;
+}
+
+export interface CartGroup {
+  seller_id: string;
+  seller_name: string;
+  subtotal_xaf: string;
+  can_checkout: boolean;
+  delivery_options: CartDeliveryOption[];
+  items: CartItem[];
+}
+
+export interface MarketplaceCart {
+  item_count: number;
+  groups: CartGroup[];
+}
+
+export interface CartQuoteRequest {
+  seller_id: string;
+  delivery_method: CartDeliveryOption["method"];
+  delivery_address?: string;
+  coupon_code?: string;
+}
+
+export interface CartQuote {
+  subtotal_xaf: string;
+  discount_xaf: string;
+  delivery_fee_xaf: string;
+  total_xaf: string;
+  delivery_method: CartDeliveryOption["method"];
+  coupon_error: string | null;
+}
+
+export interface CartCheckoutResult {
+  checkout_id: string;
+  total_xaf: string;
+  orders: MarketplaceOrderItem[];
+}
+
+async function cartRequest<T>(path: string, method: "GET" | "POST" | "DELETE", fallback: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-cart/${path}`, {
+    method,
+    headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(await authHeaders()) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, fallback);
+  return res.json();
+}
+
+export const getMarketplaceCart = () => cartRequest<MarketplaceCart>("", "GET", "Could not load your cart");
+export const setCartItem = (listingId: string, quantity: number, variantId?: string | null) =>
+  cartRequest<MarketplaceCart>("items/", "POST", "Could not update your cart", {
+    listing_id: listingId, quantity, ...(variantId ? { variant_id: variantId } : {}),
+  });
+export const removeCartItem = (listingId: string, variantId?: string | null) =>
+  cartRequest<MarketplaceCart>(
+    `items/${listingId}/${variantId ? `?variant_id=${encodeURIComponent(variantId)}` : ""}`, "DELETE", "Could not remove the item",
+  );
+export const quoteMarketplaceCart = (request: CartQuoteRequest) =>
+  cartRequest<CartQuote>("quote/", "POST", "Could not work out the total", request);
+export const checkoutMarketplaceCart = (request: CartQuoteRequest & { phone_number: string }) =>
+  cartRequest<CartCheckoutResult>("checkout/", "POST", "Could not start the payment", request);
+
+// ---------------------------------------------------------------------------
+// Coupons
+// ---------------------------------------------------------------------------
+export type CouponKind = "PERCENT" | "FIXED";
+
+export interface MarketplaceCoupon {
+  id: string;
+  code: string;
+  kind: CouponKind;
+  value: string | number;
+  min_order_xaf: string | number;
+  max_uses: number | null;
+  uses: number;
+  starts_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+}
+
+export interface CouponCheck {
+  valid: boolean;
+  message: string;
+  discount_xaf: string;
+  code: string;
+}
+
+export async function checkMarketplaceCoupon(listingId: string, quantity: number, code: string): Promise<CouponCheck> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupon-check/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ listing_id: listingId, quantity, code }),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not check the coupon");
+  return res.json();
+}
+
+export async function listMyCoupons(): Promise<MarketplaceCoupon[]> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your coupons");
+  const data = await res.json();
+  return Array.isArray(data) ? data : data.results;
+}
+
+export async function createMyCoupon(payload: Record<string, unknown>): Promise<MarketplaceCoupon> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not create the coupon");
+  return res.json();
+}
+
+export async function updateMyCoupon(id: string, payload: Record<string, unknown>): Promise<MarketplaceCoupon> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/${id}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not update the coupon");
+  return res.json();
+}
+
+export async function deleteMyCoupon(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/${id}/`, { method: "DELETE", headers: await authHeaders() });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not delete the coupon");
+}
+
+// ---------------------------------------------------------------------------
+// Shop storefront
+// ---------------------------------------------------------------------------
+export interface MarketplaceShopSettings {
+  name: string;
+  tagline: string;
+  description: string;
+  logo_url: string;
+  banner_url: string;
+  shipping_policy: string;
+  return_policy: string;
+  announcement: string;
+  on_vacation: boolean;
+  vacation_message: string;
+  vacation_until: string | null;
+}
+
+export interface MarketplaceShop extends MarketplaceShopSettings {
+  user_id: string;
+  seller: MarketplaceSellerSummary;
+  listing_count: number;
+  deal_count: number;
+  coupon_available: boolean;
+  follower_count: number;
+  is_following: boolean;
+  is_owner: boolean;
+}
+
+export async function getMarketplaceShop(userId: string): Promise<MarketplaceShop> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-shops/${userId}/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(res.status === 404 ? "This shop could not be found." : "Could not load the shop.");
+  return res.json();
+}
+
+export async function getMyShopSettings(): Promise<MarketplaceShopSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-shop/me/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your shop settings");
+  return res.json();
+}
+
+export async function saveMyShopSettings(payload: Record<string, unknown>): Promise<MarketplaceShopSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-shop/me/`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await marketplaceMutationError(res, "Could not save your shop");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Search assist: spelling suggestion, trending searches and search by photo. Synonyms and spelling are applied
+// by the server to the normal q search, so these only drive the UI around it.
+// ---------------------------------------------------------------------------
+export interface SearchAssist {
+  query: string;
+  did_you_mean: string | null;
+  synonyms: string[];
+}
+
+export async function getMarketplaceSearchAssist(q: string): Promise<SearchAssist> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-search/assist/?${new URLSearchParams({ q }).toString()}`);
+  if (!res.ok) throw new Error("Search suggestions are unavailable");
+  return res.json();
+}
+
+export async function getTrendingMarketplaceSearches(days = 7): Promise<{ term: string; count: number }[]> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-search/trending/?days=${days}`);
+  if (!res.ok) throw new Error("Trending searches are unavailable");
+  return (await res.json()).results;
+}
+
+export async function searchMarketplaceByImage(uri: string, mimeType: string): Promise<{ keywords: string[]; q: string }> {
+  const formData = new FormData();
+  formData.append("image", { uri, name: uri.split("/").pop() || "search.jpg", type: mimeType } as unknown as Blob);
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-search/image/`, { method: "POST", body: formData });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(imageSearchError(res.status, typeof data.detail === "string" ? data.detail : undefined));
+  return data;
 }
 
 export async function listMyMarketplaceOrders(role: "buying" | "selling"): Promise<PaginatedResponse<MarketplaceOrderItem>> {
@@ -1097,8 +1896,115 @@ export async function marketplaceOrderAction(orderId: string, action: Marketplac
   return marketplaceOrderResponse(res, "That action could not be completed");
 }
 
-export async function createMarketplaceListing(category: MarketplaceCategory, payload: Record<string, unknown>) {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/`, {
+export interface ShipmentUpdate {
+  status: ShipmentStep;
+  courier_name?: string;
+  tracking_number?: string;
+  note?: string;
+  proof_url?: string;
+}
+
+export async function updateMarketplaceShipment(orderId: string, update: ShipmentUpdate) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/shipment/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(update),
+  });
+  return marketplaceOrderResponse(res, "Could not update the delivery");
+}
+
+export interface ReturnRequestPayload {
+  kind: ReturnKind;
+  reason: ReturnReason;
+  description: string;
+  evidence_urls?: string[];
+  requested_amount_xaf?: number;
+}
+
+async function postReturnAction(orderId: string, action: string, body: object, fallback: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(body),
+  });
+  return marketplaceOrderResponse(res, fallback);
+}
+
+export const requestMarketplaceReturn = (orderId: string, payload: ReturnRequestPayload) =>
+  postReturnAction(orderId, "return-request", payload, "Could not send your return request");
+export const respondMarketplaceReturn = (orderId: string, decision: "ACCEPT" | "REJECT", note: string) =>
+  postReturnAction(orderId, "return-respond", { decision, note }, "Could not send your answer");
+export const withdrawMarketplaceReturn = (orderId: string) =>
+  postReturnAction(orderId, "return-withdraw", {}, "Could not withdraw the request");
+export const escalateMarketplaceReturn = (orderId: string) =>
+  postReturnAction(orderId, "return-escalate", {}, "Could not send the request to support");
+
+export type SellerPeriod = "7d" | "30d" | "90d" | "365d" | "all";
+
+export interface SellerDashboardSummary {
+  orders_total: number;
+  orders_completed: number;
+  orders_cancelled: number;
+  orders_open: number;
+  items_sold: number;
+  gross_sales_xaf: string;
+  platform_fees_xaf: string;
+  net_earnings_xaf: string;
+  refunded_xaf: string;
+  held_in_escrow_xaf: string;
+  average_order_xaf: string;
+  wallet_balance_xaf: string;
+  listing_views: number;
+  conversion_pct: number | null;
+}
+
+export interface SellerSeriesPoint { date: string; orders: number; gross_xaf: string; net_xaf: string }
+export interface SellerCategoryRow { category: BrowsableCategory; orders: number; gross_xaf: string; net_xaf: string }
+export interface SellerTopListing { listing_id: string; title: string; category: BrowsableCategory; orders: number; gross_xaf: string }
+
+export interface SellerDashboard {
+  period: SellerPeriod;
+  since: string | null;
+  summary: SellerDashboardSummary;
+  series: { bucket: "day" | "month"; points: SellerSeriesPoint[] };
+  by_category: SellerCategoryRow[];
+  top_listings: SellerTopListing[];
+  returns: { open: number };
+}
+
+export interface SellerPayoutRow {
+  order_id: string;
+  listing_id: string;
+  listing_title: string;
+  buyer_name: string;
+  quantity: number;
+  paid_at: string;
+  gross_xaf: string;
+  fee_xaf: string;
+  refunded_xaf: string;
+  net_xaf: string;
+}
+
+export async function getSellerDashboard(period: SellerPeriod): Promise<SellerDashboard> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-seller/dashboard/?period=${period}`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your sales dashboard");
+  return res.json();
+}
+
+export async function listSellerPayouts(period: SellerPeriod, page = 1): Promise<PaginatedResponse<SellerPayoutRow>> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-seller/payouts/?period=${period}&page=${page}`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your payouts");
+  return res.json();
+}
+
+export async function fetchSellerSalesCsv(period: SellerPeriod): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-seller/sales.csv?period=${period}`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not export your sales");
+  return res.text();
+}
+
+export async function createMarketplaceListing(category: BrowsableCategory, payload: Record<string, unknown>) {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(payload),
@@ -1108,8 +2014,8 @@ export async function createMarketplaceListing(category: MarketplaceCategory, pa
   return data;
 }
 
-export async function addMarketplaceMedia(category: MarketplaceCategory, listingId: string, url: string, mediaType: "PHOTO" | "VIDEO") {
-  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${listingId}/add-media/`, {
+export async function addMarketplaceMedia(category: BrowsableCategory, listingId: string, url: string, mediaType: "PHOTO" | "VIDEO") {
+  const res = await fetch(`${API_BASE_URL}/api/${BROWSE_ENDPOINTS[category]}/${listingId}/add-media/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ url, media_type: mediaType }),
@@ -1134,6 +2040,61 @@ export interface RideBookingItem {
   transport_type: string;
   has_luggage: boolean;
   cargo_description: string;
+  distance_km?: string | null;
+  requested_at?: string;
+  cancellation_reason?: RideCancelReason | "";
+  cancellation_note?: string;
+  release_reason?: RideReleaseReason | "";
+  release_note?: string;
+}
+
+export const RIDE_CANCEL_REASONS = [
+  "CHANGED_PLANS", "WAITED_TOO_LONG", "DRIVER_ASKED_TO_CANCEL", "DRIVER_NOT_MOVING", "WRONG_PICKUP", "FOUND_OTHER_TRANSPORT", "OTHER",
+] as const;
+export const RIDE_RELEASE_REASONS = [
+  "RIDER_UNREACHABLE", "PICKUP_TOO_FAR", "VEHICLE_PROBLEM", "LOAD_DOES_NOT_FIT", "SAFETY_CONCERN", "OTHER",
+] as const;
+// NO_DRIVER_FOUND is set by the server when a request expires; riders can't pick it.
+export type RideCancelReason = (typeof RIDE_CANCEL_REASONS)[number] | "NO_DRIVER_FOUND";
+export type RideReleaseReason = (typeof RIDE_RELEASE_REASONS)[number];
+// Display labels for these codes live in src/i18n/messages.ts (cancelReason.*, releaseReason.*, issue.*).
+
+export const RIDE_ISSUE_CATEGORIES = [
+  "FARE", "ROUTE", "DRIVER_BEHAVIOUR", "RIDER_BEHAVIOUR", "VEHICLE", "LOST_ITEM", "DAMAGE", "OTHER",
+] as const;
+export type RideIssueCategory = (typeof RIDE_ISSUE_CATEGORIES)[number];
+// Mirrors RIDE_ISSUE_WINDOW_DAYS on the server.
+export const RIDE_ISSUE_WINDOW_DAYS = 14;
+
+/** Whether this person can report a problem on this trip: a driver has taken it, they're on it, and it's recent. */
+export function canReportRideIssue(ride: RideBookingItem, userId: string | null, now = Date.now()): boolean {
+  if (!userId || ride.status === "REQUESTED") return false;
+  if (userId !== ride.rider && userId !== ride.driver) return false;
+  if (!ride.requested_at) return true;
+  return now - new Date(ride.requested_at).getTime() < RIDE_ISSUE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
+/** Sends a trip problem report to the Oaziland team, who reply by notification. */
+export async function reportRideIssue(rideId: string, payload: { category: RideIssueCategory; description: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/report-issue/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.description?.[0] || "Could not send your report");
+  return data;
+}
+
+/** Earnings from the rides a user DROVE. /api/rides/ also returns rides they booked as a rider, which aren't earnings. */
+export function driverEarnings(rides: RideBookingItem[], driverId: string | null) {
+  const driven = driverId ? rides.filter((r) => r.driver === driverId) : [];
+  const completed = driven.filter((r) => r.status === "COMPLETED");
+  return {
+    completedTrips: completed.length,
+    activeTrips: driven.filter((r) => r.status === "ACCEPTED" || r.status === "IN_PROGRESS").length,
+    grossXaf: completed.reduce((sum, r) => sum + Number(r.fare_estimate_xaf || 0), 0),
+  };
 }
 
 export async function listMyRides(): Promise<PaginatedResponse<RideBookingItem>> {
@@ -1143,7 +2104,8 @@ export async function listMyRides(): Promise<PaginatedResponse<RideBookingItem>>
 }
 
 export async function requestRide(payload: {
-  pickup_description: string; dropoff_description: string; distance_km: string;
+  pickup_description: string; dropoff_description: string;
+  pickup_latitude: number; pickup_longitude: number; dropoff_latitude: number; dropoff_longitude: number;
   ride_category?: string; transport_type?: string; has_luggage?: boolean; cargo_description?: string;
 }) {
   const res = await fetch(`${API_BASE_URL}/api/rides/`, {
@@ -1154,6 +2116,58 @@ export async function requestRide(payload: {
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "Could not request ride");
   return data;
+}
+
+export interface RidePoints {
+  pickup_latitude: number;
+  pickup_longitude: number;
+  dropoff_latitude: number;
+  dropoff_longitude: number;
+}
+
+export interface RideQuote {
+  distance_km: string;
+  duration_minutes: number;
+  polyline: string;
+  /** "estimate" = straight line ×1.3, used when Google's route service is unavailable. */
+  source: "google" | "estimate";
+  /** Fare in XAF per ride category, exactly as a booking would be charged. */
+  fares: Record<string, string>;
+}
+
+/** Road distance, driving time and the fare for every vehicle category between two points, before booking. */
+export async function quoteRide(points: RidePoints, signal?: AbortSignal): Promise<RideQuote> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/quote/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(points),
+    signal,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not work out the price");
+  return data;
+}
+
+export interface PlaceSuggestion {
+  id: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** Places in Cameroon matching the text (OpenStreetMap search, the same one the website uses). */
+export async function searchPlaces(query: string, language: string, signal?: AbortSignal): Promise<PlaceSuggestion[]> {
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=cm&limit=5&q=${encodeURIComponent(query)}`;
+  // OpenStreetMap's usage policy asks apps to identify themselves.
+  const res = await fetch(url, { signal, headers: { "Accept-Language": language, "User-Agent": "Oaziland mobile app (support@oaziland.com)" } });
+  if (!res.ok) return [];
+  const rows: { place_id: number; display_name: string; lat: string; lon: string }[] = await res.json();
+  return rows.map((row) => ({
+    id: String(row.place_id),
+    label: row.display_name.split(", ").slice(0, 3).join(", "),
+    latitude: Number(Number(row.lat).toFixed(6)),
+    longitude: Number(Number(row.lon).toFixed(6)),
+  }));
 }
 
 export async function acceptRide(rideId: string, vehicleId: number) {
@@ -1174,6 +2188,47 @@ export interface DriverProfileItem {
   id: number;
   license_number: string;
   is_verified: boolean;
+  is_online?: boolean;
+  last_seen_at?: string | null;
+}
+
+/** A verified driver reports their position and/or goes online or offline. */
+export async function setDriverLocation(payload: { latitude?: number; longitude?: number; is_online?: boolean }): Promise<DriverProfileItem> {
+  const res = await fetch(`${API_BASE_URL}/api/my-driver-profile/location/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not update your location");
+  return data;
+}
+
+export interface RideOfferItem {
+  ride: RideBookingItem & { pickup_distance_km: string | null };
+  expires_at: string;
+  seconds_left: number;
+}
+
+/** The ride automatic matching is offering this driver right now (or null). Checking also moves matching along on the server. */
+export async function getMyRideOffer(): Promise<{ offer: RideOfferItem | null; offer_seconds: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/my-offer/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not check for ride offers");
+  return res.json();
+}
+
+export async function declineRideOffer(rideId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/decline/`, { method: "POST", headers: await authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not decline the offer");
+  return data;
+}
+
+/** The driver's vehicles that can do this ride: cargo needs a van or truck, passengers the exact category asked for. */
+export function vehiclesForRide<V extends { vehicle_category: string }>(vehicles: V[], ride: { transport_type: string; ride_category: string }): V[] {
+  return vehicles.filter((v) =>
+    ride.transport_type === "CARGO" ? v.vehicle_category === "VAN" || v.vehicle_category === "TRUCK" : v.vehicle_category === ride.ride_category,
+  );
 }
 
 export async function getMyDriverProfile(): Promise<DriverProfileItem | null> {
@@ -1225,8 +2280,12 @@ export async function startRide(rideId: string) {
   return res.json();
 }
 
-export async function cancelRide(rideId: string) {
-  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/cancel/`, { method: "POST", headers: await authHeaders() });
+export async function cancelRide(rideId: string, reason?: { reason: RideCancelReason; note?: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/cancel/`, {
+    method: "POST",
+    headers: { ...(await authHeaders()), ...(reason ? { "Content-Type": "application/json" } : {}) },
+    body: reason ? JSON.stringify(reason) : undefined,
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "Could not cancel the ride");
   return data;
@@ -1299,8 +2358,12 @@ export async function raiseRideSos(
   return data;
 }
 
-export async function releaseRide(rideId: string) {
-  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/release/`, { method: "POST", headers: await authHeaders() });
+export async function releaseRide(rideId: string, reason?: { reason: RideReleaseReason; note?: string }) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/release/`, {
+    method: "POST",
+    headers: { ...(await authHeaders()), ...(reason ? { "Content-Type": "application/json" } : {}) },
+    body: reason ? JSON.stringify(reason) : undefined,
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "Could not release the ride");
   return data;
@@ -1860,4 +2923,108 @@ export async function submitContactMessage(payload: { name: string; email: strin
   });
   if (!res.ok) throw new Error("Contact submission failed");
   return res.json();
+}
+
+export interface WalletWithdrawal {
+  id: string;
+  amount_xaf: string;
+  fee_xaf: string;
+  status: string;
+  requested_at: string;
+  resolved_at: string | null;
+  phone_number: string;
+  provider: string;
+  rejection_reason: string;
+}
+
+export interface WalletDetail {
+  balance_xaf: string;
+  /** NONE | UNVERIFIED | PENDING | VERIFIED | REJECTED — only VERIFIED users can withdraw. */
+  kyc_status: string;
+  transactions: { id: string; transaction_type: string; amount_xaf: string; related_reference: string; created_at: string }[];
+  withdrawals: WalletWithdrawal[];
+}
+
+export type PayoutProvider = "MTN_MOMO" | "ORANGE_MONEY";
+
+export async function getMyWallet(): Promise<WalletDetail> {
+  const res = await fetch(`${API_BASE_URL}/api/wallet/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your wallet");
+  return res.json();
+}
+
+/** Asks for a Mobile Money payout; an admin reviews each request before it's paid. */
+export async function withdrawWallet(payload: { amount_xaf: number; phone_number: string; provider: PayoutProvider }) {
+  const res = await fetch(`${API_BASE_URL}/api/wallet/withdraw/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Withdrawal failed");
+  return data as { detail: string; withdrawal_id: string; amount_xaf: string; status: string; balance_xaf: string };
+}
+
+export type WithdrawalBlocker = "kycPending" | "kycRejected" | "kycMissing" | "noAmount" | "overBalance";
+
+/** Why a payout can't be requested yet (shown as the "wallet.block.*" message), or null when it can. */
+export function withdrawalBlocker(wallet: Pick<WalletDetail, "balance_xaf" | "kyc_status">, amount: number): WithdrawalBlocker | null {
+  if (wallet.kyc_status === "PENDING") return "kycPending";
+  if (wallet.kyc_status === "REJECTED") return "kycRejected";
+  if (wallet.kyc_status !== "VERIFIED") return "kycMissing";
+  if (!amount || amount <= 0) return "noAmount";
+  if (amount > Number(wallet.balance_xaf)) return "overBalance";
+  return null;
+}
+
+export interface KycProfile {
+  legal_full_name: string;
+  date_of_birth: string;
+  national_id_number: string;
+  id_document_front_image_url: string;
+  id_document_back_image_url: string;
+  selfie_image_url: string;
+  residential_address: string;
+  kyc_status: "PENDING" | "VERIFIED" | "REJECTED";
+  submitted_at: string;
+  reviewed_at: string | null;
+}
+
+export type KycSubmission = Omit<KycProfile, "kyc_status" | "submitted_at" | "reviewed_at">;
+
+/** The user's identity verification, or null when they haven't submitted one yet. */
+export async function getMyKycStatus(): Promise<KycProfile | null> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/kyc/`, { headers: await authHeaders() });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Could not load your verification status");
+  return res.json();
+}
+
+export async function submitKyc(payload: KycSubmission): Promise<KycProfile> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/kyc/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // DRF field errors come back as { field: ["message"] }; show the first one.
+    const firstFieldError = Object.values(data).find((v) => Array.isArray(v)) as string[] | undefined;
+    throw new Error(data.detail || firstFieldError?.[0] || "Could not submit your verification");
+  }
+  return data;
+}
+
+/** The fields still missing before a KYC submission can be sent, in the order the form asks for them
+ * (shown with the "kyc.missing.*" messages). */
+export function kycMissing(form: KycSubmission): (keyof KycSubmission)[] {
+  const missing: (keyof KycSubmission)[] = [];
+  if (!form.legal_full_name.trim()) missing.push("legal_full_name");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date_of_birth) || Number.isNaN(Date.parse(form.date_of_birth))) missing.push("date_of_birth");
+  if (!form.national_id_number.trim()) missing.push("national_id_number");
+  if (!form.residential_address.trim()) missing.push("residential_address");
+  if (!form.id_document_front_image_url) missing.push("id_document_front_image_url");
+  if (!form.id_document_back_image_url) missing.push("id_document_back_image_url");
+  if (!form.selfie_image_url) missing.push("selfie_image_url");
+  return missing;
 }

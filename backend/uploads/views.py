@@ -8,6 +8,7 @@ first step, not a new data model to migrate around.
 import re
 
 from rest_framework import permissions, status
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -15,12 +16,19 @@ from drf_spectacular.utils import extend_schema
 from .services import upload_media_file, UnsupportedMediaTypeError, MediaTooLargeError
 
 
+class MediaUploadThrottle(UserRateThrottle):
+    scope = "media_upload"
+
+
 class MediaUploadView(APIView):
     """Requires login — an open, unauthenticated upload endpoint is a
     real abuse vector (anyone could use the platform's storage for
-    free, unrelated file hosting)."""
+    free, unrelated file hosting). Uploads are also rate-limited per user."""
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser]
+
+    def get_throttles(self):
+        return [*super().get_throttles(), MediaUploadThrottle()]
 
     @extend_schema(request={"multipart/form-data": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}}}, responses={201: dict, 400: dict})
     def post(self, request):

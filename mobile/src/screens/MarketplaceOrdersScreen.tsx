@@ -1,12 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { View, Text, TextInput, StyleSheet, ActivityIndicator, FlatList, TouchableOpacity, Alert } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import {
-  listMyMarketplaceOrders, marketplaceOrderAction,
+  listMyMarketplaceOrders, marketplaceOrderAction, reviewMarketplaceOrder,
   type MarketplaceOrderItem, type MarketplaceOrderStatus, type MarketplaceOrderActionName,
 } from "../lib/api";
 import RateAndReport from "../components/RateAndReport";
+import OrderTrackingPanel from "../components/OrderTrackingPanel";
+import OrderReturnPanel from "../components/OrderReturnPanel";
+import ReceiptModal from "../components/ReceiptModal";
+import { confirmReceiptMessage } from "../lib/orderFulfilment";
+import { MAX_REVIEW_LENGTH, starString } from "../lib/marketplaceReviews";
 
 type Props = NativeStackScreenProps<RootStackParamList, "MarketplaceOrders">;
 type Role = "buying" | "selling";
@@ -60,14 +65,22 @@ function hint(order: MarketplaceOrderItem, role: Role): string {
 }
 
 /** Marketplace purchases and sales held in escrow: hand over, confirm receipt, cancel, decline or report a problem. */
-export default function MarketplaceOrdersScreen({ navigation }: Props) {
-  const [role, setRole] = useState<Role>("buying");
+export default function MarketplaceOrdersScreen({ navigation, route }: Props) {
+  const [role, setRole] = useState<Role>(route.params?.role ?? "buying");
+  const highlightId = route.params?.orderId;
+  const listRef = useRef<FlatList<MarketplaceOrderItem>>(null);
   const [orders, setOrders] = useState<MarketplaceOrderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [disputing, setDisputing] = useState<{ id: string; action: "dispute" | "claim-deposit" } | null>(null);
   const [reason, setReason] = useState("");
+  const [reviewing, setReviewing] = useState<{ id: string; score: number; text: string } | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [receipt, setReceipt] = useState<MarketplaceOrderItem | null>(null);
 
+  const replaceOrder = useCallback((updated: MarketplaceOrderItem) => {
+    setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+  }, []);
   const load = useCallback(async (which: Role) => {
     try {
       setOrders((await listMyMarketplaceOrders(which)).results);
@@ -82,6 +95,17 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
 
   useEffect(() => { load(role); }, [load, role]);
 
+  // Opened from a notification that points at the other tab.
+  const requestedRole = route.params?.role;
+  useEffect(() => {
+    if (requestedRole && requestedRole !== role) switchRole(requestedRole);
+  }, [requestedRole]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const index = highlightId ? orders.findIndex((o) => o.id === highlightId) : -1;
+    if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true });
+  }, [highlightId, orders]);
+
   async function run(orderId: string, action: MarketplaceOrderActionName, why?: string) {
     setError("");
     try {
@@ -91,6 +115,21 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
       await load(role);
     } catch (err) {
       setError(err instanceof Error ? err.message : "That did not work. Please try again.");
+    }
+  }
+
+  async function publishReview() {
+    if (!reviewing) return;
+    setPublishing(true);
+    setError("");
+    try {
+      await reviewMarketplaceOrder(reviewing.id, reviewing.score, reviewing.text.trim());
+      setReviewing(null);
+      await load(role);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not publish your review. Please try again.");
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -106,10 +145,12 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
     setLoading(true);
     setError("");
     setDisputing(null);
+    setReviewing(null);
   }
 
   return (
     <View style={styles.container}>
+      <ReceiptModal order={receipt} role={role} onClose={() => setReceipt(null)} />
       <View style={styles.tabs}>
         {(["buying", "selling"] as Role[]).map((value) => (
           <TouchableOpacity key={value} style={[styles.tab, role === value && styles.tabActive]} onPress={() => switchRole(value)}>
@@ -123,9 +164,11 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
         <View style={styles.centered}><ActivityIndicator color="#1B2A4A" size="large" /></View>
       ) : (
         <FlatList
+          ref={listRef}
           data={orders}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
+          onScrollToIndexFailed={() => {}}
           ListEmptyComponent={
             <View style={styles.centered}>
               <Text style={styles.empty}>{role === "buying" ? "You have not bought anything yet." : "Nobody has bought your listings yet."}</Text>
@@ -133,11 +176,12 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
             </View>
           }
           renderItem={({ item: order }) => (
-            <View style={styles.card}>
+            <View style={[styles.card, order.id === highlightId && styles.cardHighlight]}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>{order.listing_title}</Text>
                 <View style={[styles.badge, { backgroundColor: STATUS_COLORS[order.status] }]}><Text style={styles.badgeText}>{STATUS_LABELS[order.status]}</Text></View>
               </View>
+              {order.variant_label ? <Text style={styles.variant}>{order.variant_label}</Text> : null}
               <Text style={styles.meta}>
                 {Number(order.amount_xaf).toLocaleString()} XAF · {role === "buying" ? `Seller: ${order.seller_name}` : `Buyer: ${order.buyer_name}`}
               </Text>
@@ -149,6 +193,11 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
               )}
               <Text style={styles.date}>{formatDate(order.created_at)}</Text>
               <Text style={styles.hint}>{[hint(order, role), depositHint(order, role)].filter(Boolean).join(" ")}</Text>
+              <OrderTrackingPanel order={order} role={role} onUpdated={replaceOrder} />
+              <OrderReturnPanel order={order} role={role} onUpdated={replaceOrder} />
+              {order.receipt_available && (
+                <TouchableOpacity style={styles.receiptButton} onPress={() => setReceipt(order)}><Text style={styles.secondary}>View receipt</Text></TouchableOpacity>
+              )}
 
               {disputing?.id === order.id ? (
                 <View>
@@ -167,7 +216,9 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
                 <View style={styles.actions}>
                   {role === "selling" && order.status === "PAID" && (
                     <>
-                      <TouchableOpacity style={styles.primary} onPress={() => run(order.id, "hand-over")}><Text style={styles.primaryText}>Mark as handed over</Text></TouchableOpacity>
+                      {!order.is_tracked && (
+                        <TouchableOpacity style={styles.primary} onPress={() => run(order.id, "hand-over")}><Text style={styles.primaryText}>Mark as handed over</Text></TouchableOpacity>
+                      )}
                       <TouchableOpacity onPress={() => confirmThen("Decline this order? The buyer will be refunded.", order.id, "decline")}><Text style={styles.danger}>Decline and refund</Text></TouchableOpacity>
                     </>
                   )}
@@ -178,7 +229,7 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
                     </>
                   )}
                   {role === "buying" && order.status === "HANDED_OVER" && (
-                    <TouchableOpacity style={styles.primary} onPress={() => confirmThen("Confirm you received what you paid for? The seller will be paid.", order.id, "confirm")}>
+                    <TouchableOpacity style={styles.primary} onPress={() => confirmThen(confirmReceiptMessage(order), order.id, "confirm")}>
                       <Text style={styles.primaryText}>I received it</Text>
                     </TouchableOpacity>
                   )}
@@ -193,6 +244,41 @@ export default function MarketplaceOrdersScreen({ navigation }: Props) {
               {order.status === "COMPLETED" && (
                 <RateAndReport subjectUserId={role === "buying" ? order.seller : order.buyer} />
               )}
+              {role === "buying" && order.status === "COMPLETED" && order.my_review && (
+                <View style={styles.review}>
+                  <Text style={styles.reviewTitle}>Your review</Text>
+                  <Text style={styles.reviewStars}>{starString(order.my_review.score)}</Text>
+                  {order.my_review.text ? <Text style={styles.reviewText}>{order.my_review.text}</Text> : null}
+                </View>
+              )}
+              {role === "buying" && order.status === "COMPLETED" && order.can_review && !order.my_review && (
+                reviewing?.id === order.id ? (
+                  <View style={styles.review}>
+                    <Text style={styles.reviewTitle}>Review this purchase</Text>
+                    <View style={styles.starRow}>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <TouchableOpacity key={n} onPress={() => setReviewing({ ...reviewing, score: n })} accessibilityLabel={`${n} star${n === 1 ? "" : "s"}`}>
+                          <Text style={styles.starPick}>{n <= reviewing.score ? "★" : "☆"}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <TextInput
+                      style={styles.input} multiline numberOfLines={3} maxLength={MAX_REVIEW_LENGTH} value={reviewing.text}
+                      onChangeText={(text) => setReviewing({ ...reviewing, text })} placeholder="Share your experience (optional)"
+                    />
+                    <View style={styles.actions}>
+                      <TouchableOpacity style={[styles.primary, (publishing || reviewing.score < 1) && styles.disabled]} disabled={publishing || reviewing.score < 1} onPress={publishReview}>
+                        {publishing ? <ActivityIndicator color="#1B2A4A" /> : <Text style={styles.primaryText}>Publish</Text>}
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setReviewing(null)}><Text style={styles.secondary}>Close</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={styles.reviewButton} onPress={() => setReviewing({ id: order.id, score: 0, text: "" })}>
+                    <Text style={styles.secondary}>Review this purchase</Text>
+                  </TouchableOpacity>
+                )
+              )}
             </View>
           )}
         />
@@ -205,7 +291,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9FAFB" },
   centered: { alignItems: "center", justifyContent: "center", paddingTop: 40 },
   tabs: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
-  tab: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: "#E5E7EB" },
+  tab: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 22, backgroundColor: "#E5E7EB" },
   tabActive: { backgroundColor: "#1B2A4A" },
   tabText: { fontSize: 13, fontWeight: "600", color: "#374151" },
   tabTextActive: { color: "#fff" },
@@ -214,6 +300,8 @@ const styles = StyleSheet.create({
   empty: { color: "#6B7280", marginBottom: 8 },
   link: { color: "#1B2A4A", fontWeight: "700", textDecorationLine: "underline" },
   card: { backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#E5E7EB", padding: 14, marginBottom: 12 },
+  cardHighlight: { borderColor: "#C9A227", borderWidth: 2 },
+  variant: { fontSize: 13, color: "#4B5563", marginBottom: 4 },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 4 },
   cardTitle: { flex: 1, fontSize: 15, fontWeight: "700", color: "#1B2A4A" },
   badge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
@@ -228,4 +316,12 @@ const styles = StyleSheet.create({
   secondary: { color: "#1B2A4A", fontSize: 13, fontWeight: "600", textDecorationLine: "underline" },
   danger: { color: "#B91C1C", fontSize: 13, fontWeight: "600", textDecorationLine: "underline" },
   input: { borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, padding: 10, marginBottom: 8, fontSize: 14, textAlignVertical: "top" },
+  review: { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: "#F3F4F6" },
+  reviewButton: { marginTop: 12 },
+  receiptButton: { marginTop: 10, alignSelf: "flex-start" },
+  reviewTitle: { fontSize: 13, fontWeight: "700", color: "#1B2A4A", marginBottom: 4 },
+  reviewStars: { fontSize: 16, color: "#C9A227" },
+  reviewText: { fontSize: 13, color: "#374151", marginTop: 2 },
+  starRow: { flexDirection: "row", gap: 6, marginBottom: 8 },
+  starPick: { fontSize: 30, color: "#C9A227" },
 });

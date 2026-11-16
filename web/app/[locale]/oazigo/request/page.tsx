@@ -1,30 +1,34 @@
 "use client";
-import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { requestRide, type LuggageSize } from "@/lib/api";
+import { quoteRide, requestRide, type LuggageSize, type RideQuote } from "@/lib/api";
 import Button from "@/components/ui/Button";
 import MediaUploader from "@/components/MediaUploader";
 import { IconAlertCircle } from "@/components/Icons";
 import { useOaziGo } from "@/components/oazigo/OaziGoProvider";
 import RideLocationField from "@/components/oazigo/RideLocationField";
+import RouteMap from "@/components/oazigo/RouteMap";
 import { RIDE_CATEGORIES, cardCls, inputCls, labelCls } from "@/components/oazigo/styles";
-import { estimateFareXaf, roadDistanceKm } from "@/components/oazigo/fare";
+import { formatDuration } from "@/components/oazigo/route";
 
 const NO_GPS = { latitude: null, longitude: null };
 const LUGGAGE_SIZES: LuggageSize[] = ["SMALL", "MEDIUM", "LARGE", "BULKY"];
 const MAX_LUGGAGE_PHOTOS = 3;
+const QUOTE_DELAY_MS = 400;
+
+type Gps = { latitude: number | null; longitude: number | null };
 
 export default function OaziGoRequestPage() {
   const t = useTranslations("OaziGoPage");
+  const locale = useLocale();
   const router = useRouter();
   const { reload } = useOaziGo();
 
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
-  const [distanceInput, setDistanceInput] = useState<string | null>(null);
-  const [pickupGps, setPickupGps] = useState<{ latitude: number | null; longitude: number | null }>(NO_GPS);
-  const [dropoffGps, setDropoffGps] = useState<{ latitude: number | null; longitude: number | null }>(NO_GPS);
+  const [pickupGps, setPickupGps] = useState<Gps>(NO_GPS);
+  const [dropoffGps, setDropoffGps] = useState<Gps>(NO_GPS);
   const [rideCategory, setRideCategory] = useState<string>("STANDARD");
   const [transportType, setTransportType] = useState<"PASSENGER" | "CARGO">("PASSENGER");
   const [hasLuggage, setHasLuggage] = useState(false);
@@ -35,28 +39,52 @@ export default function OaziGoRequestPage() {
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState("");
 
-  // Distance comes from the two GPS points when both are captured; typing it is the fallback.
-  const autoKm = roadDistanceKm(pickupGps, dropoffGps);
-  const distance = distanceInput ?? (autoKm !== null ? String(autoKm) : "");
-  const distanceNum = Number(distance);
-  const hasDistance = distance !== "" && Number.isFinite(distanceNum) && distanceNum > 0;
-  const selectedCategory = rideCategory as (typeof RIDE_CATEGORIES)[number];
+  const [quoteResult, setQuoteResult] = useState<{ key: string; quote: RideQuote | null } | null>(null);
+  const [quoteAttempt, setQuoteAttempt] = useState(0);
+
+  const points = pickupGps.latitude !== null && pickupGps.longitude !== null && dropoffGps.latitude !== null && dropoffGps.longitude !== null
+    ? { pickup_latitude: pickupGps.latitude, pickup_longitude: pickupGps.longitude, dropoff_latitude: dropoffGps.latitude, dropoff_longitude: dropoffGps.longitude }
+    : null;
+  const requestKey = points ? `${Object.values(points).join(",")}#${quoteAttempt}` : "";
+  // A result only counts for the points (and retry) it was fetched for.
+  const current = quoteResult && quoteResult.key === requestKey ? quoteResult : null;
+  const quote = current?.quote ?? null;
+  const quoteFailed = Boolean(current && !current.quote);
+  const quoting = Boolean(points) && !current;
+
+  // The price comes from the server's road route between the two points, never from the browser.
+  useEffect(() => {
+    if (!points) return;
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      quoteRide(points, token, controller.signal)
+        .then((result) => setQuoteResult({ key: requestKey, quote: result }))
+        .catch(() => { if (!controller.signal.aborted) setQuoteResult({ key: requestKey, quote: null }); });
+    }, QUOTE_DELAY_MS);
+    return () => { clearTimeout(timer); controller.abort(); };
+    // requestKey stands for the four coordinates and the retry count.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestKey]);
+
+  const retryQuote = useCallback(() => setQuoteAttempt((n) => n + 1), []);
+  const fareFor = (category: string) => (quote ? Number(quote.fares[category]) : null);
+  const selectedFare = fareFor(rideCategory);
+  const duration = quote ? formatDuration(quote.duration_minutes, { min: t("durationMin"), h: t("durationHour") }) : "";
+  const km = quote ? Number(quote.distance_km).toLocaleString(locale, { maximumFractionDigits: 1 }) : "";
 
   async function handleRequest(e: React.FormEvent) {
     e.preventDefault();
     const token = localStorage.getItem("access_token");
-    if (!token) return;
+    if (!token || !points || !quote) return;
     setRequesting(true);
     setRequestError("");
     try {
       await requestRide({
         pickup_description: pickup,
         dropoff_description: dropoff,
-        distance_km: distance,
-        pickup_latitude: pickupGps.latitude,
-        pickup_longitude: pickupGps.longitude,
-        dropoff_latitude: dropoffGps.latitude,
-        dropoff_longitude: dropoffGps.longitude,
+        ...points,
         ride_category: rideCategory,
         transport_type: transportType,
         has_luggage: hasLuggage,
@@ -84,7 +112,7 @@ export default function OaziGoRequestPage() {
         value={pickup}
         onValueChange={setPickup}
         coords={pickupGps}
-        onCoordsChange={(c) => { setPickupGps(c); setDistanceInput(null); }}
+        onCoordsChange={setPickupGps}
         allowCurrentLocation
       />
 
@@ -95,14 +123,33 @@ export default function OaziGoRequestPage() {
         value={dropoff}
         onValueChange={setDropoff}
         coords={dropoffGps}
-        onCoordsChange={(c) => { setDropoffGps(c); setDistanceInput(null); }}
+        onCoordsChange={setDropoffGps}
       />
 
-      <div>
-        <label className={labelCls} htmlFor="oazigo-distance">{t("distanceLabel")}</label>
-        <input id="oazigo-distance" required type="number" step="0.1" min="0.1" placeholder={t("distancePlaceholder")} value={distance} onChange={(e) => setDistanceInput(e.target.value)} className={inputCls} />
-        <p className="mt-1.5 text-[11px] text-slate-400">{autoKm !== null && distanceInput === null ? t("distanceAutoHint") : t("distanceManualHint")}</p>
-      </div>
+      {!points ? (
+        <p className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">{t("chooseBothPoints")}</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <RouteMap
+            pickup={[points.pickup_latitude, points.pickup_longitude]}
+            dropoff={[points.dropoff_latitude, points.dropoff_longitude]}
+            polyline={quote?.polyline ?? ""}
+            label={t("routeMapLabel")}
+          />
+          {quoting && <p role="status" className="text-xs text-slate-500">{t("quoteLoading")}</p>}
+          {quote && (
+            <p className="text-sm font-bold text-slate-800">
+              {t(quote.source === "google" ? "routeSummary" : "routeSummaryEstimated", { km, time: duration })}
+            </p>
+          )}
+          {quoteFailed && (
+            <p role="alert" className="flex flex-wrap items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
+              {t("quoteFailed")}
+              <button type="button" onClick={retryQuote} className="font-bold underline cursor-pointer">{t("quoteRetry")}</button>
+            </p>
+          )}
+        </div>
+      )}
 
       <div>
         <p className={labelCls}>{t("vehicleCategoryLabel")}</p>
@@ -114,7 +161,8 @@ export default function OaziGoRequestPage() {
               className={`rounded-xl px-3.5 py-2 text-xs font-bold border transition-colors cursor-pointer text-left ${rideCategory === cat ? "bg-slate-900 text-amber-300 border-slate-900" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
             >
               <span className="block">{t(`category_${cat}`)}</span>
-              {hasDistance && <span className="block text-[11px] font-semibold opacity-80">≈ {estimateFareXaf(cat, distanceNum).toLocaleString()} XAF</span>}
+              <span className="block text-[11px] font-medium opacity-70">{t(`categoryHint_${cat}`)}</span>
+              {fareFor(cat) !== null && <span className="block text-[11px] font-semibold opacity-80">{fareFor(cat)!.toLocaleString(locale)} XAF</span>}
             </button>
           ))}
         </div>
@@ -196,14 +244,14 @@ export default function OaziGoRequestPage() {
         </div>
       )}
 
-      {hasDistance && (
+      {quote && selectedFare !== null && (
         <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">{t("estimatedFare")}</p>
-            <p className="text-[11px] text-emerald-700">{t("estimateNote")}</p>
+            <p className="text-[11px] text-emerald-700">{t(quote.source === "google" ? "estimateNote" : "estimateNoteApprox")}</p>
           </div>
           <p className="text-xl font-black tracking-tight text-emerald-900">
-            ≈ {estimateFareXaf(selectedCategory, distanceNum).toLocaleString()} <span className="text-xs font-bold">XAF</span>
+            {selectedFare.toLocaleString(locale)} <span className="text-xs font-bold">XAF</span>
           </p>
         </div>
       )}
@@ -213,7 +261,7 @@ export default function OaziGoRequestPage() {
           <IconAlertCircle size={16} className="mt-0.5 shrink-0" /> {requestError}
         </p>
       )}
-      <Button size="lg" variant="success" disabled={requesting}>{requesting ? t("requesting") : t("requestRide")}</Button>
+      <Button size="lg" variant="success" disabled={requesting || !quote}>{requesting ? t("requesting") : t("requestRide")}</Button>
     </form>
   );
 }

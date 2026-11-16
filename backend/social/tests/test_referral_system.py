@@ -107,7 +107,7 @@ def test_registration_with_a_referral_code_creates_the_referral():
     client = APIClient()
     response = client.post("/api/auth/register/", {
         "username": "referral_api_new_user", "phone": "+237699888809", "password": "a_real_password_123",
-        "referral_code": code,
+        "referral_code": code, "accept_terms": True,
     })
     assert response.status_code == 201
     new_user = User.objects.get(username="referral_api_new_user")
@@ -121,7 +121,7 @@ def test_registration_with_an_invalid_referral_code_still_succeeds():
     client = APIClient()
     response = client.post("/api/auth/register/", {
         "username": "referral_typo_user", "phone": "+237699888810", "password": "a_real_password_123",
-        "referral_code": "TOTALLYWRONG",
+        "referral_code": "TOTALLYWRONG", "accept_terms": True,
     })
     assert response.status_code == 201
     assert User.objects.filter(username="referral_typo_user").exists()

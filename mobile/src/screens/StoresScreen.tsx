@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { useMarketplaceListings } from "../lib/useMarketplaceListings";
 import LoadMoreButton from "../components/LoadMoreButton";
+import TopBadge from "../components/TopBadge";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import MarketplaceFilterBar from "../components/MarketplaceFilterBar";
 import { EMPTY_MARKETPLACE_FILTERS, filtersActive, filtersToQuery, type MarketplaceFilters } from "../lib/marketplaceFilters";
@@ -121,6 +122,7 @@ export default function StoresScreen() {
                 <View style={styles.imagePlaceholder}><Text style={styles.imagePlaceholderText}>No photo yet</Text></View>
               )}
               <View style={styles.cardBody}>
+                {item.is_boosted && <TopBadge />}
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 <Text style={styles.cardSubtitle}>{item.size_sqm} m²</Text>
                 <Text style={styles.price}>{Number(item.price_xaf).toLocaleString()} XAF</Text>

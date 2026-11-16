@@ -255,6 +255,54 @@ def test_a_course_with_an_unfinished_quiz_cant_go_live_and_a_live_quiz_keeps_its
 
 
 @pytest.mark.django_db
+def test_my_learning_shows_the_next_lesson_last_activity_and_typical_review_time():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from careers.course_services import review_submission
+    from careers.models import AssignmentSubmission, TrainingEnrollment
+
+    admin = _user("c_admin", is_staff=True)
+    a, s = _client(admin), _client(_user("c_student"))
+    course_id = _create_course(a)
+    module = a.post("/api/manage/modules/", {"program": course_id, "title": "M"}, format="json").data["id"]
+    first = a.post("/api/manage/lessons/", {"module": module, "title": "First", "kind": "TEXT", "content_text": "a"}, format="json").data["id"]
+    a.post("/api/manage/lessons/", {"module": module, "title": "Second", "kind": "TEXT", "content_text": "b"}, format="json")
+    task = a.post("/api/manage/lessons/", {"module": module, "title": "Task", "kind": "ASSIGNMENT"}, format="json").data["id"]
+    enrollment = s.post(f"/api/trainings/{course_id}/enroll/").data["id"]
+
+    mine = s.get("/api/my-enrollments/").data["results"][0]
+    assert mine["next_lesson"]["title"] == "First" and mine["last_activity_at"] is None
+    s.post(f"/api/my-enrollments/{enrollment}/lessons/{first}/complete/")
+    mine = s.get("/api/my-enrollments/").data["results"][0]
+    assert mine["next_lesson"]["title"] == "Second" and mine["last_activity_at"] is not None
+
+    # Reviewing a submission keeps the learner's submission time (it used to be overwritten with the review time).
+    pdf = SimpleUploadedFile("work.pdf", b"%PDF-1.4 work", content_type="application/pdf")
+    s.post(f"/api/my-enrollments/{enrollment}/assignments/{task}/submit/", {"file": pdf}, format="multipart")
+    submission = AssignmentSubmission.objects.get()
+    AssignmentSubmission.objects.filter(pk=submission.pk).update(submitted_at=timezone.now() - timedelta(hours=30))
+    submission.refresh_from_db()
+    review_submission(submission, reviewer=admin, decision="APPROVED")
+    submission.refresh_from_db()
+    assert submission.reviewed_at - submission.submitted_at >= timedelta(hours=29)
+
+    # The typical review time appears once the course has at least three reviews.
+    outline = s.get(f"/api/my-enrollments/{enrollment}/course/").data
+    assert outline["typical_review_hours"] is None
+    program = TrainingEnrollment.objects.get(pk=enrollment).program
+    for n, hours in enumerate((10, 50)):
+        other = TrainingEnrollment.objects.create(program=program, student=_user(f"c_rev{n}"))
+        done = AssignmentSubmission.objects.create(enrollment=other, lesson_id=task, file=SimpleUploadedFile("w.pdf", b"%PDF-1.4"))
+        AssignmentSubmission.objects.filter(pk=done.pk).update(
+            submitted_at=timezone.now() - timedelta(hours=hours + 1), reviewed_at=timezone.now() - timedelta(hours=1),
+            status="APPROVED",
+        )
+    assert s.get(f"/api/my-enrollments/{enrollment}/course/").data["typical_review_hours"] == 30  # median of 10, 30, 50
+
+
+@pytest.mark.django_db
 def test_assignment_submission_review_resubmission_and_file_privacy():
     admin = _user("c_admin", is_staff=True)
     supervisor, student, other, outsider = _user("c_sup"), _user("c_student"), _user("c_other"), _user("c_out")

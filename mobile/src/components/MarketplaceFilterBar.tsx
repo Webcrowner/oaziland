@@ -1,5 +1,7 @@
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
 import { MARKETPLACE_SORTS, MARKETPLACE_PRICE_BASES, type MarketplaceFilters } from "../lib/marketplaceFilters";
+import { useDidYouMean } from "../lib/useDidYouMean";
+import DidYouMeanBanner from "./DidYouMeanBanner";
 
 /** Search, price type, price range and sort controls shared by the four marketplace category screens. */
 export default function MarketplaceFilterBar({
@@ -10,10 +12,12 @@ export default function MarketplaceFilterBar({
   showPriceBasis?: boolean;
 }) {
   const set = (patch: Partial<MarketplaceFilters>) => onChange({ ...value, ...patch });
+  const suggestion = useDidYouMean(value.q);
 
   return (
     <View style={styles.container}>
       <TextInput style={styles.input} placeholder="Search listings" value={value.q} onChangeText={(q) => set({ q })} returnKeyType="search" />
+      <DidYouMeanBanner suggestion={suggestion} onPick={(q) => set({ q })} />
       <View style={styles.priceRow}>
         <TextInput style={[styles.input, styles.half]} placeholder="Min price" value={value.minPrice} onChangeText={(minPrice) => set({ minPrice })} keyboardType="numeric" />
         <TextInput style={[styles.input, styles.half]} placeholder="Max price" value={value.maxPrice} onChangeText={(maxPrice) => set({ maxPrice })} keyboardType="numeric" />

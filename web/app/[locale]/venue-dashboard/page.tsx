@@ -9,6 +9,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import Panel from "@/components/ui/Panel";
 import StatCard from "@/components/ui/StatCard";
 import ShareAndQrModal from "@/components/ShareAndQrModal";
+import VenueOwnerBookingsPanel from "@/components/VenueOwnerBookingsPanel";
 import { IconShare, IconQrCode, IconArrowUpRight, IconFileText, IconCreditCard, IconSparkles } from "@/components/Icons";
 
 /**
@@ -140,6 +141,8 @@ export default function VenueDashboardPage() {
           </select>
         </div>
       )}
+
+      <VenueOwnerBookingsPanel />
 
       {dashboardLoading || !dashboard ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

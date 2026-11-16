@@ -13,6 +13,7 @@ import LocationCapture, { EMPTY_GPS, type GpsValue } from "@/components/Location
 import MediaThumbs from "@/components/MediaThumbs";
 import DirectChatButton from "@/components/DirectChatButton";
 import InterestCaptureModal from "@/components/InterestCaptureModal";
+import VenueBookingModal from "@/components/VenueBookingModal";
 import {
   IconParty,
   IconMapPin,
@@ -92,16 +93,7 @@ export default function EventsPage() {
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
 
-  // Booking modal state
   const [bookingVenue, setBookingVenue] = useState<Venue | null>(null);
-  const [bookingSpace, setBookingSpace] = useState("");
-  const [eventType, setEventType] = useState("");
-  const [eventDate, setEventDate] = useState("");
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
-  const [guestCount, setGuestCount] = useState("");
-  const [bookingStatus, setBookingStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
-  const [bookingError, setBookingError] = useState("");
 
   // Customer-facing lead capture on showcase (preview) cards - these
   // aren't real bookable venues yet, so the primary card action must
@@ -110,46 +102,6 @@ export default function EventsPage() {
 
   function openBooking(venue: Venue) {
     setBookingVenue(venue);
-    setBookingSpace(venue.spaces[0]?.id ?? "");
-    setEventType("");
-    setEventDate("");
-    setStartTime("");
-    setEndTime("");
-    setGuestCount("");
-    setBookingStatus("idle");
-    setBookingError("");
-  }
-
-  const selectedSpace: VenueSpaceSummary | undefined = bookingVenue?.spaces.find((s) => s.id === bookingSpace);
-  const estimatedHours =
-    startTime && endTime ? (new Date(`2000-01-01T${endTime}`).getTime() - new Date(`2000-01-01T${startTime}`).getTime()) / 3600000 : 0;
-  const bookingTotal = selectedSpace && estimatedHours > 0 ? estimatedHours * Number(selectedSpace.base_price_per_hour_xaf) : 0;
-
-  async function handleBookingSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-      window.location.href = "/login";
-      return;
-    }
-    setBookingStatus("submitting");
-    try {
-      await createEventBooking(
-        {
-          venue_space: bookingSpace,
-          event_type: eventType,
-          event_date: eventDate,
-          start_time: startTime,
-          end_time: endTime,
-          guest_count: Number(guestCount),
-        },
-        token
-      );
-      setBookingStatus("success");
-    } catch (err) {
-      setBookingStatus("error");
-      setBookingError(err instanceof Error ? err.message : t("bookingFailed"));
-    }
   }
 
   const load = useCallback(() => {
@@ -491,7 +443,7 @@ export default function EventsPage() {
                     )
                   }
                   share={{
-                    title: "event venue",
+                    title: venue.spaces.map((s) => s.space_name).filter(Boolean).join(", ") || t("venueLabel"),
                     location: venue.quarter_name,
                     price: cheapestSpace ? Number(cheapestSpace.base_price_per_hour_xaf).toLocaleString() : "",
                     path: `/events/${venue.id}`,
@@ -627,145 +579,7 @@ export default function EventsPage() {
         </div>
       )}
 
-      {/* ================= BOOKING MODAL ================= */}
-      {bookingVenue && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-            {bookingStatus === "success" ? (
-              <div className="text-center py-4">
-                <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-                  <IconCheckCircle size={24} />
-                </div>
-                <h3 className="font-bold text-slate-900 text-lg mb-1.5">{t("bookingConfirmedTitle")}</h3>
-                <p className="text-xs text-slate-500 mb-5">{t("bookingConfirmedBody")}</p>
-                <div className="flex gap-2">
-                  <Link
-                    href="/bookings"
-                    className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors"
-                  >
-                    {t("viewMyBookings")}
-                  </Link>
-                  <button
-                    onClick={() => setBookingVenue(null)}
-                    className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-sm font-bold hover:bg-slate-200 transition-colors"
-                  >
-                    {t("close")}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <form onSubmit={handleBookingSubmit}>
-                <div className="flex items-start justify-between mb-4">
-                  <h3 className="font-bold text-slate-900 text-lg">{t("bookSpace")}</h3>
-                  <button type="button" onClick={() => setBookingVenue(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">
-                    &times;
-                  </button>
-                </div>
-
-                <div className="space-y-3.5">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      {t("selectSpace")}
-                    </label>
-                    <select
-                      value={bookingSpace}
-                      onChange={(e) => setBookingSpace(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                    >
-                      {bookingVenue.spaces.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.space_name} — {Number(s.base_price_per_hour_xaf).toLocaleString()} XAF/hr
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      {t("eventType")}
-                    </label>
-                    <input
-                      required
-                      placeholder="Wedding, Conference, Birthday..."
-                      value={eventType}
-                      onChange={(e) => setEventType(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      {t("eventDate")}
-                    </label>
-                    <input
-                      required
-                      type="date"
-                      min={new Date().toISOString().slice(0, 10)}
-                      value={eventDate}
-                      onChange={(e) => setEventDate(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                        {t("startTime")}
-                      </label>
-                      <input
-                        required
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                        {t("endTime")}
-                      </label>
-                      <input
-                        required
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      {t("guestCount")}
-                    </label>
-                    <input
-                      required
-                      type="number"
-                      min={1}
-                      value={guestCount}
-                      onChange={(e) => setGuestCount(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                    />
-                  </div>
-
-                  {bookingTotal > 0 && (
-                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/60 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-amber-900">{t("totalLabel")}</span>
-                      <span className="text-sm font-bold text-slate-900">{bookingTotal.toLocaleString()} XAF</span>
-                    </div>
-                  )}
-
-                  {bookingStatus === "error" && <p className="text-red-600 text-xs font-medium">{bookingError}</p>}
-
-                  <Button disabled={bookingStatus === "submitting"} className="w-full" size="lg">
-                    {bookingStatus === "submitting" ? t("bookingSubmitting") : t("confirmBooking")}
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
+      {bookingVenue && <VenueBookingModal venue={bookingVenue} onClose={() => setBookingVenue(null)} />}
 
       {interestItem && (
         <InterestCaptureModal itemName={interestItem} onClose={() => setInterestItem(null)} />

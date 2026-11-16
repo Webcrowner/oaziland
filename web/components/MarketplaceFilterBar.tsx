@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import MarketplaceSearchBox from "@/components/MarketplaceSearchBox";
 import {
   GOODS_CATEGORIES, GOODS_CONDITIONS, CAR_BODY_TYPES, CAR_FUEL_TYPES, CAR_TRANSMISSIONS, CAR_CONDITIONS, CAR_DAILY_BASIS, type Quarter,
 } from "@/lib/api";
@@ -180,14 +181,11 @@ export default function MarketplaceFilterBar({
 
   return (
     <div className="mb-5" role="search">
-      <div className="flex gap-2">
-        <input
-          type="search" value={value.q} onChange={(e) => set({ q: e.target.value })}
-          placeholder={t("search")} aria-label={t("search")} className={`${field} flex-1`}
-        />
+      <div className="flex flex-wrap gap-2">
+        <MarketplaceSearchBox value={value.q} onChange={(q) => set({ q })} className="min-w-0 basis-full sm:flex-1 sm:basis-0" />
         <button
           type="button" onClick={() => setOpen(!open)} aria-expanded={open}
-          className="md:hidden shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700"
+          className="md:hidden min-h-11 w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700"
         >
           {t("filters")}
           {activeCount > 0 && <span className="rounded-full bg-[var(--gold)] px-1.5 text-xs text-[var(--navy)]">{activeCount}</span>}

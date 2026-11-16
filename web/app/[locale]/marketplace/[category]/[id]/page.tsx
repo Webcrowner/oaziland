@@ -15,6 +15,8 @@ import CarRentalBox from "@/components/CarRentalBox";
 import { CarSpecSheet } from "@/components/CarSpecSheet";
 import SimilarMarketplaceListings from "@/components/SimilarMarketplaceListings";
 import SellerTrustCard from "@/components/SellerTrustCard";
+import MarketplaceReviews from "@/components/MarketplaceReviews";
+import FlashSalePrice from "@/components/FlashSalePrice";
 
 const CATEGORIES: MarketplaceCategory[] = ["warehouses", "stores", "businesses", "cars", "goods"];
 const SHARE_TITLES: Record<MarketplaceCategory, string> = { warehouses: "warehouse", stores: "store", businesses: "business", cars: "car", goods: "item" };
@@ -28,6 +30,12 @@ const PRICE_BASIS_KEYS: Record<string, string> = {
 type AnyListing = WarehouseListing & Partial<StoreListing> & Partial<BusinessListing> & Partial<CarListing> & Partial<GoodsListing>;
 const getListing = cache((category: MarketplaceCategory, id: string) => getMarketplaceListing<AnyListing>(category, id));
 
+/** The headline price: the cheapest in-stock version for items with options, else the current (flash-sale aware) price. */
+function headlinePrice(listing: AnyListing): string {
+  if (listing.has_variants && listing.price_from_xaf) return listing.price_from_xaf;
+  return listing.on_sale ? listing.current_price_xaf ?? listing.price_xaf : listing.price_xaf;
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -38,7 +46,7 @@ export async function generateMetadata({
   const listing = await getListing(category as MarketplaceCategory, id).catch(() => null);
   if (!listing) return {};
 
-  const price = `${Number(listing.price_xaf).toLocaleString(locale)} XAF`;
+  const price = `${Number(headlinePrice(listing)).toLocaleString(locale)} XAF`;
   const description = listing.description.trim() || `${listing.title} · ${price}${listing.quarter_name ? ` · ${listing.quarter_name}` : ""}`;
   const images = listing.media.filter((item) => item.media_type === "PHOTO").map((item) => item.file_url);
   return {
@@ -88,7 +96,7 @@ export default async function MarketplaceDetailPage({
   const facts: { label: string; value: string }[] = [];
   if (listing.item_category) facts.push({ label: t("itemCategory"), value: tg(`cat_${listing.item_category}`) });
   if (listing.condition) facts.push({ label: t("itemCondition"), value: tg(`cond_${listing.condition}`) });
-  if (cat === "goods" && listing.quantity && listing.quantity > 1) facts.push({ label: t("quantityAvailable"), value: String(listing.quantity) });
+  if (cat === "goods" && listing.quantity != null) facts.push({ label: t("quantityAvailable"), value: listing.quantity > 0 ? String(listing.quantity) : tg("soldOut") });
   if (listing.size_sqm) facts.push({ label: "m²", value: String(listing.size_sqm) });
   if (listing.frontage_meters) facts.push({ label: t("frontage"), value: `${listing.frontage_meters} m` });
   if (listing.seating_capacity) facts.push({ label: t("seats"), value: String(listing.seating_capacity) });
@@ -120,7 +128,8 @@ export default async function MarketplaceDetailPage({
   const negotiable = car !== null && listing.price_basis === "SALE" && car.price_negotiable;
   // An expired listing can still be opened from a link or a chat, but can't be bought or booked until it's renewed.
   const availability = listing.is_expired ? "UNAVAILABLE" : listing.availability_status;
-  const statusNote = listing.is_expired ? t("listingExpired") : listing.availability_status === "UNDER_OFFER" ? t("listingUnderOffer") : listing.availability_status === "UNAVAILABLE" ? t("listingUnavailable") : "";
+  const soldOut = cat === "goods" && listing.quantity === 0;
+  const statusNote = listing.is_expired ? t("listingExpired") : soldOut ? tg("soldOut") : listing.availability_status === "UNDER_OFFER" ? t("listingUnderOffer") : listing.availability_status === "UNAVAILABLE" ? t("listingUnavailable") : "";
   const media = listing.media.map((m) => ({ id: m.id, url: m.file_url, media_type: m.media_type, is_primary: m.order === 0 }));
   const structuredData = {
     "@context": "https://schema.org",
@@ -131,8 +140,8 @@ export default async function MarketplaceDetailPage({
     offers: {
       "@type": "Offer",
       priceCurrency: "XAF",
-      price: listing.price_xaf,
-      availability: listing.availability_status === "AVAILABLE"
+      price: headlinePrice(listing),
+      availability: listing.availability_status === "AVAILABLE" && !soldOut
         ? "https://schema.org/InStock"
         : "https://schema.org/OutOfStock",
     },
@@ -158,7 +167,7 @@ export default async function MarketplaceDetailPage({
         backHref={`/marketplace/${cat}`}
         backLabel={t(BACK_KEYS[cat])}
         title={listing.title}
-        shareTitle={SHARE_TITLES[cat]}
+        shareTitle={listing.title || SHARE_TITLES[cat]}
         location={listing.quarter_name ?? ""}
         photos={media}
         listerRole={listing.lister_role}
@@ -171,6 +180,14 @@ export default async function MarketplaceDetailPage({
         sectionTitle={t("conditions")}
         rows={conditionRows}
         priceText={`${price} XAF${priceSuffix ? ` · ${priceSuffix}` : ""}${negotiable ? ` · ${tcar("negotiable")}` : ""}${statusNote ? ` · ${statusNote}` : ""}`}
+        priceSlot={cat === "goods" && (listing.on_sale || listing.compare_at_price_xaf || listing.has_variants) ? (
+          <FlashSalePrice
+            priceXaf={listing.price_xaf} currentPriceXaf={listing.current_price_xaf ?? listing.price_xaf}
+            onSale={Boolean(listing.on_sale)} saleEndsAt={listing.sale_ends_at ?? null} suffix={statusNote}
+            compareAtXaf={listing.compare_at_price_xaf ?? null}
+            fromXaf={listing.has_variants ? listing.price_from_xaf ?? listing.price_xaf : null}
+          />
+        ) : undefined}
         detailsSlot={car ? <CarSpecSheet car={car} /> : undefined}
         listingChat={{ category: cat, id: listing.id, isSale: listing.price_basis === "SALE" }}
         sellerSlot={<SellerTrustCard sellerId={listing.lister_user} listerRole={listing.lister_role} isSale={listing.price_basis === "SALE"} />}
@@ -195,6 +212,21 @@ export default async function MarketplaceDetailPage({
               availability={availability}
               isSale={listing.price_basis === "SALE"}
               amount={payTotal}
+              askingXaf={Number(listing.price_xaf)}
+              depositXaf={depositValue}
+              allowOffers={Boolean(listing.allow_offers) && !listing.on_sale && !listing.has_variants}
+              sellerOnVacation={Boolean(listing.seller_on_vacation)}
+              goods={cat === "goods" ? {
+                stock: Number(listing.quantity ?? 1),
+                unitPriceXaf: Number(listing.on_sale ? listing.current_price_xaf ?? listing.price_xaf : listing.price_xaf),
+                compareAtXaf: listing.compare_at_price_xaf ?? null,
+                variants: listing.has_variants ? listing.variants ?? [] : undefined,
+                options: [
+                  ...(listing.pickup_available ? [{ method: "PICKUP" as const, feeXaf: 0 }] : []),
+                  ...(listing.seller_delivery ? [{ method: "SELLER" as const, feeXaf: Number(listing.seller_delivery_fee_xaf ?? 0), note: listing.seller_delivery_areas || undefined }] : []),
+                  ...(listing.courier_shipping ? [{ method: "COURIER" as const, feeXaf: Number(listing.courier_fee_xaf ?? 0), note: listing.courier_note || undefined }] : []),
+                ],
+              } : undefined}
             />
             )}
             <HideForOwner ownerId={listing.lister_user}>
@@ -204,6 +236,7 @@ export default async function MarketplaceDetailPage({
           </div>
         }
       />
+      <MarketplaceReviews category={cat} listingId={listing.id} />
       <SimilarMarketplaceListings category={cat} id={listing.id} />
     </>
   );

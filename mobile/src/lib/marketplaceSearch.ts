@@ -1,6 +1,6 @@
-import type { MarketplaceCategory, PaginatedResponse } from "./api";
+import type { BrowsableCategory, PaginatedResponse } from "./api";
 
-export const SEARCH_CATEGORIES: MarketplaceCategory[] = ["warehouses", "stores", "businesses", "cars"];
+export const SEARCH_CATEGORIES: BrowsableCategory[] = ["warehouses", "stores", "businesses", "cars", "goods"];
 export const MIN_SEARCH_LENGTH = 2;
 
 export interface MarketplaceSearchResult {
@@ -9,10 +9,13 @@ export interface MarketplaceSearchResult {
   price_xaf: string;
   price_basis: string;
   quarter_name: string | null;
-  category: MarketplaceCategory;
+  category: BrowsableCategory;
+  on_sale?: boolean;
+  current_price_xaf?: string;
+  sale_ends_at?: string | null;
 }
 
-export type ListCategory = (category: MarketplaceCategory, filters: Record<string, string>) => Promise<PaginatedResponse<Omit<MarketplaceSearchResult, "category">>>;
+export type ListCategory = (category: BrowsableCategory, filters: Record<string, string>) => Promise<PaginatedResponse<Omit<MarketplaceSearchResult, "category">>>;
 
 export interface MarketplaceSearchOutcome {
   results: MarketplaceSearchResult[];
@@ -28,7 +31,7 @@ export function searchableQuery(raw: string): string {
   return trimmed.length >= MIN_SEARCH_LENGTH ? trimmed : "";
 }
 
-/** Searches all four categories at once; one category failing still shows the others. */
+/** Searches all five categories at once; one category failing still shows the others. */
 export async function searchMarketplace(query: string, list: ListCategory): Promise<MarketplaceSearchOutcome> {
   const responses = await Promise.allSettled(
     SEARCH_CATEGORIES.map((category) =>

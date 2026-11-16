@@ -92,9 +92,12 @@ export default function SecurityPage() {
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [error, setError] = useState("");
   const [mfaEnabled, setMfaEnabled] = useState<boolean | null>(null);
+  // null until the browser has been checked, so the form never flashes up for signed-out visitors.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
+    void Promise.resolve().then(() => setSignedIn(Boolean(token)));
     if (!token) return;
     getMfaStatus(token).then((r) => setMfaEnabled(r.mfa_enabled)).catch(() => {});
   }, []);
@@ -129,6 +132,18 @@ export default function SecurityPage() {
   const score = newPassword ? checks.filter((c) => c.ok).length : 0;
   const strength = STRENGTH[score];
   const mismatch = confirmPassword.length > 0 && confirmPassword !== newPassword;
+
+  if (signedIn === null) return <AccountSidebarLayout activeHref="/security">{null}</AccountSidebarLayout>;
+  if (!signedIn) {
+    return (
+      <AccountSidebarLayout activeHref="/security">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-slate-600 mb-4 font-semibold text-sm">{t("signInPrompt")}</p>
+          <Button href="/login">{t("signInButton")}</Button>
+        </div>
+      </AccountSidebarLayout>
+    );
+  }
 
   return (
     <AccountSidebarLayout activeHref="/security">

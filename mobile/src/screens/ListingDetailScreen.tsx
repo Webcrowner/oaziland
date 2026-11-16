@@ -17,6 +17,7 @@ function listerRoleLabel(role: string, listingType: string): string {
   if (role === "OWNER") return listingType === "SALE" ? "Owner" : "Landlord";
   if (role === "AGENT") return "Agent";
   if (role === "AGENCY") return "Agency";
+  if (role === "PLATFORM") return "Oaziland official";
   return "Owner";
 }
 

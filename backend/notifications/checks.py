@@ -15,7 +15,7 @@ def warn_about_sandbox_notification_channels(app_configs, **kwargs):
             hint=(
                 "Messages are saved but never sent, including SMS to a user's emergency contact when they press SOS on an "
                 "OaziGo ride. Configure the required provider environment variables for each channel; see "
-                "backend/.env.example. PUSH intentionally remains sandboxed until a push provider is selected."
+                "backend/.env.example. For PUSH, run `manage.py generate_vapid_keys` and set the VAPID_* variables."
             ),
             id="notifications.W001",
         )

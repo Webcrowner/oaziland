@@ -13,6 +13,20 @@ from events.models import Venue, VenueSpace
 from decimal import Decimal
 
 
+def _ensure_room_types(hotel, specs):
+    """Gives the hotel (or guest house) named room types with real rooms behind them, upgrading the unnamed rows older seeds
+    created (matched by their old category code) instead of duplicating them."""
+    from hotels.room_types import save_room_type
+
+    for legacy_category, name, category, capacity, rate, beds, size, rooms, description, amenities in specs:
+        existing = hotel.room_types.filter(name__iexact=name).first() or hotel.room_types.filter(name="", category=legacy_category).first()
+        save_room_type(hotel, {
+            "name": name, "category": category, "capacity": capacity, "base_rate_xaf": str(rate), "bed_setup": beds,
+            "size_sqm": str(size), "description": description, "amenities": amenities,
+            "room_count": max(rooms, existing.rooms.count()) if existing else rooms,
+        }, existing)
+
+
 class Command(BaseCommand):
     help = "Seed Cameroon realistic demo accommodations and quarters"
 
@@ -108,19 +122,13 @@ class Command(BaseCommand):
         if not h1.name:
             h1.name = "Kribi Oceanfront Resort & Spa"
             h1.save(update_fields=["name"])
+        _ensure_room_types(h1, [
+            ("DELUXE_OCEAN_SUITE", "Deluxe ocean-view double", "DELUXE", 2, 45000, "1 queen bed", 30, 6,
+             "Sea-facing double with a balcony, air conditioning and a rain shower.", ["Ocean view", "Balcony", "Air conditioning", "Wi-Fi"]),
+            ("EXECUTIVE_SUITE", "Executive beach suite", "SUITE", 3, 65000, "1 king bed + sofa bed", 48, 3,
+             "Suite with a separate lounge, a terrace onto the beach and a bathtub.", ["Beach access", "Terrace", "Minibar", "Air conditioning", "Wi-Fi"]),
+        ])
         if created:
-            RoomType.objects.create(
-                hotel=h1,
-                category="DELUXE_OCEAN_SUITE",
-                base_rate_xaf=Decimal("45000"),
-                capacity=2,
-            )
-            RoomType.objects.create(
-                hotel=h1,
-                category="EXECUTIVE_SUITE",
-                base_rate_xaf=Decimal("65000"),
-                capacity=3,
-            )
             PropertyAssetPhoto.objects.create(
                 property_asset=h1,
                 url="https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80",
@@ -142,13 +150,11 @@ class Command(BaseCommand):
         if not h2.name:
             h2.name = "Bastos Diplomatic Suites"
             h2.save(update_fields=["name"])
+        _ensure_room_types(h2, [
+            ("DIPLOMATIC_ROOM", "Diplomatic double", "DELUXE", 2, 55000, "1 king bed", 32, 8,
+             "Quiet double with a work desk, fast Wi-Fi and blackout curtains, near the embassies.", ["Work desk", "Air conditioning", "Wi-Fi", "Safe"]),
+        ])
         if created:
-            RoomType.objects.create(
-                hotel=h2,
-                category="DIPLOMATIC_ROOM",
-                base_rate_xaf=Decimal("55000"),
-                capacity=2,
-            )
             PropertyAssetPhoto.objects.create(
                 property_asset=h2,
                 url="https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=800&q=80",
@@ -206,6 +212,14 @@ class Command(BaseCommand):
             type="GUEST_HOUSE_LODGE",
             defaults={"description": "Charming beachfront guest lodge in Kribi."},
         )
+        if not gh1.name:
+            gh1.name = "Kribi Beach Lodge"
+            gh1.is_coastal_leisure = True
+            gh1.save(update_fields=["name", "is_coastal_leisure"])
+        _ensure_room_types(gh1, [
+            ("", "Beach bungalow double", "STANDARD", 2, 25000, "1 double bed", 18, 4,
+             "Bungalow a few steps from the sand, with a fan and a private shower.", ["Beach access", "Fan", "Private shower"]),
+        ])
         if created:
             PropertyAssetPhoto.objects.create(
                 property_asset=gh1,

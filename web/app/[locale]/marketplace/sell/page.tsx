@@ -35,6 +35,7 @@ export default function SellPage() {
   const [itemCategory, setItemCategory] = useState<GoodsCategory | "">("");
   const [condition, setCondition] = useState<GoodsCondition>("USED");
   const [price, setPrice] = useState("");
+  const [compareAt, setCompareAt] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [quarterId, setQuarterId] = useState("");
   const [description, setDescription] = useState("");
@@ -47,6 +48,8 @@ export default function SellPage() {
     listQuarters().then(setQuarters).catch(() => {});
   }, []);
 
+  const compareAtInvalid = compareAt !== "" && !(Number(compareAt) > Number(price));
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const token = localStorage.getItem("access_token");
@@ -54,11 +57,16 @@ export default function SellPage() {
       router.push("/login");
       return;
     }
+    if (compareAtInvalid) {
+      setError(t("compareAtInvalid"));
+      return;
+    }
     setStatus("submitting");
     setError("");
     try {
       const listing = await createMarketplaceListing("goods", {
         title: title.trim(), description: description.trim(), price_basis: "SALE", price_xaf: price,
+        ...(compareAt ? { compare_at_price_xaf: compareAt } : {}),
         item_category: itemCategory, condition, quantity: Number(quantity) || 1, quarter: quarterId || null,
         latitude: gps.latitude, longitude: gps.longitude,
       }, token);
@@ -147,6 +155,18 @@ export default function SellPage() {
             <label htmlFor="sell-quantity" className={label}>{t("quantity")}</label>
             <input id="sell-quantity" required type="number" inputMode="numeric" min="1" max="100000" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} className={field} />
           </div>
+        </div>
+
+        <div>
+          <label htmlFor="sell-compare-at" className={label}>{t("compareAt")}</label>
+          <input
+            id="sell-compare-at" type="number" inputMode="numeric" min="1" step="any" value={compareAt}
+            onChange={(e) => setCompareAt(e.target.value)} aria-invalid={compareAtInvalid} aria-describedby="sell-compare-at-hint"
+            className={field}
+          />
+          <p id="sell-compare-at-hint" className={`mt-1 text-xs ${compareAtInvalid ? "font-semibold text-red-700" : "text-slate-500"}`}>
+            {compareAtInvalid ? t("compareAtInvalid") : t("compareAtHint")}
+          </p>
         </div>
 
         <div>

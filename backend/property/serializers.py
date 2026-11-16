@@ -61,6 +61,8 @@ class OwnerRoleSerializerMixin(ListerRatingSerializerMixin):
     lister_role = serializers.SerializerMethodField()
 
     def get_lister_role(self, obj) -> str:
+        if getattr(obj.owner, "is_platform_account", False):
+            return "PLATFORM"  # offered by Oaziland itself (identity.platform_account)
         agent_profile = getattr(obj.owner, "agent_profile", None)
         if agent_profile is None:
             return "OWNER"

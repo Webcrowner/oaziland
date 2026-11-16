@@ -1,4 +1,7 @@
-import { NavigationContainer } from "@react-navigation/native";
+import { useEffect } from "react";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
+import * as Notifications from "expo-notifications";
+import { registerDeviceForPush } from "../lib/pushNotifications";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import HomeScreen from "../screens/HomeScreen";
@@ -10,6 +13,8 @@ import ListPropertyScreen from "../screens/ListPropertyScreen";
 import MfaSetupScreen from "../screens/MfaSetupScreen";
 import HotelsScreen from "../screens/HotelsScreen";
 import EventsScreen from "../screens/EventsScreen";
+import VenueBookingsScreen from "../screens/VenueBookingsScreen";
+import StaysScreen from "../screens/StaysScreen";
 import GuestHousesScreen from "../screens/GuestHousesScreen";
 import StudentHostelsScreen from "../screens/StudentHostelsScreen";
 import WantedBoardScreen from "../screens/WantedBoardScreen";
@@ -21,16 +26,26 @@ import MessagesScreen from "../screens/MessagesScreen";
 import ConversationScreen from "../screens/ConversationScreen";
 import FeedScreen from "../screens/FeedScreen";
 import CreatePostScreen from "../screens/CreatePostScreen";
+import VideosScreen from "../screens/VideosScreen";
+import CreateVideoScreen from "../screens/CreateVideoScreen";
 import AdminConsoleScreen from "../screens/AdminConsoleScreen";
 import AgentDashboardScreen from "../screens/AgentDashboardScreen";
 import MarketplaceScreen from "../screens/MarketplaceScreen";
 import MarketplaceListingDetailScreen from "../screens/MarketplaceListingDetailScreen";
 import MarketplaceOrdersScreen from "../screens/MarketplaceOrdersScreen";
+import MarketplaceOffersScreen from "../screens/MarketplaceOffersScreen";
+import MarketplaceVariantsScreen from "../screens/MarketplaceVariantsScreen";
+import MarketplaceSellerDashboardScreen from "../screens/MarketplaceSellerDashboardScreen";
 import MyMarketplaceListingsScreen from "../screens/MyMarketplaceListingsScreen";
+import MarketplaceCartScreen from "../screens/MarketplaceCartScreen";
+import MarketplaceDealsScreen from "../screens/MarketplaceDealsScreen";
+import MarketplaceShopScreen from "../screens/MarketplaceShopScreen";
+import MarketplaceShopSettingsScreen from "../screens/MarketplaceShopSettingsScreen";
 import WarehousesScreen from "../screens/WarehousesScreen";
 import StoresScreen from "../screens/StoresScreen";
 import BusinessesScreen from "../screens/BusinessesScreen";
 import CarsScreen from "../screens/CarsScreen";
+import GoodsScreen from "../screens/GoodsScreen";
 import OaziGoScreen from "../screens/OaziGoScreen";
 import TasklnServiceScreen from "../screens/TasklnServiceScreen";
 import PropertyManagementScreen from "../screens/PropertyManagementScreen";
@@ -46,10 +61,11 @@ import PremiumScreen from "../screens/PremiumScreen";
 import PrivacySettingsScreen from "../screens/PrivacySettingsScreen";
 import ReferralsScreen from "../screens/ReferralsScreen";
 import TechnicianDashboardScreen from "../screens/TechnicianDashboardScreen";
+import KycScreen from "../screens/KycScreen";
 import AboutScreen from "../screens/AboutScreen";
 import ContactScreen from "../screens/ContactScreen";
 import HowItWorksScreen from "../screens/HowItWorksScreen";
-import type { MarketplaceCategory } from "../lib/api";
+import type { BrowsableCategory } from "../lib/api";
 
 export type RootStackParamList = {
   Home: undefined;
@@ -61,6 +77,8 @@ export type RootStackParamList = {
   MfaSetup: undefined;
   Hotels: undefined;
   Events: undefined;
+  VenueBookings: undefined;
+  Stays: undefined;
   GuestHouses: undefined;
   StudentHostels: undefined;
   WantedBoard: undefined;
@@ -72,16 +90,26 @@ export type RootStackParamList = {
   Conversation: { conversationId: string; participantNames: string };
   Feed: { tab?: "forYou" | "following" | "mine" } | undefined;
   CreatePost: { linkedListingId?: string } | undefined;
+  Videos: undefined;
+  CreateVideo: { linkedListingId?: string } | undefined;
   AdminConsole: undefined;
   AgentDashboard: undefined;
   Marketplace: undefined;
-  MarketplaceListingDetail: { category: MarketplaceCategory; listingId: string };
-  MarketplaceOrders: undefined;
+  MarketplaceListingDetail: { category: BrowsableCategory; listingId: string };
+  MarketplaceOrders: { role?: "buying" | "selling"; orderId?: string } | undefined;
+  MarketplaceOffers: { role?: "buying" | "selling" } | undefined;
+  MarketplaceVariants: { listingId: string; title?: string };
+  MarketplaceSellerDashboard: undefined;
   MyMarketplaceListings: undefined;
+  MarketplaceCart: undefined;
+  MarketplaceDeals: undefined;
+  MarketplaceShop: { userId: string };
+  MarketplaceShopSettings: undefined;
   Warehouses: undefined;
   Stores: undefined;
   Businesses: undefined;
   Cars: undefined;
+  Goods: undefined;
   OaziGo: undefined;
   TasklnService: undefined;
   PropertyManagement: undefined;
@@ -97,12 +125,28 @@ export type RootStackParamList = {
   PrivacySettings: undefined;
   Referrals: undefined;
   TechnicianDashboard: undefined;
+  Kyc: undefined;
   About: undefined;
   Contact: undefined;
   HowItWorks: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+// The backend sends a web path ("/oazigo/trips", "/notifications"...) with each push; map it to a screen.
+const SCREEN_FOR_PATH: [string, keyof RootStackParamList][] = [
+  ["/oazigo", "OaziGo"],
+  ["/notifications", "Notifications"],
+  ["/messages", "Messages"],
+];
+
+function openFromPush(response: Notifications.NotificationResponse | null) {
+  const url = response?.notification.request.content.data?.url;
+  if (typeof url !== "string" || !navigationRef.isReady()) return;
+  const match = SCREEN_FOR_PATH.find(([prefix]) => url.startsWith(prefix));
+  navigationRef.navigate((match ? match[1] : "Notifications") as never);
+}
 
 /**
  * The mobile equivalent of the web app's five core pages (Prompt 17),
@@ -111,8 +155,16 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
  * what "adapted for mobile" actually means here.
  */
 export default function AppNavigator() {
+  useEffect(() => {
+    // Taps while the app runs; the tap that launched it from closed is handled once navigation is ready.
+    const subscription = Notifications.addNotificationResponseReceivedListener(openFromPush);
+    // Re-register on start so a refreshed push token reaches the server.
+    void registerDeviceForPush().catch(() => false);
+    return () => subscription.remove();
+  }, []);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={() => Notifications.getLastNotificationResponseAsync().then(openFromPush).catch(() => {})}>
       <Stack.Navigator
         initialRouteName="Home"
         screenOptions={{
@@ -130,6 +182,8 @@ export default function AppNavigator() {
         <Stack.Screen name="MfaSetup" component={MfaSetupScreen} options={{ title: "Verify Your Account" }} />
         <Stack.Screen name="Hotels" component={HotelsScreen} options={{ title: "Hotels" }} />
         <Stack.Screen name="Events" component={EventsScreen} options={{ title: "Event Venues" }} />
+        <Stack.Screen name="VenueBookings" component={VenueBookingsScreen} options={{ title: "My Venue Bookings" }} />
+        <Stack.Screen name="Stays" component={StaysScreen} options={{ title: "My Stays" }} />
         <Stack.Screen name="GuestHouses" component={GuestHousesScreen} options={{ title: "Guest Houses" }} />
         <Stack.Screen name="StudentHostels" component={StudentHostelsScreen} options={{ title: "Student Hostels" }} />
         <Stack.Screen name="WantedBoard" component={WantedBoardScreen} options={{ title: "Looking For..." }} />
@@ -141,16 +195,26 @@ export default function AppNavigator() {
         <Stack.Screen name="Conversation" component={ConversationScreen} options={({ route }) => ({ title: route.params.participantNames })} />
         <Stack.Screen name="Feed" component={FeedScreen} options={{ title: "Feed" }} />
         <Stack.Screen name="CreatePost" component={CreatePostScreen} options={{ title: "Create a Post" }} />
+        <Stack.Screen name="Videos" component={VideosScreen} options={{ title: "Videos" }} />
+        <Stack.Screen name="CreateVideo" component={CreateVideoScreen} options={{ title: "Post a video" }} />
         <Stack.Screen name="AdminConsole" component={AdminConsoleScreen} options={{ title: "Admin Console" }} />
         <Stack.Screen name="AgentDashboard" component={AgentDashboardScreen} options={{ title: "My Dashboard" }} />
         <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: "Marketplace" }} />
         <Stack.Screen name="MarketplaceListingDetail" component={MarketplaceListingDetailScreen} options={{ title: "Listing" }} />
         <Stack.Screen name="MarketplaceOrders" component={MarketplaceOrdersScreen} options={{ title: "Marketplace Orders" }} />
+        <Stack.Screen name="MarketplaceOffers" component={MarketplaceOffersScreen} options={{ title: "My Offers" }} />
+        <Stack.Screen name="MarketplaceVariants" component={MarketplaceVariantsScreen} options={{ title: "Options" }} />
+        <Stack.Screen name="MarketplaceSellerDashboard" component={MarketplaceSellerDashboardScreen} options={{ title: "Seller Dashboard" }} />
         <Stack.Screen name="MyMarketplaceListings" component={MyMarketplaceListingsScreen} options={{ title: "My Listings" }} />
+        <Stack.Screen name="MarketplaceCart" component={MarketplaceCartScreen} options={{ title: "My Cart" }} />
+        <Stack.Screen name="MarketplaceDeals" component={MarketplaceDealsScreen} options={{ title: "Flash deals" }} />
+        <Stack.Screen name="MarketplaceShop" component={MarketplaceShopScreen} options={{ title: "Shop" }} />
+        <Stack.Screen name="MarketplaceShopSettings" component={MarketplaceShopSettingsScreen} options={{ title: "Shop Settings" }} />
         <Stack.Screen name="Warehouses" component={WarehousesScreen} options={{ title: "Warehouses" }} />
         <Stack.Screen name="Stores" component={StoresScreen} options={{ title: "Stores" }} />
         <Stack.Screen name="Businesses" component={BusinessesScreen} options={{ title: "Businesses" }} />
         <Stack.Screen name="Cars" component={CarsScreen} options={{ title: "Cars" }} />
+        <Stack.Screen name="Goods" component={GoodsScreen} options={{ title: "Goods" }} />
         <Stack.Screen name="OaziGo" component={OaziGoScreen} options={{ title: "OaziGo" }} />
         <Stack.Screen name="TasklnService" component={TasklnServiceScreen} options={{ title: "Taskln Service" }} />
         <Stack.Screen name="PropertyManagement" component={PropertyManagementScreen} options={{ title: "Property Management" }} />
@@ -166,6 +230,7 @@ export default function AppNavigator() {
         <Stack.Screen name="PrivacySettings" component={PrivacySettingsScreen} options={{ title: "Privacy Settings" }} />
         <Stack.Screen name="Referrals" component={ReferralsScreen} options={{ title: "Referrals" }} />
         <Stack.Screen name="TechnicianDashboard" component={TechnicianDashboardScreen} options={{ title: "Technician Dashboard" }} />
+        <Stack.Screen name="Kyc" component={KycScreen} options={{ title: "Verify Your Identity" }} />
         <Stack.Screen name="About" component={AboutScreen} options={{ title: "About" }} />
         <Stack.Screen name="Contact" component={ContactScreen} options={{ title: "Contact" }} />
         <Stack.Screen name="HowItWorks" component={HowItWorksScreen} options={{ title: "How It Works" }} />

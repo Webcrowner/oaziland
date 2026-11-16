@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { getMyProfile, devSwitchRole, type UserProfile } from "@/lib/api";
+import { currentPath, loginHref } from "@/lib/authRedirect";
+import { disablePush } from "@/lib/push";
 import {
   IconSearch,
   IconHotel,
@@ -49,11 +51,15 @@ function primaryDashboardHref(profile: UserProfile | null, devRole: string | nul
 /**
  * Full-height left sidebar that replaces the global top bar on dashboard/account
  * pages: logo, role-specific nav, public-site links, language, account actions.
+ * Every page using it is personal, so signed-out visitors are sent to sign in
+ * (and brought back here afterwards) before anything is shown.
  */
 export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
   const t = useTranslations("Header");
   const router = useRouter();
   const pathname = usePathname();
+  // null until the browser has been checked, so signed-out visitors never see the account sidebar.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
@@ -63,15 +69,22 @@ export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
 
   useEffect(() => {
     const storedRole = localStorage.getItem(DEV_ROLE_KEY);
-    void Promise.resolve().then(() => setDevRole(storedRole));
     const token = localStorage.getItem("access_token");
-    if (!token) return;
+    void Promise.resolve().then(() => {
+      setDevRole(storedRole);
+      setSignedIn(Boolean(token));
+    });
+    if (!token) {
+      router.replace(loginHref(currentPath(pathname)));
+      return;
+    }
     getMyProfile(token)
       .then(setProfile)
       .catch(() => setProfile(null));
-  }, []);
+  }, [router, pathname]);
 
   function handleLogOut() {
+    void disablePush(localStorage.getItem("access_token"));
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     setProfile(null);
@@ -98,6 +111,9 @@ export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
   }
 
   const dashboardHref = primaryDashboardHref(profile, SHOW_DEV_ROLES ? devRole : null);
+
+  // Blank while checking or redirecting to sign in: no sidebar, no page content.
+  if (!signedIn) return <div className="min-h-screen bg-slate-50/70" />;
 
   const exploreLinks = [
     { href: "/search", label: t("exploreProperties"), icon: IconSearch },

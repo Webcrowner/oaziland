@@ -15,9 +15,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import SellGateNotice, { useSellGate } from "@/components/MarketplaceSellGate";
 import { listingErrorMessage } from "@/lib/marketplaceErrors";
 
-const PRICE_BASIS_LABELS: Record<string, string> = {
-  SALE: "For Sale", RENT_NIGHTLY: "Rent / Night", RENT_WEEKLY: "Rent / Week", RENT_MONTHLY: "Rent / Month", RENT_ANNUAL: "Rent / Year",
-};
+const PRICE_BASIS_OPTIONS = ["SALE", "RENT_NIGHTLY", "RENT_WEEKLY", "RENT_MONTHLY", "RENT_ANNUAL"] as const;
 
 /** Post a store (retail shopfront) for rent or sale. Browsing stores is the marketplace page's Stores tab. */
 export default function SellStorePage() {
@@ -74,18 +72,18 @@ export default function SellStorePage() {
       <SellGateNotice gate={gate} />
 
       <form onSubmit={handleSubmit} className="border border-gray-200 rounded-xl p-6 bg-white mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <input required placeholder={t("titlePlaceholder")} value={title} onChange={(e) => setTitle(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
-        <textarea rows={3} placeholder={t("listingDescriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
-        <input required type="number" min="0.01" step="0.01" placeholder={t("sizeSqmPlaceholder")} value={sizeSqm} onChange={(e) => setSizeSqm(e.target.value)} className="border rounded-lg px-3 py-2" />
-        <input type="number" min="0.01" step="0.01" placeholder={t("frontagePlaceholder")} value={frontage} onChange={(e) => setFrontage(e.target.value)} className="border rounded-lg px-3 py-2" />
-        <select value={priceBasis} onChange={(e) => setPriceBasis(e.target.value)} className="border rounded-lg px-3 py-2">
-          {Object.entries(PRICE_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        <input required placeholder={t("titlePlaceholder")} aria-label={t("titlePlaceholder")} value={title} onChange={(e) => setTitle(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
+        <textarea rows={3} placeholder={t("listingDescriptionPlaceholder")} aria-label={t("listingDescriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" />
+        <input required type="number" min="0.01" step="0.01" placeholder={t("sizeSqmPlaceholder")} aria-label={t("sizeSqmPlaceholder")} value={sizeSqm} onChange={(e) => setSizeSqm(e.target.value)} className="border rounded-lg px-3 py-2" />
+        <input type="number" min="0.01" step="0.01" placeholder={t("frontagePlaceholder")} aria-label={t("frontagePlaceholder")} value={frontage} onChange={(e) => setFrontage(e.target.value)} className="border rounded-lg px-3 py-2" />
+        <select aria-label={t("priceBasisLabel")} value={priceBasis} onChange={(e) => setPriceBasis(e.target.value)} className="border rounded-lg px-3 py-2">
+          {PRICE_BASIS_OPTIONS.map((value) => <option key={value} value={value}>{t(`priceBasisOptions.${value}`)}</option>)}
         </select>
-        <input required type="number" min="0.01" step="0.01" placeholder={t("pricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
+        <input required type="number" min="0.01" step="0.01" placeholder={t("pricePlaceholder")} aria-label={t("pricePlaceholder")} value={price} onChange={(e) => setPrice(e.target.value)} className="border rounded-lg px-3 py-2" />
         {priceBasis !== "SALE" && (
-          <input type="number" min="0" step="0.01" placeholder={t("depositPlaceholder")} value={deposit} onChange={(e) => setDeposit(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <input type="number" min="0" step="0.01" placeholder={t("depositPlaceholder")} aria-label={t("depositPlaceholder")} value={deposit} onChange={(e) => setDeposit(e.target.value)} className="border rounded-lg px-3 py-2" />
         )}
-        <select value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" required>
+        <select aria-label={t("chooseNeighborhood")} value={quarterId} onChange={(e) => setQuarterId(e.target.value)} className="border rounded-lg px-3 py-2 md:col-span-2" required>
           <option value="" disabled>{t("chooseNeighborhood")}</option>
           <QuarterOptions quarters={quarters} />
         </select>

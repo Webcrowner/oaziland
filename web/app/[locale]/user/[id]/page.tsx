@@ -1,18 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 
+function MapLoading() {
+  const t = useTranslations("UserPortfolio");
+  return (
+    <div className="w-full h-64 bg-slate-100 animate-pulse rounded-2xl flex items-center justify-center text-xs text-slate-400">
+      {t("mapLoading")}
+    </div>
+  );
+}
+
 // Dynamic Leaflet map without SSR
 const PropertyMap = dynamic(() => import("@/components/PropertyMap"), {
   ssr: false,
-  loading: () => (
-    <div className="w-full h-64 bg-slate-100 animate-pulse rounded-2xl flex items-center justify-center text-xs text-slate-400">
-      Loading interactive map...
-    </div>
-  ),
+  loading: () => <MapLoading />,
 });
 import {
   getUserPublicIndex,
@@ -47,6 +53,8 @@ import {
 export default function UserPublicIndexPage() {
   const params = useParams();
   const userId = params?.id as string;
+  const t = useTranslations("UserPortfolio");
+  const locale = useLocale();
 
   const [profile, setProfile] = useState<UserRoleIndexProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,17 +85,17 @@ export default function UserPublicIndexPage() {
         setError(null);
       })
       .catch((err) => {
-        setError(err.message || "Failed to load user index page");
+        setError(err.message || t("loadFailed"));
       })
       .finally(() => setLoading(false));
-  }, [userId]);
+  }, [userId, t]);
 
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto text-center py-24">
           <div className="w-12 h-12 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-500 font-medium text-sm">Loading user index and portfolio...</p>
+          <p className="text-slate-500 font-medium text-sm">{t("loading")}</p>
         </div>
       </main>
     );
@@ -100,13 +108,13 @@ export default function UserPublicIndexPage() {
           <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 font-bold text-xl">
             !
           </div>
-          <h2 className="text-lg font-bold text-slate-900 mb-2">User Not Found</h2>
-          <p className="text-sm text-slate-500 mb-6">{error || "Could not retrieve the requested user portfolio index."}</p>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">{t("notFound")}</h2>
+          <p className="text-sm text-slate-500 mb-6">{error || t("notFoundBody")}</p>
           <Link
             href="/search"
             className="inline-block px-5 py-2.5 rounded-xl font-bold text-xs bg-slate-900 text-white hover:bg-slate-800 transition-colors"
           >
-            Explore Listings
+            {t("explore")}
           </Link>
         </div>
       </main>
@@ -114,15 +122,15 @@ export default function UserPublicIndexPage() {
   }
 
   const roleLabels: Record<string, string> = {
-    hotel_owner: "Hotel Owner",
-    hostel_owner: "Hostel Owner",
-    landlord: "Property Landlord",
-    agent: "Real Estate Agent",
-    agency: "Real Estate Agency",
-    technician: "Taskln Technician",
-    driver: "OaziGo Driver",
-    student: "Student Resident",
-    user: "Member",
+    hotel_owner: t("role_hotel_owner"),
+    hostel_owner: t("role_hostel_owner"),
+    landlord: t("role_landlord"),
+    agent: t("role_agent"),
+    agency: t("role_agency"),
+    technician: t("role_technician"),
+    driver: t("role_driver"),
+    student: t("role_student"),
+    user: t("role_user"),
   };
 
   const apartments = profile.listings.filter(
@@ -144,12 +152,12 @@ export default function UserPublicIndexPage() {
     if (h.latitude && h.longitude) {
       geoProperties.push({
         id: h.id,
-        title: `Hotel in ${h.quarter_name}`,
-        category: "Hotel",
+        title: h.name || t("hotelIn", { place: h.quarter_name }),
+        category: t("catHotel"),
         latitude: h.latitude,
         longitude: h.longitude,
         quarter_name: h.quarter_name,
-        url: "/hotels",
+        url: `/hotels/${h.id}`,
       });
     }
   });
@@ -158,12 +166,12 @@ export default function UserPublicIndexPage() {
     if (sh.latitude && sh.longitude) {
       geoProperties.push({
         id: sh.id,
-        title: `Hostel in ${sh.quarter_name}`,
-        category: "Hostel",
+        title: sh.name || t("hostelIn", { place: sh.quarter_name }),
+        category: t("catHostel"),
         latitude: sh.latitude,
         longitude: sh.longitude,
         quarter_name: sh.quarter_name,
-        url: "/student-hostels",
+        url: `/student-hostels/${sh.id}`,
       });
     }
   });
@@ -172,8 +180,8 @@ export default function UserPublicIndexPage() {
     if (gh.latitude && gh.longitude) {
       geoProperties.push({
         id: gh.id,
-        title: `Guest House in ${gh.quarter_name}`,
-        category: "Guest House",
+        title: t("guestHouseIn", { place: gh.quarter_name }),
+        category: t("catGuestHouse"),
         latitude: gh.latitude,
         longitude: gh.longitude,
         quarter_name: gh.quarter_name,
@@ -186,8 +194,8 @@ export default function UserPublicIndexPage() {
     if (v.latitude && v.longitude) {
       geoProperties.push({
         id: v.id,
-        title: `Event Venue in ${v.quarter_name}`,
-        category: "Venue",
+        title: t("venueIn", { place: v.quarter_name }),
+        category: t("catVenue"),
         latitude: v.latitude,
         longitude: v.longitude,
         quarter_name: v.quarter_name,
@@ -239,7 +247,7 @@ export default function UserPublicIndexPage() {
                   {profile.is_kyc_verified && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                       <IconShieldCheck size={12} className="text-emerald-600" />
-                      KYC Verified
+                      {t("kycVerified")}
                     </span>
                   )}
                 </div>
@@ -284,7 +292,7 @@ export default function UserPublicIndexPage() {
                 >
                   <IconQrCode size={15} />
                   <IconShare size={14} />
-                  <span>Share &amp; QR</span>
+                  <span>{t("shareShort")}</span>
                 </button>
               </div>
             </div>
@@ -300,7 +308,7 @@ export default function UserPublicIndexPage() {
                   : "bg-white text-slate-600 border border-slate-200/80 hover:bg-slate-50"
               }`}
             >
-              All ({totalOfferingsCount})
+              {t("allCount", { count: totalOfferingsCount })}
             </button>
 
             {profile.hotels.length > 0 && (
@@ -313,7 +321,7 @@ export default function UserPublicIndexPage() {
                 }`}
               >
                 <IconHotel size={13} />
-                <span>Hotels ({profile.hotels.length})</span>
+                <span>{t("pillHotels", { count: profile.hotels.length })}</span>
               </button>
             )}
 
@@ -327,7 +335,7 @@ export default function UserPublicIndexPage() {
                 }`}
               >
                 <IconGraduationCap size={13} />
-                <span>Hostels ({profile.hostels.length})</span>
+                <span>{t("pillHostels", { count: profile.hostels.length })}</span>
               </button>
             )}
 
@@ -341,7 +349,7 @@ export default function UserPublicIndexPage() {
                 }`}
               >
                 <IconBuilding size={13} />
-                <span>Apartments ({apartments.length})</span>
+                <span>{t("pillApartments", { count: apartments.length })}</span>
               </button>
             )}
 
@@ -355,7 +363,7 @@ export default function UserPublicIndexPage() {
                 }`}
               >
                 <IconLayers size={13} />
-                <span>Properties ({profile.listings.length})</span>
+                <span>{t("pillProperties", { count: profile.listings.length })}</span>
               </button>
             )}
 
@@ -369,7 +377,7 @@ export default function UserPublicIndexPage() {
                 }`}
               >
                 <IconCompass size={13} className="text-amber-600" />
-                <span>Map ({geoProperties.length})</span>
+                <span>{t("pillMap", { count: geoProperties.length })}</span>
               </button>
             )}
 
@@ -383,7 +391,7 @@ export default function UserPublicIndexPage() {
                 }`}
               >
                 <IconWrench size={13} />
-                <span>Services</span>
+                <span>{t("pillServices")}</span>
               </button>
             )}
 
@@ -397,7 +405,7 @@ export default function UserPublicIndexPage() {
                 }`}
               >
                 <IconCar size={13} />
-                <span>Fleet</span>
+                <span>{t("pillFleet")}</span>
               </button>
             )}
           </div>
@@ -431,11 +439,11 @@ export default function UserPublicIndexPage() {
                     {profile.is_kyc_verified ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                         <IconShieldCheck size={13} className="text-emerald-600" />
-                        KYC Verified
+                        {t("kycVerified")}
                       </span>
                     ) : (
                       <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                        Pending KYC
+                        {t("kycPending")}
                       </span>
                     )}
                   </div>
@@ -445,7 +453,7 @@ export default function UserPublicIndexPage() {
               {/* Roles Badge List */}
               <div className="space-y-1.5 mb-4">
                 <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
-                  Active User Roles
+                  {t("activeRoles")}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {profile.roles.map((r) => (
@@ -460,7 +468,7 @@ export default function UserPublicIndexPage() {
                 {profile.agency_name && (
                   <p className="text-xs text-slate-600 font-medium pt-1 flex items-center gap-1">
                     <IconBriefcase size={13} className="text-slate-400" />
-                    <span>Member of <strong>{profile.agency_name}</strong></span>
+                    <span>{t.rich("memberOf", { agency: profile.agency_name, strong: (chunks) => <strong>{chunks}</strong> })}</span>
                   </p>
                 )}
               </div>
@@ -468,22 +476,22 @@ export default function UserPublicIndexPage() {
               {/* Ratings & Reviews */}
               <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100 mb-5 text-xs">
                 <div>
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Reputation</span>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">{t("reputation")}</span>
                   {profile.average_rating ? (
                     <div className="flex items-center gap-1 font-extrabold text-slate-900 mt-0.5">
                       <span className="text-amber-500">★</span>
                       <span>{profile.average_rating}</span>
                       <span className="text-slate-400 font-normal">
-                        ({profile.rating_count} {profile.rating_count === 1 ? "review" : "reviews"})
+                        ({t("reviewCount", { count: profile.rating_count })})
                       </span>
                     </div>
                   ) : (
-                    <span className="text-slate-500 font-medium">New member</span>
+                    <span className="text-slate-500 font-medium">{t("newMember")}</span>
                   )}
                 </div>
                 <div className="text-right">
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Offerings</span>
-                  <span className="font-extrabold text-slate-900">{totalOfferingsCount} listed</span>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">{t("offerings")}</span>
+                  <span className="font-extrabold text-slate-900">{t("listedCount", { count: totalOfferingsCount })}</span>
                 </div>
               </div>
 
@@ -502,7 +510,7 @@ export default function UserPublicIndexPage() {
                 >
                   <IconQrCode size={16} />
                   <IconShare size={15} />
-                  <span>Share Portfolio &amp; QR Code</span>
+                  <span>{t("sharePortfolio")}</span>
                 </button>
 
                 <div className="w-full">
@@ -515,7 +523,7 @@ export default function UserPublicIndexPage() {
             <div className="bg-white rounded-3xl p-4 border border-slate-200/90 shadow-xs">
               <div className="px-3 py-2 mb-1">
                 <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
-                  Role Portfolio Navigation
+                  {t("navTitle")}
                 </p>
               </div>
 
@@ -531,7 +539,7 @@ export default function UserPublicIndexPage() {
                 >
                   <div className="flex items-center gap-2.5">
                     <IconLayers size={16} className={activeTab === "all" ? "text-amber-400" : "text-slate-400"} />
-                    <span>All Offerings</span>
+                    <span>{t("navAll")}</span>
                   </div>
                   <span
                     className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -554,7 +562,7 @@ export default function UserPublicIndexPage() {
                   >
                     <div className="flex items-center gap-2.5">
                       <IconHotel size={16} className={activeTab === "hotels" ? "text-amber-400" : "text-slate-400"} />
-                      <span>Hotels Owned</span>
+                      <span>{t("navHotels")}</span>
                     </div>
                     <span
                       className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -578,7 +586,7 @@ export default function UserPublicIndexPage() {
                   >
                     <div className="flex items-center gap-2.5">
                       <IconGraduationCap size={16} className={activeTab === "hostels" ? "text-amber-400" : "text-slate-400"} />
-                      <span>Student Hostels</span>
+                      <span>{t("navHostels")}</span>
                     </div>
                     <span
                       className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -602,7 +610,7 @@ export default function UserPublicIndexPage() {
                   >
                     <div className="flex items-center gap-2.5">
                       <IconBuilding size={16} className={activeTab === "apartments" ? "text-amber-400" : "text-slate-400"} />
-                      <span>Apartments &amp; Studios</span>
+                      <span>{t("navApartments")}</span>
                     </div>
                     <span
                       className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -626,7 +634,7 @@ export default function UserPublicIndexPage() {
                   >
                     <div className="flex items-center gap-2.5">
                       <IconHome size={16} className={activeTab === "all_listings" ? "text-amber-400" : "text-slate-400"} />
-                      <span>All Property Listings</span>
+                      <span>{t("navListings")}</span>
                     </div>
                     <span
                       className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -650,7 +658,7 @@ export default function UserPublicIndexPage() {
                   >
                     <div className="flex items-center gap-2.5">
                       <IconCompass size={16} className={activeTab === "map" ? "text-slate-950" : "text-amber-600"} />
-                      <span>Map &amp; On-Site GPS</span>
+                      <span>{t("navMap")}</span>
                     </div>
                     <span
                       className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -674,7 +682,7 @@ export default function UserPublicIndexPage() {
                   >
                     <div className="flex items-center gap-2.5">
                       <IconWrench size={16} className={activeTab === "technician" ? "text-amber-400" : "text-slate-400"} />
-                      <span>Taskln Services</span>
+                      <span>{t("navServices")}</span>
                     </div>
                     <span
                       className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -698,7 +706,7 @@ export default function UserPublicIndexPage() {
                   >
                     <div className="flex items-center gap-2.5">
                       <IconCar size={16} className={activeTab === "driver" ? "text-amber-400" : "text-slate-400"} />
-                      <span>OaziGo Fleet</span>
+                      <span>{t("navFleet")}</span>
                     </div>
                     <span
                       className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -715,23 +723,23 @@ export default function UserPublicIndexPage() {
             {/* 3. Portfolio Summary Stats Card */}
             <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-xs">
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-3">
-                Portfolio Breakdown
+                {t("breakdown")}
               </p>
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Hotels</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">{t("statHotels")}</span>
                   <span className="text-lg font-black text-slate-900">{profile.stats.hotels_count}</span>
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Hostels</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">{t("statHostels")}</span>
                   <span className="text-lg font-black text-slate-900">{profile.stats.hostels_count}</span>
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Flats</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">{t("statFlats")}</span>
                   <span className="text-lg font-black text-slate-900">{profile.stats.apartments_count}</span>
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Listings</span>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">{t("statListings")}</span>
                   <span className="text-lg font-black text-slate-900">{profile.stats.listings_count}</span>
                 </div>
               </div>
@@ -743,17 +751,17 @@ export default function UserPublicIndexPage() {
                 <IconShieldCheck size={18} />
               </div>
               <h3 className="text-xs font-black uppercase tracking-wider text-amber-300 mb-1">
-                Oaziland Escrow Guarantee
+                {t("escrowTitle")}
               </h3>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                Reservations and bookings with this verified provider are safeguarded in escrow until physical check-in or delivery.
+                {t("escrowBody")}
               </p>
             </div>
 
             {/* 5. Direct Rating & Moderation */}
             <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-xs">
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-3">
-                Rate &amp; Review Member
+                {t("rateMember")}
               </p>
               <RateAndReport subjectUserId={userId} />
             </div>
@@ -768,23 +776,23 @@ export default function UserPublicIndexPage() {
               <div>
                 <h2 className="text-xl font-black text-slate-900">
                   {activeTab === "all"
-                    ? "Complete Offerings & Portfolio"
+                    ? t("titleAll")
                     : activeTab === "hotels"
-                    ? `Hotels Owned (${profile.hotels.length})`
+                    ? t("titleHotels", { count: profile.hotels.length })
                     : activeTab === "hostels"
-                    ? `Student Hostels (${profile.hostels.length})`
+                    ? t("titleHostels", { count: profile.hostels.length })
                     : activeTab === "apartments"
-                    ? `Apartments & Studios (${apartments.length})`
+                    ? t("titleApartments", { count: apartments.length })
                     : activeTab === "all_listings"
-                    ? `All Property Listings (${profile.listings.length})`
+                    ? t("titleListings", { count: profile.listings.length })
                     : activeTab === "map"
-                    ? `On-Site Location Map (${geoProperties.length})`
+                    ? t("titleMap", { count: geoProperties.length })
                     : activeTab === "technician"
-                    ? "Taskln Technical Services"
-                    : "OaziGo Fleet & Transport"}
+                    ? t("titleServices")
+                    : t("titleFleet")}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Verified listings and direct booking access for {profile.full_name}
+                  {t("subtitle", { name: profile.full_name })}
                 </p>
               </div>
 
@@ -794,7 +802,7 @@ export default function UserPublicIndexPage() {
                   onClick={() => setActiveTab("all")}
                   className="text-xs font-bold text-amber-600 hover:text-amber-700 underline cursor-pointer"
                 >
-                  View All Sections
+                  {t("viewAll")}
                 </button>
               )}
             </div>
@@ -807,10 +815,10 @@ export default function UserPublicIndexPage() {
                 <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600">
                   <IconHotel size={18} />
                 </div>
-                <h2 className="text-lg font-bold text-slate-900">Hotels Owned</h2>
+                <h2 className="text-lg font-bold text-slate-900">{t("navHotels")}</h2>
               </div>
               <span className="text-xs font-semibold text-slate-400">
-                {profile.hotels.length} {profile.hotels.length === 1 ? "hotel" : "hotels"}
+                {t("hotelCount", { count: profile.hotels.length })}
               </span>
             </div>
 
@@ -834,12 +842,12 @@ export default function UserPublicIndexPage() {
                     )}
                     {h.star_rating && (
                       <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-950/80 text-amber-300 backdrop-blur-xs flex items-center gap-1">
-                        ★ {h.star_rating} Star
+                        {t("stars", { stars: h.star_rating })}
                       </span>
                     )}
                     {h.verified && (
                       <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white shadow-xs">
-                        Verified
+                        {t("verified")}
                       </span>
                     )}
                   </div>
@@ -847,13 +855,13 @@ export default function UserPublicIndexPage() {
                   <div className="p-5 flex-1 flex flex-col justify-between">
                     <div>
                       <h3 className="font-bold text-slate-900 group-hover:text-amber-600 transition-colors">
-                        Hotel in {h.quarter_name || "Cameroon"}
+                        {h.name || t("hotelIn", { place: h.quarter_name || t("cameroon") })}
                       </h3>
                       <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                         <IconMapPin size={13} />
                         <span>{h.quarter_name}</span>
                         <span className="text-slate-300">•</span>
-                        <span>{h.total_rooms} Rooms</span>
+                        <span>{t("roomsCount", { count: h.total_rooms })}</span>
                       </p>
 
                       {h.room_categories.length > 0 && (
@@ -872,18 +880,18 @@ export default function UserPublicIndexPage() {
 
                     <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
                       <div>
-                        <span className="text-[11px] text-slate-400 block">From</span>
+                        <span className="text-[11px] text-slate-400 block">{t("from")}</span>
                         <span className="text-sm font-extrabold text-slate-900">
-                          {h.cheapest_rate_xaf ? Number(h.cheapest_rate_xaf).toLocaleString() : "Contact"} XAF
+                          {h.cheapest_rate_xaf ? Number(h.cheapest_rate_xaf).toLocaleString(locale) : t("contact")} XAF
                         </span>
-                        <span className="text-[10px] text-slate-400"> / night</span>
+                        <span className="text-[10px] text-slate-400"> {t("perNight")}</span>
                       </div>
 
                       <Link
-                        href="/hotels"
+                        href={`/hotels/${h.id}`}
                         className="px-3.5 py-1.5 rounded-xl font-bold text-xs bg-slate-900 text-white hover:bg-slate-800 transition-colors"
                       >
-                        Reserve
+                        {t("seeRooms")}
                       </Link>
                     </div>
                   </div>
@@ -901,10 +909,10 @@ export default function UserPublicIndexPage() {
                 <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600">
                   <IconGraduationCap size={18} />
                 </div>
-                <h2 className="text-lg font-bold text-slate-900">Student Hostels</h2>
+                <h2 className="text-lg font-bold text-slate-900">{t("navHostels")}</h2>
               </div>
               <span className="text-xs font-semibold text-slate-400">
-                {profile.hostels.length} {profile.hostels.length === 1 ? "hostel" : "hostels"}
+                {t("hostelCount", { count: profile.hostels.length })}
               </span>
             </div>
 
@@ -934,13 +942,13 @@ export default function UserPublicIndexPage() {
                   <div className="p-5 flex-1 flex flex-col justify-between">
                     <div>
                       <h3 className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
-                        Hostel in {sh.quarter_name || "Cameroon"}
+                        {sh.name || t("hostelIn", { place: sh.quarter_name || t("cameroon") })}
                       </h3>
                       <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                         <IconMapPin size={13} />
                         <span>{sh.quarter_name}</span>
                         <span className="text-slate-300">•</span>
-                        <span>{sh.total_units} Units</span>
+                        <span>{t("unitsCount", { count: sh.total_units })}</span>
                       </p>
 
                       {sh.unit_types.length > 0 && (
@@ -958,12 +966,12 @@ export default function UserPublicIndexPage() {
                     </div>
 
                     <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-500">Semester Accommodation</span>
+                      <span className="text-xs font-semibold text-slate-500">{t("semester")}</span>
                       <Link
-                        href="/student-hostels"
+                        href={`/student-hostels/${sh.id}`}
                         className="px-3.5 py-1.5 rounded-xl font-bold text-xs bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
                       >
-                        Apply / Waitlist
+                        {t("seeRooms")}
                       </Link>
                     </div>
                   </div>
@@ -982,11 +990,11 @@ export default function UserPublicIndexPage() {
                   <IconBuilding size={18} />
                 </div>
                 <h2 className="text-lg font-bold text-slate-900">
-                  {activeTab === "apartments" ? "Apartments & Studios" : "Properties & Apartments"}
+                  {activeTab === "apartments" ? t("navApartments") : t("propertiesAndApartments")}
                 </h2>
               </div>
               <span className="text-xs font-semibold text-slate-400">
-                {activeTab === "apartments" ? apartments.length : profile.listings.length} listed
+                {t("listedCount", { count: activeTab === "apartments" ? apartments.length : profile.listings.length })}
               </span>
             </div>
 
@@ -1025,17 +1033,17 @@ export default function UserPublicIndexPage() {
                       </h3>
                       <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                         <IconMapPin size={13} />
-                        <span>{item.quarter_name || "Cameroon"}</span>
+                        <span>{item.quarter_name || t("cameroon")}</span>
                       </p>
                     </div>
 
                     <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
                       <div>
                         <span className="text-sm font-extrabold text-slate-900">
-                          {Number(item.price_xaf).toLocaleString()} XAF
+                          {Number(item.price_xaf).toLocaleString(locale)} XAF
                         </span>
                         {item.listing_type === "RENT" && (
-                          <span className="text-[10px] text-slate-400"> / month</span>
+                          <span className="text-[10px] text-slate-400"> {t("perMonth")}</span>
                         )}
                       </div>
 
@@ -1043,7 +1051,7 @@ export default function UserPublicIndexPage() {
                         href={`/listing/${item.id}`}
                         className="px-3.5 py-1.5 rounded-xl font-bold text-xs bg-slate-900 text-white hover:bg-slate-800 transition-colors"
                       >
-                        Details
+                        {t("details")}
                       </Link>
                     </div>
                   </div>
@@ -1062,14 +1070,14 @@ export default function UserPublicIndexPage() {
                   <IconCompass size={18} />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">Map & On-Site Location Tracking</h2>
+                  <h2 className="text-lg font-bold text-slate-900">{t("mapTitle")}</h2>
                   <p className="text-xs text-slate-500">
-                    Exact coordinates captured on-site. Use these pins to track locations and navigate visits.
+                    {t("mapIntro")}
                   </p>
                 </div>
               </div>
               <span className="text-xs font-semibold text-slate-400">
-                {geoProperties.length} Geocoded
+                {t("geocoded", { count: geoProperties.length })}
               </span>
             </div>
 
@@ -1109,7 +1117,7 @@ export default function UserPublicIndexPage() {
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <polygon points="3 11 22 2 13 21 11 13 3 11" />
                         </svg>
-                        <span>Open in Google Maps &amp; Follow</span>
+                        <span>{t("openMaps")}</span>
                       </a>
                       <a
                         href={`https://www.google.com/maps/search/?api=1&query=${prop.latitude},${prop.longitude}`}
@@ -1117,13 +1125,13 @@ export default function UserPublicIndexPage() {
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
                       >
-                        <span>View Pin</span>
+                        <span>{t("viewPin")}</span>
                       </a>
                       <Link
                         href={prop.url}
                         className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 transition-colors"
                       >
-                        <span>View</span>
+                        <span>{t("view")}</span>
                       </Link>
                     </div>
                   </div>
@@ -1149,10 +1157,10 @@ export default function UserPublicIndexPage() {
                 <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600">
                   <IconWrench size={18} />
                 </div>
-                <h2 className="text-lg font-bold text-slate-900">Taskln Technical Services</h2>
+                <h2 className="text-lg font-bold text-slate-900">{t("titleServices")}</h2>
               </div>
               <span className="text-xs font-semibold text-slate-400">
-                {profile.technician.completed_jobs} Jobs Completed
+                {t("jobsCompleted", { count: profile.technician.completed_jobs })}
               </span>
             </div>
 
@@ -1160,22 +1168,22 @@ export default function UserPublicIndexPage() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900">Vetting & Verification:</span>
+                    <span className="font-bold text-slate-900">{t("vetting")}</span>
                     {profile.technician.is_verified ? (
                       <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                         <IconCheckCircle size={13} className="text-emerald-600" />
-                        Verified Technician
+                        {t("techVerified")}
                       </span>
                     ) : (
                       <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                        Registration Pending
+                        {t("regPending")}
                       </span>
                     )}
                   </div>
                   {profile.technician.coverage_quarter_name && (
                     <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                       <IconMapPin size={13} />
-                      <span>Primary Coverage: {profile.technician.coverage_quarter_name}</span>
+                      <span>{t("coverage", { place: profile.technician.coverage_quarter_name })}</span>
                     </p>
                   )}
                 </div>
@@ -1184,13 +1192,13 @@ export default function UserPublicIndexPage() {
                   href={`/taskln-service?technician=${profile.user_id}`}
                   className="inline-flex items-center justify-center px-4 py-2 rounded-xl text-xs font-bold bg-amber-400 text-slate-950 hover:bg-amber-300 transition-colors shadow-2xs"
                 >
-                  Request Service
+                  {t("requestService")}
                 </Link>
               </div>
 
               <div className="mt-4">
                 <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">
-                  Technical Specialties
+                  {t("specialties")}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {profile.technician.specialties.map((s) => (
@@ -1215,10 +1223,10 @@ export default function UserPublicIndexPage() {
                 <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600">
                   <IconCar size={18} />
                 </div>
-                <h2 className="text-lg font-bold text-slate-900">OaziGo Transport & Fleet</h2>
+                <h2 className="text-lg font-bold text-slate-900">{t("titleFleet")}</h2>
               </div>
               <span className="text-xs font-semibold text-slate-400">
-                {profile.driver.completed_rides} Rides Fulfilled
+                {t("ridesDone", { count: profile.driver.completed_rides })}
               </span>
             </div>
 
@@ -1226,20 +1234,20 @@ export default function UserPublicIndexPage() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900">Driver Status:</span>
+                    <span className="font-bold text-slate-900">{t("driverStatus")}</span>
                     {profile.driver.is_verified ? (
                       <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                         <IconCheckCircle size={13} className="text-emerald-600" />
-                        Licensed & Verified
+                        {t("licensed")}
                       </span>
                     ) : (
                       <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                        Pending Verification
+                        {t("pendingVerification")}
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    License Number: {profile.driver.license_number}
+                    {t("licenseNumber", { number: profile.driver.license_number })}
                   </p>
                 </div>
 
@@ -1247,13 +1255,13 @@ export default function UserPublicIndexPage() {
                   href="/oazigo"
                   className="inline-flex items-center justify-center px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-500 transition-colors shadow-2xs"
                 >
-                  Book Ride / Dispatch
+                  {t("bookRide")}
                 </Link>
               </div>
 
               <div className="mt-4">
                 <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">
-                  Registered Fleet Vehicles
+                  {t("fleetVehicles")}
                 </p>
                 {profile.driver.vehicles.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1275,7 +1283,7 @@ export default function UserPublicIndexPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400">No active vehicles attached yet.</p>
+                  <p className="text-xs text-slate-400">{t("noVehicles")}</p>
                 )}
               </div>
             </div>
@@ -1288,15 +1296,15 @@ export default function UserPublicIndexPage() {
             <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-4">
               <IconCompass size={32} />
             </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-1">No Active Listings Yet</h3>
+            <h3 className="text-lg font-bold text-slate-900 mb-1">{t("emptyTitle")}</h3>
             <p className="text-sm text-slate-500 max-w-sm mx-auto mb-6">
-              This user hasn&apos;t published hotels, hostels, or apartments yet.
+              {t("emptyBody")}
             </p>
             <Link
               href="/search"
               className="inline-block px-5 py-2.5 rounded-xl font-bold text-xs bg-slate-900 text-white hover:bg-slate-800 transition-colors"
             >
-              Browse Public Market
+              {t("browseMarket")}
             </Link>
           </div>
         )}
@@ -1314,8 +1322,8 @@ export default function UserPublicIndexPage() {
     isOpen={showShareModal}
     onClose={() => setShowShareModal(false)}
     url={pageUrl}
-    title={`${profile.full_name}'s Portfolio`}
-    subtitle="Share this index page or scan the QR code to view owned hotels, hostels, and apartments."
+    title={t("shareTitle", { name: profile.full_name })}
+    subtitle={t("shareSubtitle")}
   />
 </main>
   );

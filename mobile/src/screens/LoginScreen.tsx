@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator 
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { loginUser } from "../lib/api";
+import { registerDeviceForPush } from "../lib/pushNotifications";
 import { checkBiometricAvailability, authenticateWithBiometrics } from "../lib/biometrics";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
@@ -23,6 +24,8 @@ export default function LoginScreen({ navigation }: Props) {
     setLoading(true);
     try {
       await loginUser(username, password);
+      // Not awaited: sign-in must not wait on the permission prompt or the network.
+      void registerDeviceForPush().catch(() => false);
       navigation.navigate("Home");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");

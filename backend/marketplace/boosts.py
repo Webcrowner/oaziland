@@ -41,6 +41,7 @@ def _pay_from_wallet(user, amount: Decimal, reference: str):
 def boost_listing(*, listing, user, duration_unit: str, quantity: int, pay_with: str, phone_number: str = "", payment_gateway=None):
     """Charges for the boost, then extends the listing's TOP period (a boost bought while one is running adds on
     after it). Returns (listing, price)."""
+    from django.db import transaction as db_transaction
     from django.utils import timezone
     from monetization.models import (
         AdCampaign, AdPlacement, BoostedContent, BOOST_DURATION_TIMEDELTA, PlatformFeePolicy, TransactionCategory,
@@ -62,30 +63,32 @@ def boost_listing(*, listing, user, duration_unit: str, quantity: int, pay_with:
 
     now = timezone.now()
     length = timedelta(**BOOST_DURATION_TIMEDELTA[duration_unit]) * quantity
-    if pay_with == "WALLET":
-        _pay_from_wallet(user, price, f"TOP boost: {listing.title}"[:255])
-        fee = PlatformFeePolicy.fee_for(TransactionCategory.AD_SPEND, price)
-        campaign = AdCampaign.objects.create(
-            owner=user, placement=AdPlacement.MARKETPLACE_TOP, duration_unit=duration_unit, duration_quantity=quantity,
-            budget_xaf=price - fee, starts_at=now, ends_at=now + length,
-        )
-        campaign.launch()
-        BoostedContent.objects.create(campaign=campaign, listing_id=listing.pk)
-    elif pay_with == "MOMO":
-        if not phone_number.strip():
-            raise BoostError("Enter the Mobile Money number to charge.")
-        try:
-            purchase_campaign_boost(
-                owner=user, placement=AdPlacement.MARKETPLACE_TOP, duration_unit=duration_unit, duration_quantity=quantity,
-                payment_gateway=payment_gateway, phone_number=phone_number.strip(), target_listing_id=listing.pk,
-            )
-        except ValueError as e:
-            raise BoostError(str(e))
-    else:
+    if pay_with == "MOMO" and not phone_number.strip():
+        raise BoostError("Enter the Mobile Money number to charge.")
+    if pay_with not in ("WALLET", "MOMO"):
         raise BoostError("Choose how to pay.")
-
-    listing.refresh_from_db(fields=["boosted_until"])
-    start = listing.boosted_until if listing.boosted_until and listing.boosted_until > now else now
-    MarketplaceListingBase.objects.filter(pk=listing.pk).update(boosted_until=start + length)
+    # One transaction for charge + campaign + TOP period: a failure part-way leaves no debit without a boost, and the
+    # locked listing row stops two concurrent purchases from losing one extension.
+    with db_transaction.atomic():
+        locked = MarketplaceListingBase.objects.select_for_update().only("pk", "boosted_until").get(pk=listing.pk)
+        if pay_with == "WALLET":
+            _pay_from_wallet(user, price, f"TOP boost: {listing.title}"[:255])
+            fee = PlatformFeePolicy.fee_for(TransactionCategory.AD_SPEND, price)
+            campaign = AdCampaign.objects.create(
+                owner=user, placement=AdPlacement.MARKETPLACE_TOP, duration_unit=duration_unit, duration_quantity=quantity,
+                budget_xaf=price - fee, starts_at=now, ends_at=now + length,
+            )
+            campaign.launch()
+            BoostedContent.objects.create(campaign=campaign, listing_id=listing.pk)
+        else:
+            try:
+                purchase_campaign_boost(
+                    owner=user, placement=AdPlacement.MARKETPLACE_TOP, duration_unit=duration_unit, duration_quantity=quantity,
+                    payment_gateway=payment_gateway, phone_number=phone_number.strip(), target_listing_id=listing.pk,
+                )
+            except ValueError as e:
+                raise BoostError(str(e))
+        start = locked.boosted_until if locked.boosted_until and locked.boosted_until > now else now
+        MarketplaceListingBase.objects.filter(pk=listing.pk).update(boosted_until=start + length)
     listing.boosted_until = start + length
     return listing, price

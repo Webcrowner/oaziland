@@ -136,16 +136,17 @@ When a payment is late, act early and in writing: a polite message on the first 
                 reading("Maintenance: preventive and urgent", """
 Repairs are cheaper when they are planned.
 
-Preventive maintenance — on a schedule:
+## Preventive maintenance — on a schedule
 - Clean gutters and drains before the rainy season.
 - Check roofs, ceilings and walls for leaks and damp.
 - Service water pumps, tanks and generators.
 - Check electrical installations and replace damaged sockets and cables.
 - Treat for termites and pests.
 
-Urgent repairs — handle within 24 hours: water leaks, electrical hazards, broken locks or doors, no water, sewage problems.
+## Urgent repairs — within 24 hours
+Water leaks, electrical hazards, broken locks or doors, no water, sewage problems.
 
-Keep a maintenance log: date reported, problem, who fixed it, cost, date completed. Tell tenants how to report a problem (a phone number or WhatsApp) and confirm when it's fixed. Use reliable, vetted technicians, and get a quote before non-urgent work.
+> **Tip:** keep a maintenance log: date reported, problem, who fixed it, cost, date completed. Tell tenants how to report a problem (a phone number or WhatsApp) and confirm when it's fixed. Use reliable, vetted technicians, and get a quote before non-urgent work.
 """),
                 reading("Records that protect you", """
 If there is ever a dispute, the person with the clearest records is usually right. For each unit, keep one folder (paper or digital) with:
@@ -379,14 +380,16 @@ Lost property: record every item found (date, room, description, who found it), 
             ]),
             ("Guest experience and complaints", [
                 reading("Handling complaints: the LAST method", """
-A complaint handled well often creates a more loyal guest than no problem at all. Use LAST:
+A complaint handled well often creates a more loyal guest than no problem at all. Use **LAST**:
 
-- Listen: let the guest finish without interrupting. Take notes.
-- Apologise: sincerely, for the inconvenience — even before you know whose fault it was.
-- Solve: offer a concrete solution and a time: "I'll move you to room 12 within 15 minutes", "The technician will fix the shower before 6 pm".
-- Thank: thank the guest for telling you, and follow up later to check the solution worked.
+- **Listen:** let the guest finish without interrupting. Take notes.
+- **Apologise:** sincerely, for the inconvenience — even before you know whose fault it was.
+- **Solve:** offer a concrete solution and a time: "I'll move you to room 12 within 15 minutes", "The technician will fix the shower before 6 pm".
+- **Thank:** thank the guest for telling you, and follow up later to check the solution worked.
 
-Stay calm, never argue in front of other guests, and know what you're allowed to offer (a room change, a free breakfast, a discount) so you can act immediately. Record every complaint and how it was solved, and review them each week to fix the root causes.
+> Stay calm, never argue in front of other guests, and know what you're allowed to offer (a room change, a free breakfast, a discount) so you can act immediately.
+
+Record every complaint and how it was solved, and review them each week to fix the root causes.
 """),
                 reading("Reviews and repeat guests", """
 Most travellers read reviews before booking. You can influence them:
@@ -406,6 +409,206 @@ Most travellers read reviews before booking. You can influence them:
                      "Thank, apologise, explain what changed and invite them back — never argue publicly.",
                      [("Thank the guest and apologise", True), ("Explain what you have changed", True), ("Argue that the guest is wrong", False)]),
                 ]),
+            ]),
+        ],
+    },
+    "Photographing Your Listing": {
+        "duration_hours": Decimal("3"),
+        "description": (
+            "A free workshop on taking the clear, honest photos that get listings noticed. Using only the phone in "
+            "your pocket, you'll learn how to prepare a room, work with daylight, frame each shot and build a "
+            "complete set of photos that shows a property exactly as it is — so the people who come to visit are "
+            "the ones who are serious.\n\n"
+            "Each module ends with a short quiz, and the workshop finishes with a practical assignment: "
+            "photograph one real property and submit the full set."
+        ),
+        "modules": [
+            ("Before you press the button", [
+                reading("Why photos decide whether your listing is seen", """
+On Oaziland, as on every listing site, people scroll. Before anyone reads your description or your price, they have already decided — in about a second — from one small picture: the cover photo, which is the first photo you upload.
+
+A dark, blurry or crooked cover photo costs you real money. The listing is skipped, and the property stays empty for weeks longer than it should.
+
+But "better photos" does not mean "flattering photos". Honest photos save you more time than attractive ones:
+
+- Fewer pointless visits. Someone who can already see the kitchen will not travel across Yaoundé to discover they don't like it.
+- Fewer disappointed visitors. A visitor who feels misled will not rent, will not buy, and will tell other people.
+- Fewer problems later. On Oaziland, a listing whose photos don't match the property gets reported, can be removed by moderation, and can turn into a dispute over money already held in escrow.
+
+Your goal for the whole workshop is simple: **someone who has never seen the property should be able to walk through it in their head, and recognise it when they arrive.**
+"""),
+                reading("Prepare the property first — this matters more than the camera", """
+Most of the difference between a bad photo and a good one happens before you lift your phone. A clean, tidy room photographed on a cheap phone always beats a cluttered room photographed on an expensive one.
+
+Inside, in every room you will photograph:
+- Clear the clutter: dishes, laundry, shoes, buckets, bins, cables, papers, drying clothes.
+- Put away personal things: family photos, documents, medicine, religious items, children's toys.
+- Make the beds properly. Straighten chairs, cushions and curtains.
+- Wipe the surfaces and sweep the floor. Dust shows up badly in photographs.
+- Open the curtains fully and turn on every light, including the one in the bathroom.
+- Close the toilet lid. Hang towels straight. Remove soap and toothbrushes.
+
+Outside:
+- Sweep the yard and the entrance, and close the gate if it looks better closed.
+- Move cars, wheelbarrows and rubbish out of the shot, unless the parking space is the point.
+- Cut back grass or branches that hide the building.
+
+Fix the small things that take five minutes: a burnt-out bulb, a torn mosquito net, a crooked curtain rail, a door that won't stay shut.
+
+One rule: tidy the property, don't hide its faults. You may choose not to make a crack the subject of a photo, but never arrange furniture or a camera angle specifically to conceal damage a tenant or buyer would discover on the first visit.
+"""),
+                reading("Your phone is enough: the settings that matter", """
+You do not need a camera. You need a clean lens, steady hands and the right settings.
+
+Before you start:
+- **Clean the lens** with a soft cloth. A fingerprint is the single most common cause of hazy, washed-out photos. Phones live in pockets; lenses get greasy.
+- **Set the highest resolution** in the camera settings, and use the standard photo mode — not "portrait" mode, which blurs the background.
+- **Turn on the grid.** The lines help you keep walls straight. It is the most useful setting on your phone for this work.
+- **Turn off filters, "beauty" mode and any automatic effect.**
+
+As you shoot:
+- **Hold the phone horizontally (landscape)** for rooms. A room is wider than it is tall. Use vertical (portrait) only for tall, narrow subjects like a staircase or a gate.
+- **Hold it with both hands**, elbows against your body, and lean on a door frame or wall to stay steady. A small tripod costs little and helps a lot.
+- **Tap the screen on a mid-bright part of the room** to set focus, then slide the little sun icon down slightly. This stops the window from burning to pure white.
+- **Don't zoom.** Phone zoom throws away detail. Move your feet instead.
+- **Don't use the flash.** It creates harsh shadows, hard reflections and ugly colour. Daylight is always better.
+
+Finally, keep the original files. Photos for Oaziland must be JPG, PNG or WebP and under 10 MB each — which any phone photo already is.
+"""),
+                quiz("Quiz: preparing to shoot", [
+                    ("What is the most common cause of hazy, washed-out phone photos?",
+                     "Phones live in pockets, and a greasy fingerprint on the lens softens the whole image. Wipe it before every shoot.",
+                     [("A dirty lens", True), ("A phone that is too old", False), ("Shooting in the morning", False)]),
+                    ("Which of these should you do before photographing a room? (Choose all that apply.)",
+                     "Tidying, opening the curtains and turning on the lights change the result far more than the camera does.",
+                     [("Clear away clutter and personal items", True), ("Open the curtains and turn on every light", True), ("Rearrange the furniture to hide a crack in the wall", False), ("Make the bed and straighten the chairs", True)]),
+                    ("Your phone is too far from the kitchen worktop. What should you do?",
+                     "Phone zoom is digital: it simply crops and throws away detail. Walking closer keeps the full quality.",
+                     [("Walk closer", True), ("Use the zoom", False), ("Use the flash", False)]),
+                ]),
+            ]),
+            ("Taking the photos", [
+                reading("Light: the one thing that changes everything", """
+Daylight is free, it never fails, and it is the difference between a photo that looks like a home and one that looks like a cell.
+
+- **Shoot during the day**, ideally mid-morning or late afternoon. Never photograph the inside of a property at night with a phone.
+- **Don't depend on bulbs.** With load shedding you cannot count on power, and bulb light alone turns photos orange and grainy. Turn the lights on as well, to fill the dark corners — but let daylight do the work.
+- **Keep the window to your side, not in front of you.** Shooting straight at a window leaves you with a white rectangle and a black room.
+- **If a room is very dark**, stand in the doorway, open everything, and expose for the room rather than the window.
+- **Outside**, shoot the building in the morning or the late afternoon, with the sun behind you. Harsh midday sun creates black shadows across a facade. An overcast but bright day is excellent for exteriors.
+- **Don't photograph in the rain**, and don't photograph a muddy compound during a downpour — but do be honest about the state of the access road in your description.
+
+If the property genuinely gets very little daylight, say so in the description. A buyer who learns it on the visit feels cheated; one who was told in advance may not mind.
+"""),
+                reading("Where to stand and how to frame the shot", """
+How a room photographs depends almost entirely on where you put your feet.
+
+- **Stand in a corner, or in the doorway, with your back to the wall.** This shows the most floor and makes the room read as it really is. Standing in the middle of a room gives you a photo of one blank wall.
+- **Hold the phone at chest height**, about 1.5 m from the floor, and keep it **level** — not tilted up or down.
+- **Keep vertical lines vertical.** Use the grid: the edges of doors, windows and wall corners should run straight up and down. A tilted phone makes walls lean inwards and looks amateur.
+- **Include two walls and some floor.** That gives the photo depth, so the viewer understands the shape of the room.
+- **Watch the edges of the frame** before you shoot: a bin, a cable, a bare foot, your own shadow.
+- **Watch mirrors and windows** — you and your phone are often standing in them.
+- **Take three or four shots of every room** from different corners. It costs nothing, and you choose the best one later, calmly, on a bigger screen.
+"""),
+                reading("The shot list: leave nothing out", """
+A missing room makes people assume the worst. Work through the property in the order a visitor would walk it, and don't skip anything.
+
+**Outside**
+1. The approach: the street or lane, so people recognise the place when they arrive.
+2. The gate and the compound wall.
+3. The building itself, from a corner so you see two sides.
+4. Parking, the yard or garden, the terrace or balcony.
+
+**Inside**
+5. The living room — usually your best and most important photo.
+6. The dining area.
+7. The kitchen, including the worktop and sink.
+8. **Every** bedroom, separately, with its wardrobe or storage.
+9. **Every** bathroom and toilet, including the shower.
+10. The corridor or stairs, if they tell you something about the space.
+
+**What people in Cameroon actually ask about** — photograph these, because they often decide the rental:
+- The water situation: the tank, the borehole or forage, the pump.
+- The power backup: the generator, the inverter, the solar panels, and the meter.
+- Security: the fence, the gate, the guard house, the window bars.
+- The state of the access road.
+
+Take 20 to 30 photos and publish the best 10 to 15. A short, steady video walkthrough — MP4 or MOV, under 500 MB — is worth a great deal on top of the stills, because it proves the rooms really connect the way the photos suggest.
+"""),
+                quiz("Quiz: light and framing", [
+                    ("Where should you stand to photograph a bedroom?",
+                     "Standing in a corner or doorway with your back to the wall shows the most floor and the true shape of the room.",
+                     [("In a corner or the doorway, with your back to the wall", True), ("In the middle of the room", False), ("As close to the bed as possible", False)]),
+                    ("You are photographing a living room with one large window. Where should the window be?",
+                     "Shooting straight into a window leaves a white rectangle and a dark room. Keep it to the side.",
+                     [("To the side of the shot", True), ("Directly in front of you", False), ("Behind a closed curtain", False)]),
+                    ("Which of these should appear in the photo set for a house in Yaoundé? (Choose all that apply.)",
+                     "Every room must appear, and so should the things people actually ask about: water, power backup and security.",
+                     [("Every bedroom, separately", True), ("Every bathroom and toilet", True), ("The water tank and the generator or inverter", True), ("Only the two nicest rooms", False)]),
+                ]),
+            ]),
+            ("Finishing and publishing the set", [
+                reading("Editing without lying", """
+A little editing is part of good photography. Changing what the property *is* is not.
+
+**Fair:**
+- Cropping, and straightening a slightly tilted horizon.
+- Small adjustments to brightness and contrast, so the photo matches what your eyes saw in the room.
+- Removing a dust spot caused by the lens.
+- Keeping the same look across the whole set, so it feels like one property.
+
+**Not fair — and against Oaziland's rules:**
+- Editing out a crack, a damp patch, a stain or the building next door.
+- Replacing a grey sky with a blue one.
+- Heavy filters that change the colour of the walls or the floor.
+- Using photos of a different unit, a show flat, or the building as it looked before it was damaged.
+- Using photos taken from the internet or from another agent's listing. That is someone else's work, and it will get your listing removed.
+
+Two more honesty rules:
+- **Photograph the actual unit being advertised.** In a block of identical apartments it is tempting to photograph the nice one. Don't.
+- **Keep the photos current.** If the property is repainted, emptied of furniture or damaged, photograph it again. Old photos of a changed property are misleading even when every one of them was once true.
+"""),
+                reading("Choosing the cover photo and ordering the set", """
+**The cover photo** is the first photo you upload on Oaziland, and it does most of the work. Choose the shot that is brightest, straightest and says most clearly what the property is:
+- For an apartment or a room, usually the living room.
+- For a whole house or a plot of land, the exterior.
+- For a shop, warehouse or business, the frontage or the main floor area.
+
+Never make the cover a bathroom, a close-up detail, or a dark corridor.
+
+**Order the rest as a walkthrough**, the way a visitor would move: outside, living room, dining, kitchen, bedrooms, bathrooms, then the extras. The first three photos are seen far more than the rest, so put your three strongest there — while still being representative.
+
+**Then finish the job:**
+- Use the description to say what a photo cannot show: the floor the flat is on, the noise, the water pressure, the state of the road in the rainy season, what is included in the rent.
+- Look at the finished listing on a phone, not just a computer. That is how nearly everyone will see it.
+- Ask someone who has never seen the property to look at the set and tell you what they think is missing. Whatever they ask about is the photo you forgot.
+"""),
+                quiz("Final quiz: honesty and publishing", [
+                    ("Which of these edits is acceptable on a listing photo? (Choose all that apply.)",
+                     "You may crop, straighten and make small brightness or contrast adjustments. You may not remove or disguise a real feature of the property.",
+                     [("Cropping and straightening the photo", True), ("A small brightness adjustment so it matches what you saw", True), ("Editing out a damp patch on the wall", False), ("Replacing the grey sky with a blue one", False)]),
+                    ("You are advertising one apartment in a block where all the units are identical. The one for rent is untidy; the one upstairs is beautiful. What do you photograph?",
+                     "Always photograph the exact unit being advertised. Tidy it first, then shoot it.",
+                     [("The unit that is actually for rent, after tidying it", True), ("The beautiful one upstairs, since they are identical", False), ("Photos from the developer's brochure", False)]),
+                    ("Which photo makes the best cover for a two-bedroom apartment?",
+                     "The cover should be the brightest, clearest shot that shows what the property is — usually the living room for an apartment.",
+                     [("A bright, straight photo of the living room", True), ("A close-up of the bathroom tap", False), ("A dark photo of the corridor", False)]),
+                ]),
+                assignment("Assignment: photograph one property", """
+Photograph one real property — one you are listing, one you manage, or your own home — and submit the complete set.
+
+Submit, as one PDF:
+1. The property's address or a short description, and the date you took the photos.
+2. **At least ten photos**, in the order you would publish them, starting with your cover photo. Between them they must show the outside, the living area, the kitchen, every bedroom and every bathroom.
+3. One sentence under each photo saying what it shows and why you included it.
+4. A short note on your cover photo: why you chose it over the others.
+5. A short note on anything you deliberately did **not** hide — a defect, a tight room, a difficult access road — and how you described it instead.
+
+Before you submit, check your own set against the workshop: are the walls straight? Is every room there? Is any photo taken at night, zoomed, or taken with the flash?
+
+Upload it as a PDF (up to 20 MB). Your trainer will review it and may ask for changes.
+"""),
             ]),
         ],
     },

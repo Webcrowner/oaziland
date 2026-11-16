@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 from oaziland.permissions import IsAdminRole
 from .models import Notification, GreetingSettings
-from .serializers import NotificationSerializer, GreetingSettingsSerializer, ListingShareMessageSerializer
+from .serializers import NotificationSerializer, GreetingSettingsSerializer, ListingShareMessageSerializer, PushDeviceSerializer
 
 
 class AdminGreetingSettingsView(APIView):
@@ -54,11 +54,18 @@ class MyNotificationViewSet(viewsets.ReadOnlyModelViewSet):
             return Notification.objects.none()
         return Notification.objects.filter(recipient=self.request.user).order_by("-created_at")
 
+    def list(self, request, *args, **kwargs):
+        from .links import resolve_targets
+        page = self.paginate_queryset(self.filter_queryset(self.get_queryset()))
+        rows = page if page is not None else list(self.filter_queryset(self.get_queryset()))
+        serializer = self.get_serializer(rows, many=True, context={**self.get_serializer_context(), "targets": resolve_targets(rows, request.user)})
+        return self.get_paginated_response(serializer.data) if page is not None else Response(serializer.data)
+
     @action(detail=True, methods=["post"])
     def mark_read(self, request, pk=None):
         notification = self.get_object()
         notification.mark_read()
-        return Response(NotificationSerializer(notification).data)
+        return Response(self.get_serializer(notification).data)
 
     @action(detail=False, methods=["post"], url_path="mark-all-read")
     def mark_all_read(self, request):
@@ -71,3 +78,45 @@ class MyNotificationViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["get"], url_path="unread-count")
     def unread_count(self, request):
         return Response({"unread_count": self.get_queryset().filter(read_at__isnull=True).count()})
+
+
+class PushConfigView(APIView):
+    """Public: what a browser needs to subscribe to push (the VAPID public key), and whether sending is switched on."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .push import web_push_configured, web_push_public_key
+        return Response({"web_push_enabled": web_push_configured(), "web_push_public_key": web_push_public_key()})
+
+
+class PushDeviceView(APIView):
+    """POST registers this browser or phone for the signed-in user's push notifications (re-registering moves
+    the device to whoever is signed in now). POST to .../remove/ unregisters it, e.g. on sign-out."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=PushDeviceSerializer, responses={201: dict, 400: dict})
+    def post(self, request):
+        from .models import PushDevice
+        serializer = PushDeviceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        device, created = PushDevice.objects.update_or_create(
+            token=data["token"],
+            defaults={
+                "user": request.user, "platform": data["platform"],
+                "web_p256dh": data.get("web_p256dh", ""), "web_auth": data.get("web_auth", ""),
+            },
+        )
+        return Response({"id": device.pk, "platform": device.platform}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class PushDeviceRemoveView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=dict, responses={200: dict})
+    def post(self, request):
+        from .models import PushDevice
+        token = str(request.data.get("token", "")).strip()
+        removed, _ = PushDevice.objects.filter(token=token, user=request.user).delete() if token else (0, None)
+        return Response({"removed": removed})

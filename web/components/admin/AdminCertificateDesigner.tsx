@@ -133,6 +133,14 @@ export default function AdminCertificateDesigner({ token, dialogs }: Props) {
               {t("useThis")}
             </button>
           )}
+          <button
+            className={smallButton}
+            disabled={busy}
+            title={t("customiseBuiltinHint")}
+            onClick={() => run(async () => setEditing(await createCertificateTemplate(t("builtinCopyName"), "default", token)))}
+          >
+            ✏️ {t("customiseBuiltin")}
+          </button>
         </TemplateCard>
         {data.results.map((template) => (
           <TemplateCard

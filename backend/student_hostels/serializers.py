@@ -67,13 +67,49 @@ class StudentHostelSerializer(OwnerRoleSerializerMixin, serializers.ModelSeriali
     quarter_name = serializers.CharField(source="quarter.name", read_only=True)
     owner = serializers.PrimaryKeyRelatedField(read_only=True)
     owner_name = serializers.CharField(source="owner.full_name", read_only=True, default=None)
+    listed_by_name = serializers.SerializerMethodField()
     units = serializers.SerializerMethodField()
     photos = serializers.SerializerMethodField()
+    room_types = serializers.SerializerMethodField()
+    from_price = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentHostel
-        fields = ["id", "owner", "owner_name", "lister_role", "lister_average_rating", "lister_rating_count", "property_type", "quarter", "quarter_name", "latitude", "longitude", "description", "amenities", "units", "photos"]
-        read_only_fields = ["description", "amenities"]
+        fields = ["id", "name", "owner", "owner_name", "listed_by", "listed_by_name", "lister_role", "lister_average_rating", "lister_rating_count", "property_type", "quarter", "quarter_name", "latitude", "longitude", "description", "amenities", "units", "photos", "room_types", "from_price"]
+        read_only_fields = ["name", "listed_by", "description", "amenities"]
+
+    def get_lister_role(self, obj) -> str:
+        """An agent-listed hostel shows the agent's role; otherwise the owner's (see OwnerRoleSerializerMixin)."""
+        agent_profile = getattr(obj.listed_by, "agent_profile", None) if obj.listed_by_id else None
+        if agent_profile is not None:
+            return "AGENCY" if agent_profile.agency_id else "AGENT"
+        return super().get_lister_role(obj)
+
+    def get_listed_by_name(self, obj) -> str | None:
+        return (obj.listed_by.full_name or obj.listed_by.username) if obj.listed_by_id else None
+
+    def _room_types(self, hostel) -> list[dict]:
+        # Computed once per hostel: both room_types and from_price read it.
+        cache = getattr(self, "_room_type_cache", None)
+        if cache is None:
+            cache = self._room_type_cache = {}
+        if hostel.pk not in cache:
+            from .room_types import public_room_types
+            cache[hostel.pk] = public_room_types(hostel)
+        return cache[hostel.pk]
+
+    def get_room_types(self, hostel) -> list[dict]:
+        """What students browse and book: each room type with its photos, price and places free."""
+        return self._room_types(hostel)
+
+    def get_from_price(self, hostel) -> dict | None:
+        """The cheapest room type with a free place (else the cheapest overall), for "from X XAF / month" on the card."""
+        room_types = self._room_types(hostel)
+        if not room_types:
+            return None
+        pool = [r for r in room_types if r["available_places"] > 0] or room_types
+        cheapest = min(pool, key=lambda r: float(r["price_xaf"]))
+        return {"price_xaf": cheapest["price_xaf"], "price_period": cheapest["price_period"]}
 
     @extend_schema_field(HostelUnitSerializer(many=True))
     def get_units(self, hostel):
@@ -93,6 +129,9 @@ class StudentHostelCreateSerializer(serializers.Serializer):
     PropertyAsset.owner and owner_profile.account_user in sync — not
     reimplemented here."""
     quarter = serializers.UUIDField()
+    name = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    # An agent listing for a landlord: the landlord's phone number or username. Empty for your own hostel.
+    landlord = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
     property_type = serializers.ChoiceField(choices=["BLOCK", "SELF_CONTAIN_COMPOUND", "STUDIO_COMPLEX", "APARTMENT_BUILDING", "MIXED"], required=False, default="BLOCK")
     latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-90, max_value=90)
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True, min_value=-180, max_value=180)

@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { searchHotels, createHotel, addHotelPhoto, createReservation, listQuarters, type Hotel, type RoomTypeSummary, type Quarter, type MediaUploadResult } from "@/lib/api";
+import { searchHotels, createHotel, addHotelPhoto, listQuarters, type Hotel, type Quarter, type MediaUploadResult } from "@/lib/api";
 import QuarterOptions from "@/components/QuarterOptions";
 import MissingAreaRequest from "@/components/MissingAreaRequest";
 import PageHeader from "@/components/ui/PageHeader";
@@ -13,9 +13,7 @@ import MediaThumbs from "@/components/MediaThumbs";
 import LocationCapture from "@/components/LocationCapture";
 import DirectChatButton from "@/components/DirectChatButton";
 import { Link } from "@/i18n/navigation";
-import WhatsAppShareButton from "@/components/WhatsAppShareButton";
 import InterestCaptureModal from "@/components/InterestCaptureModal";
-import BookingCheckoutModal from "@/components/BookingCheckoutModal";
 import {
   IconHotel,
   IconMapPin,
@@ -85,6 +83,8 @@ export default function HotelsPage() {
   const [roomCategory, setRoomCategory] = useState<string>("STANDARD");
   const [roomCapacity, setRoomCapacity] = useState("2");
   const [roomRate, setRoomRate] = useState("");
+  const [roomName, setRoomName] = useState("");
+  const [roomCount, setRoomCount] = useState("1");
   const [gpsCoords, setGpsCoords] = useState<{ latitude: number | null; longitude: number | null }>({
     latitude: null,
     longitude: null,
@@ -92,73 +92,7 @@ export default function HotelsPage() {
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
 
-  // Booking modal state
-  const [bookingHotel, setBookingHotel] = useState<Hotel | null>(null);
-  const [bookingRoomType, setBookingRoomType] = useState("");
-  const [checkIn, setCheckIn] = useState("");
-  const [checkOut, setCheckOut] = useState("");
-  const [adults, setAdults] = useState("2");
-  const [children, setChildren] = useState("0");
-  const [bookingStatus, setBookingStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
-  const [bookingError, setBookingError] = useState("");
-
-  // Only live hotels can enter checkout.
-  const [activeCheckout, setActiveCheckout] = useState<{
-    title: string;
-    quarter: string;
-    price: number | string;
-    targetId: string;
-    hotelObj?: Hotel | null;
-  } | null>(null);
   const [interestItem, setInterestItem] = useState<string | null>(null);
-
-  function openBooking(hotel: Hotel) {
-    const cheapest = hotel.room_types[0];
-    setActiveCheckout({
-      title: hotel.name || "Cameroon Verified Hotel Stay",
-      quarter: hotel.quarter_name,
-      price: cheapest ? Number(cheapest.base_rate_xaf) : 45000,
-      targetId: hotel.id,
-      hotelObj: hotel,
-    });
-  }
-
-  const selectedRoomType: RoomTypeSummary | undefined = bookingHotel?.room_types.find((rt) => rt.id === bookingRoomType);
-  const nightsCount =
-    checkIn && checkOut ? Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000) : 0;
-  const bookingTotal =
-    selectedRoomType && nightsCount > 0 ? nightsCount * Number(selectedRoomType.base_rate_xaf) : 0;
-
-  async function handleBookingSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-      window.location.href = "/login";
-      return;
-    }
-    if (!checkIn || !checkOut || nightsCount <= 0) {
-      setBookingStatus("error");
-      setBookingError(t("invalidDateRange"));
-      return;
-    }
-    setBookingStatus("submitting");
-    try {
-      await createReservation(
-        {
-          room_type: bookingRoomType,
-          check_in: checkIn,
-          check_out: checkOut,
-          adults: Number(adults),
-          children: Number(children),
-        },
-        token
-      );
-      setBookingStatus("success");
-    } catch (err) {
-      setBookingStatus("error");
-      setBookingError(err instanceof Error ? err.message : t("bookingFailed"));
-    }
-  }
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -219,7 +153,7 @@ export default function HotelsPage() {
           star_rating: starRating ? Number(starRating) : undefined,
           latitude: gpsCoords.latitude ?? undefined,
           longitude: gpsCoords.longitude ?? undefined,
-          room_types: [{ category: roomCategory, capacity: Number(roomCapacity), base_rate_xaf: roomRate }],
+          room_types: [{ name: roomName.trim() || undefined, category: roomCategory, capacity: Number(roomCapacity), base_rate_xaf: roomRate, room_count: Number(roomCount) }],
         },
         token
       );
@@ -228,6 +162,8 @@ export default function HotelsPage() {
       setStarRating("");
       setHotelName("");
       setRoomRate("");
+      setRoomName("");
+      setRoomCount("1");
       setMedia([]);
       load();
     } catch {
@@ -453,6 +389,37 @@ export default function HotelsPage() {
             </div>
 
             <div className="md:col-span-2">
+              <label htmlFor="new-hotel-room-name" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                {t("roomNameLabel")}
+              </label>
+              <input
+                id="new-hotel-room-name"
+                maxLength={120}
+                placeholder={t("roomNamePlaceholder")}
+                value={roomName}
+                onChange={(e) => setRoomName(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="new-hotel-room-count" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                {t("roomCountLabel")} <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="new-hotel-room-count"
+                required
+                type="number"
+                min={1}
+                max={500}
+                value={roomCount}
+                onChange={(e) => setRoomCount(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">{t("roomCountHint")}</p>
+            </div>
+
+            <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
                 Nightly Rate in XAF <span className="text-red-500">*</span>
               </label>
@@ -545,12 +512,13 @@ export default function HotelsPage() {
                     )
                   }
                   share={{
-                    title: "hotel",
+                    title: hotel.name || t("hotelLabel"),
                     location: hotel.quarter_name,
                     price: cheapestRoom ? Number(cheapestRoom.base_rate_xaf).toLocaleString() : "",
                     path: `/hotels/${hotel.id}`,
                   }}
                   price={cheapestRoom ? Number(cheapestRoom.base_rate_xaf).toLocaleString() : undefined}
+                  pricePrefix={cheapestRoom && hotel.room_types.length > 1 ? t("fromPrefix") : undefined}
                   priceUnit={t("perNight")}
                   typeLabel={hotel.name || "Hotel"}
                   location={hotel.quarter_name}
@@ -569,20 +537,18 @@ export default function HotelsPage() {
                         </span>
                       )}
                       <span>
-                        {hotel.room_types.length === 1
-                          ? t("roomsAvailable", { count: hotel.room_types.length })
-                          : t("roomsAvailableOther", { count: hotel.room_types.length })}
+                        {t("roomTypeCount", { count: hotel.room_types.length })}
                       </span>
                     </>
                   }
                 >
                   {cheapestRoom && (
-                    <button
-                      onClick={() => openBooking(hotel)}
-                      className="w-full text-xs font-black text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-lg transition-colors"
+                    <Link
+                      href={`/hotels/${hotel.id}`}
+                      className="block w-full text-center text-xs font-black text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-lg transition-colors"
                     >
-                      Reserve →
-                    </button>
+                      {t("seeRooms")} →
+                    </Link>
                   )}
                   {hotel.owner && (
                     <DirectChatButton
@@ -678,153 +644,6 @@ export default function HotelsPage() {
             </Button>
           </div>
         </div>
-      )}
-
-      {/* ================= BOOKING MODAL ================= */}
-      {bookingHotel && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-            {bookingStatus === "success" ? (
-              <div className="text-center py-4">
-                <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-                  <IconCheckCircle size={24} />
-                </div>
-                <h3 className="font-bold text-slate-900 text-lg mb-1.5">{t("bookingConfirmedTitle")}</h3>
-                <p className="text-xs text-slate-500 mb-5">{t("bookingConfirmedBody")}</p>
-                <div className="flex gap-2">
-                  <Link
-                    href="/bookings"
-                    className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-colors text-center"
-                  >
-                    {t("viewMyBookings")}
-                  </Link>
-                  <button
-                    onClick={() => setBookingHotel(null)}
-                    className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-sm font-bold hover:bg-slate-200 transition-colors"
-                  >
-                    {t("close")}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <form onSubmit={handleBookingSubmit}>
-                <div className="flex items-start justify-between mb-4">
-                  <h3 className="font-bold text-slate-900 text-lg">{t("bookRoom")}</h3>
-                  <button type="button" onClick={() => setBookingHotel(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">
-                    &times;
-                  </button>
-                </div>
-
-                <div className="space-y-3.5">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      {t("selectRoomType")}
-                    </label>
-                    <select
-                      value={bookingRoomType}
-                      onChange={(e) => setBookingRoomType(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                    >
-                      {bookingHotel.room_types.map((rt) => (
-                        <option key={rt.id} value={rt.id}>
-                          {rt.category} — {Number(rt.base_rate_xaf).toLocaleString()} XAF/night
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                        {t("checkIn")}
-                      </label>
-                      <input
-                        required
-                        type="date"
-                        min={new Date().toISOString().slice(0, 10)}
-                        value={checkIn}
-                        onChange={(e) => setCheckIn(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                        {t("checkOut")}
-                      </label>
-                      <input
-                        required
-                        type="date"
-                        min={checkIn || new Date().toISOString().slice(0, 10)}
-                        value={checkOut}
-                        onChange={(e) => setCheckOut(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                        {t("adults")}
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={adults}
-                        onChange={(e) => setAdults(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
-                        {t("children")}
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={children}
-                        onChange={(e) => setChildren(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800"
-                      />
-                    </div>
-                  </div>
-
-                  {nightsCount > 0 && selectedRoomType && (
-                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/60 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-amber-900">
-                        {nightsCount === 1 ? t("nights", { count: nightsCount }) : t("nightsOther", { count: nightsCount })}
-                      </span>
-                      <span className="text-sm font-bold text-slate-900">
-                        {t("totalPrice")}: {bookingTotal.toLocaleString()} XAF
-                      </span>
-                    </div>
-                  )}
-
-                  {bookingStatus === "error" && <p className="text-red-600 text-xs font-medium">{bookingError}</p>}
-
-                  <Button disabled={bookingStatus === "submitting"} className="w-full" size="lg">
-                    {bookingStatus === "submitting" ? t("bookingSubmitting") : t("confirmBooking")}
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeCheckout && (
-        <BookingCheckoutModal
-          isOpen={true}
-          onClose={() => setActiveCheckout(null)}
-          bookingType="HOTEL"
-          title={activeCheckout.title}
-          quarterName={activeCheckout.quarter}
-          priceXaf={activeCheckout.price}
-          pricePeriodLabel="per night"
-          targetId={activeCheckout.targetId}
-          targetContentType="hotels.Hotel"
-          hotelObject={activeCheckout.hotelObj}
-        />
       )}
 
       {interestItem && (

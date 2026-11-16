@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { getMyEmergencyContactState, saveMyEmergencyContact, deleteMyEmergencyContact, type EmergencyContact } from "../lib/api";
+import { useI18n } from "../i18n";
 
 /** The person to alert when this user presses SOS on a ride. One contact, set and removed by the user. */
 export default function EmergencyContactCard() {
+  const { t } = useI18n();
   const [saved, setSaved] = useState<EmergencyContact | null>(null);
   const [smsLive, setSmsLive] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -39,7 +41,7 @@ export default function EmergencyContactCard() {
       }
       setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the contact. Please try again.");
+      setError(err instanceof Error ? err.message : t("emergency.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -50,29 +52,29 @@ export default function EmergencyContactCard() {
       await deleteMyEmergencyContact();
       setSaved(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove the contact.");
+      setError(err instanceof Error ? err.message : t("emergency.removeFailed"));
     }
   }
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>Emergency contact</Text>
-      <Text style={styles.explainer}>Someone we alert, with your route, vehicle and location, if you press SOS during a ride.</Text>
+      <Text style={styles.title}>{t("emergency.title")}</Text>
+      <Text style={styles.explainer}>{t("emergency.explainer")}</Text>
       {!smsLive ? (
         <Text style={styles.warning}>
-          Automatic SMS is not connected on this server yet. If you press SOS, the Oaziland team will see this contact&apos;s number so an operator can call them.
+          {t("emergency.smsNotLive")}
         </Text>
       ) : null}
       {editing ? (
         <View>
-          <TextInput style={styles.input} placeholder="Contact's name" value={name} onChangeText={setName} maxLength={200} />
-          <TextInput style={styles.input} placeholder="Contact's phone, e.g. +237 6XX XXX XXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" maxLength={20} />
+          <TextInput style={styles.input} placeholder={t("emergency.namePlaceholder")} value={name} onChangeText={setName} maxLength={200} />
+          <TextInput style={styles.input} placeholder={t("emergency.phonePlaceholder")} value={phone} onChangeText={setPhone} keyboardType="phone-pad" maxLength={20} />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <View style={styles.row}>
             <TouchableOpacity style={[styles.primary, (busy || !name.trim() || !phone.trim()) && styles.disabled]} disabled={busy || !name.trim() || !phone.trim()} onPress={save}>
-              <Text style={styles.primaryText}>Save</Text>
+              <Text style={styles.primaryText}>{t("common.save")}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setEditing(false)}><Text style={styles.link}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setEditing(false)}><Text style={styles.link}>{t("common.cancel")}</Text></TouchableOpacity>
           </View>
         </View>
       ) : saved ? (
@@ -80,12 +82,12 @@ export default function EmergencyContactCard() {
           <Text style={styles.contact}>{saved.name} · {saved.phone}</Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <View style={styles.row}>
-            <TouchableOpacity onPress={startEdit}><Text style={styles.link}>Change</Text></TouchableOpacity>
-            <TouchableOpacity onPress={remove}><Text style={styles.danger}>Remove</Text></TouchableOpacity>
+            <TouchableOpacity onPress={startEdit}><Text style={styles.link}>{t("emergency.change")}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={remove}><Text style={styles.danger}>{t("emergency.remove")}</Text></TouchableOpacity>
           </View>
         </View>
       ) : (
-        <TouchableOpacity onPress={startEdit}><Text style={styles.link}>Add an emergency contact</Text></TouchableOpacity>
+        <TouchableOpacity onPress={startEdit}><Text style={styles.link}>{t("emergency.add")}</Text></TouchableOpacity>
       )}
     </View>
   );

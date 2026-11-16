@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import PhotoGallery from "@/components/PhotoGallery";
 import ListerRoleBadge from "@/components/ListerRoleBadge";
-import WhatsAppShareButton from "@/components/WhatsAppShareButton";
+import ShareButton from "@/components/ShareButton";
 import DirectChatButton from "@/components/DirectChatButton";
 import PropertyMap from "@/components/PropertyMap";
 import Badge from "@/components/ui/Badge";
@@ -32,6 +32,8 @@ export interface AssetDetailProps {
   verified?: boolean;
   isSale?: boolean;
   priceText?: string;
+  /** Replaces the plain price line, e.g. with a flash-sale price and countdown. */
+  priceSlot?: React.ReactNode;
   description?: string;
   amenities?: string[];
   facts?: { label: string; value: string }[];
@@ -82,7 +84,7 @@ export default async function AssetDetailView(props: AssetDetailProps) {
           </div>
 
           <h1 className="text-3xl font-bold text-[var(--navy)] mb-1">{props.title}</h1>
-          {props.priceText && <p className="text-2xl font-bold text-[var(--navy)] mb-1">{props.priceText}</p>}
+          {props.priceSlot ?? (props.priceText && <p className="text-2xl font-bold text-[var(--navy)] mb-1">{props.priceText}</p>)}
           <p className="text-gray-600 mb-4">📍 {props.location}</p>
 
           {facts.length > 0 && (
@@ -179,7 +181,7 @@ export default async function AssetDetailView(props: AssetDetailProps) {
               />
             </HideForOwner>
           )}
-          <WhatsAppShareButton
+          <ShareButton
             variant="detail"
             title={props.shareTitle}
             location={props.location}

@@ -12,14 +12,21 @@ class _LiveDispatcher(services.NotificationDispatcher):
         return True
 
 
-def test_the_sandbox_is_not_live_but_in_app_always_is():
+@pytest.fixture
+def no_vapid_keys(monkeypatch):
+    # A developer's .env may hold local VAPID keys, which makes PUSH live.
+    monkeypatch.delenv("VAPID_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("VAPID_PRIVATE_KEY", raising=False)
+
+
+def test_the_sandbox_is_not_live_but_in_app_always_is(no_vapid_keys):
     assert services.SandboxDispatcher().is_live is False
     assert services.is_delivery_live("IN_APP") is True
     assert services.is_delivery_live("SMS") is False
     assert services.sandbox_channels() == ["SMS", "WHATSAPP", "EMAIL", "PUSH"]
 
 
-def test_the_startup_check_names_the_channels_and_where_to_fix_it():
+def test_the_startup_check_names_the_channels_and_where_to_fix_it(no_vapid_keys):
     (warning,) = warn_about_sandbox_notification_channels(None)
     assert warning.id == "notifications.W001"
     assert "SMS, WHATSAPP, EMAIL, PUSH" in warning.msg and "NOT being delivered" in warning.msg

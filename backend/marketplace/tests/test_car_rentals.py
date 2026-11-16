@@ -190,7 +190,10 @@ def test_cancelling_early_is_free_but_late_keeps_one_day_for_the_owner(car, fee_
     client = _auth_client(renter)
     early = _book(client, car_id, _day(5), _day(8)).data
     assert client.post(f"/api/marketplace-orders/{early['id']}/cancel/").data["status"] == "CANCELLED"
-    assert MarketplaceOrder.objects.get(pk=early["id"]).booking.escrow.status == EscrowStatus.REFUNDED
+    early_order = MarketplaceOrder.objects.get(pk=early["id"])
+    assert early_order.booking.escrow.status == EscrowStatus.REFUNDED
+    # Rent and deposit both went back into the renter's wallet.
+    assert Wallet.objects.get(owner=renter).balance_xaf == early_order.amount_xaf + early_order.deposit_xaf
 
     late = _book(client, car_id, _day(0), _day(3)).data
     cancelled = client.post(f"/api/marketplace-orders/{late['id']}/cancel/")
@@ -199,7 +202,8 @@ def test_cancelling_early_is_free_but_late_keeps_one_day_for_the_owner(car, fee_
     # One day (30,000) to the owner minus the 5% fee; the other two days and the deposit back to the renter.
     assert (escrow.refunded_amount_xaf, escrow.payee_amount_xaf) == (Decimal("60000.00"), Decimal("28500.00"))
     assert Wallet.objects.get(owner=owner).balance_xaf == Decimal("28500.00")
-    assert Wallet.objects.get(owner=renter).balance_xaf == Decimal("160000.00")
+    # The free early cancellation (90,000 rent + 100,000 deposit) plus this late one (60,000 + 100,000 deposit).
+    assert Wallet.objects.get(owner=renter).balance_xaf == Decimal("350000.00")
     # The cancelled days are free again.
     assert client.get(f"/api/cars/{car_id}/quote/?start_date={_day(0)}&end_date={_day(3)}").status_code == 200
 

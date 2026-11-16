@@ -228,12 +228,12 @@ def hostel_summary(hostel) -> dict:
     ).count()
     waiting = Waitlist.objects.filter(hostel=hostel, fulfilled_at__isnull=True).count()
     return {
-        "id": str(hostel.pk), "label": hostel_label(hostel), "quarter": hostel.quarter.name, "owner": _person(hostel.owner),
-        "rooms": units.count(), "places": places, "housed_now": housed, "waiting": waiting,
+        "id": str(hostel.pk), "label": hostel_label(hostel), "name": hostel.name, "quarter": hostel.quarter.name,
+        "owner": _person(hostel.owner), "rooms": units.count(), "places": places, "housed_now": housed, "waiting": waiting,
     }
 
 
-def hostel_board(hostel, semester_id=None) -> dict:
+def hostel_board(hostel, semester_id=None, viewer=None) -> dict:
     """Rooms and beds, with who holds each place in the chosen semester (the current one, or the latest, by default)."""
     institutions = list(hostel.institution_partnerships.order_by("name"))
     semesters = list(Semester.objects.filter(institution__in=institutions).select_related("institution").order_by("-start_date"))
@@ -268,11 +268,18 @@ def hostel_board(hostel, semester_id=None) -> dict:
             places = [{"bed": None, "allocation": allocation_row(held[0]) if held else None}]
         rooms.append({
             "id": str(unit.pk), "room_code": unit.room_code, "unit_type": unit.unit_type, "occupancy_model": unit.occupancy_model,
+            "room_type": str(unit.room_type_id) if unit.room_type_id else None,
             "places": places, "has_history": unit.allocations.exists(),
         })
 
+    from .agents import managers_for_board
+    from .room_types import owner_room_types
     return {
         "hostel": hostel_summary(hostel),
+        "is_owner": viewer is not None and viewer.pk == hostel.owner_id,
+        "listed_by": _person(hostel.listed_by),
+        "managers": managers_for_board(hostel, viewer),
+        "room_types": owner_room_types(hostel),
         "institutions": [{"id": i.pk, "name": i.name} for i in institutions],
         "semesters": [
             {"id": s.pk, "name": s.name, "institution": s.institution.name, "start_date": s.start_date, "end_date": s.end_date,

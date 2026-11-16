@@ -84,6 +84,11 @@ export default function GuestHousesPage() {
   const [quarterId, setQuarterId] = useState("");
   const [isCoastalLeisure, setIsCoastalLeisure] = useState(false);
   const [finishLevel, setFinishLevel] = useState("STANDARD");
+  const [houseName, setHouseName] = useState("");
+  const [roomName, setRoomName] = useState("");
+  const [roomRate, setRoomRate] = useState("");
+  const [roomCount, setRoomCount] = useState("1");
+  const [roomCapacity, setRoomCapacity] = useState("2");
   const [gpsCoords, setGpsCoords] = useState<GpsValue>(EMPTY_GPS);
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "error">("idle");
@@ -133,7 +138,10 @@ export default function GuestHousesPage() {
     try {
       const guestHouse = await createGuestHouse(
         {
-          quarter: quarterId, is_coastal_leisure: isCoastalLeisure, finish_level: finishLevel,
+          quarter: quarterId, name: houseName.trim(), is_coastal_leisure: isCoastalLeisure, finish_level: finishLevel,
+          room_types: roomRate
+            ? [{ name: roomName.trim() || t("defaultRoomName"), category: "STANDARD", capacity: Number(roomCapacity), base_rate_xaf: roomRate, room_count: Number(roomCount) }]
+            : [],
           latitude: gpsCoords.latitude ?? undefined, longitude: gpsCoords.longitude ?? undefined,
         },
         token
@@ -141,6 +149,10 @@ export default function GuestHousesPage() {
       for (const m of media) await addGuestHousePhoto(guestHouse.id, m.url, m.media_type, token);
       setShowForm(false);
       setIsCoastalLeisure(false);
+      setHouseName("");
+      setRoomName("");
+      setRoomRate("");
+      setRoomCount("1");
       setGpsCoords(EMPTY_GPS);
       setMedia([]);
       load();
@@ -267,6 +279,12 @@ export default function GuestHousesPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="md:col-span-2">
+              <label htmlFor="gh-name" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                {t("nameLabel")} <span className="text-red-500">*</span>
+              </label>
+              <input id="gh-name" required maxLength={200} value={houseName} onChange={(e) => setHouseName(e.target.value)} placeholder={t("namePlaceholder")} className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
+            </div>
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
                 Location Quarter <span className="text-red-500">*</span>
@@ -309,6 +327,29 @@ export default function GuestHousesPage() {
                   {t("coastalLeisure")} (Beachfront or vacation lodge in Kribi, Limbe, etc.)
                 </span>
               </label>
+            </div>
+
+            <div className="md:col-span-2 border-t border-slate-100 pt-4">
+              <h4 className="text-sm font-bold text-slate-900">{t("firstRoomTitle")}</h4>
+              <p className="text-xs text-slate-500 mt-0.5">{t("firstRoomHint")}</p>
+            </div>
+            <div className="md:col-span-2">
+              <label htmlFor="gh-room-name" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">{t("roomNameLabel")}</label>
+              <input id="gh-room-name" maxLength={120} value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder={t("roomNamePlaceholder")} className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
+            </div>
+            <div>
+              <label htmlFor="gh-room-rate" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">{t("roomRateLabel")}</label>
+              <input id="gh-room-rate" type="number" min={1} step={1} value={roomRate} onChange={(e) => setRoomRate(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="gh-room-count" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">{t("roomCountLabel")}</label>
+                <input id="gh-room-count" type="number" min={1} max={500} required={Boolean(roomRate)} value={roomCount} onChange={(e) => setRoomCount(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
+              </div>
+              <div>
+                <label htmlFor="gh-room-capacity" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">{t("roomCapacityLabel")}</label>
+                <input id="gh-room-capacity" type="number" min={1} max={20} required={Boolean(roomRate)} value={roomCapacity} onChange={(e) => setRoomCapacity(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
+              </div>
             </div>
 
             <LocationCapture className="md:col-span-2" value={gpsCoords} onChange={setGpsCoords} />
@@ -374,8 +415,16 @@ export default function GuestHousesPage() {
                       <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-teal-600 text-white">{t("coastalLeisure")}</span>
                     ) : undefined
                   }
-                  share={{ title: "guest house", location: gh.quarter_name, path: `/guest-houses/${gh.id}` }}
-                  typeLabel="Guest House"
+                  share={{
+                    title: gh.name || t("guestHouseLabel"),
+                    location: gh.quarter_name,
+                    price: gh.from_price_xaf ? Number(gh.from_price_xaf).toLocaleString() : undefined,
+                    path: `/guest-houses/${gh.id}`,
+                  }}
+                  price={gh.from_price_xaf ? Number(gh.from_price_xaf).toLocaleString() : undefined}
+                  pricePrefix={gh.from_price_xaf && gh.room_types.length > 1 ? t("fromPrefix") : undefined}
+                  priceUnit={t("perNight")}
+                  typeLabel={gh.name || t("guestHouseLabel")}
                   location={gh.quarter_name}
                   mapsHref={
                     gh.latitude && gh.longitude
@@ -400,7 +449,7 @@ export default function GuestHousesPage() {
                         href={`/guest-houses/${gh.id}`}
                         className="w-full text-center text-xs font-black text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-lg transition-colors"
                       >
-                        Book Now →
+                        {gh.room_types.length > 0 ? `${t("seeRooms")} →` : t("viewAndContact")}
                       </Link>
                       <DirectChatButton
                         recipientId={gh.owner}

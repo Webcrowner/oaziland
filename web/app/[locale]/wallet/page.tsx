@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import Button from "@/components/ui/Button";
@@ -16,6 +17,7 @@ import { IconCreditCard } from "@/components/Icons";
  * withdrawal, and transaction history.
  */
 export default function WalletPage() {
+  const tSignIn = useTranslations("SignInPrompt");
   const [loggedIn, setLoggedIn] = useState(true);
   const [walletVersion, setWalletVersion] = useState(0);
 
@@ -28,8 +30,8 @@ export default function WalletPage() {
     return (
       <AccountSidebarLayout activeHref="/wallet">
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
-          <p className="text-slate-600 mb-4 font-semibold text-sm">Sign in to view your wallet.</p>
-          <Button href="/login">Sign In</Button>
+          <p className="text-slate-600 mb-4 font-semibold text-sm">{tSignIn("wallet")}</p>
+          <Button href="/login">{tSignIn("button")}</Button>
         </div>
       </AccountSidebarLayout>
     );

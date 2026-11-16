@@ -325,9 +325,15 @@ def _release_directed_request(service_request: ServiceRequest, *, notify_request
     _alert_board_technicians(service_request)
 
 
+MONEY_NOTIFICATIONS = {
+    "SERVICE_REQUEST_FUNDED", "SERVICE_REQUEST_REFUNDED", "SERVICE_REQUEST_COMPLETED", "SERVICE_REQUEST_AUTO_RELEASED",
+}
+
+
 def _notify(recipient, notification_type: str, title: str, message: str, service_request):
-    from notifications.services import notify
-    notify(
+    from notifications.services import notify, notify_important
+    send = notify_important if notification_type in MONEY_NOTIFICATIONS else notify
+    send(
         recipient=recipient, notification_type=notification_type, title=title,
         message=message, related_reference=str(service_request.id),
     )
@@ -351,19 +357,20 @@ def is_escrow_funded(service_request: ServiceRequest) -> bool:
 
 
 def _refund_held_escrow(service_request: ServiceRequest) -> bool:
-    """Returns held money to the requester and detaches the cancelled booking
+    """Returns held money to the requester's wallet and detaches the cancelled booking
     so a fresh payment can be made if the job is reassigned."""
     escrow = _held_escrow(service_request)
     if escrow is None:
         return False
+    from transactions.services import settle_escrow
     with db_transaction.atomic():
-        escrow.refund()
-        escrow.booking.cancel()
+        # Back to the requester's Oaziland wallet (settle_escrow also cancels the booking).
+        settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"service request #{service_request.pk}")
         service_request.booking = None
         service_request.save(update_fields=["booking"])
     _notify(
         service_request.requester, "SERVICE_REQUEST_REFUNDED", "Your payment was refunded",
-        f"{escrow.gross_amount_xaf} XAF held for this job was returned to you.", service_request,
+        f"{escrow.gross_amount_xaf} XAF held for this job was returned to your Oaziland wallet.", service_request,
     )
     return True
 
@@ -371,9 +378,14 @@ def _refund_held_escrow(service_request: ServiceRequest) -> bool:
 def fund_service_request_escrow(*, service_request: ServiceRequest, requester, lock_client, payment_gateway, phone_number: str):
     """The requester pays the approved quote into escrow BEFORE work starts, so
     the technician is guaranteed payment and the requester's money stays
-    protected until they confirm the job is done."""
-    from transactions.services import reserve_booking, confirm_payment, initiate_booking_payment, fail_payment
+    protected until they confirm the job is done. The sandbox gateway confirms at once and returns the escrow;
+    a real payment returns None and is confirmed later by the provider's verified webhook
+    (see confirm_service_funding_after_payment) once the requester approves it on their phone."""
+    from transactions.services import (
+        reserve_booking, initiate_booking_payment, fail_payment, confirm_sandbox_payment, InventoryConflictError,
+    )
     from transactions.models import BookingType
+    from payments.gateways import confirms_instantly
     if service_request.requester_id != requester.id:
         raise NotPartyToServiceRequestError("Only the requester can pay for this job.")
     if service_request.status not in OPEN_JOB_STATUSES:
@@ -383,29 +395,68 @@ def fund_service_request_escrow(*, service_request: ServiceRequest, requester, l
     if service_request.booking_id is not None:
         raise ServiceRequestStateError("This job is already paid for.")
 
-    booking = reserve_booking(
-        lock_client=lock_client, requester=service_request.requester,
-        booking_type=BookingType.SERVICE_REQUEST,
-        target_content_type="services.ServiceRequest", target_id=service_request.id,
-        amount_xaf=service_request.quoted_amount_xaf,
-    )
+    try:
+        booking = reserve_booking(
+            lock_client=lock_client, requester=service_request.requester,
+            booking_type=BookingType.SERVICE_REQUEST,
+            target_content_type="services.ServiceRequest", target_id=service_request.id,
+            amount_xaf=service_request.quoted_amount_xaf,
+        )
+    except InventoryConflictError:
+        raise ServiceRequestStateError("A payment for this job is already in progress. Approve it on your phone.")
     debit = initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
     if not debit.success:
         fail_payment(lock_client=lock_client, booking=booking)
         raise ServiceRequestStateError("The payment could not be completed. Please try again.")
-    escrow = confirm_payment(
-        lock_client=lock_client, booking=booking, provider="MTN_MOMO",
-        provider_reference=booking.idempotency_key, payment_gateway=payment_gateway,
-        raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
-    )
-    service_request.booking = booking
-    service_request.save(update_fields=["booking"])
+    if not confirms_instantly(payment_gateway):
+        return None
+    escrow = confirm_sandbox_payment(lock_client=lock_client, booking=booking, payment_gateway=payment_gateway)
+    confirm_service_funding_after_payment(booking)
+    service_request.refresh_from_db()
+    return escrow
+
+
+def confirm_service_funding_after_payment(booking):
+    """Runs once the payment for a job is confirmed (by the provider's webhook, or at once for the sandbox): the
+    escrow is attached to the job and the technician can start. If the job was cancelled, re-quoted or already paid
+    meanwhile, the money goes straight back to the requester's wallet instead. Safe to run twice."""
+    from transactions.models import EscrowStatus
+    from transactions.services import settle_escrow
+    if booking.target_content_type != "services.ServiceRequest":
+        return None
+    with db_transaction.atomic():
+        service_request = (
+            ServiceRequest.objects.select_for_update().select_related("requester", "technician").filter(pk=booking.target_id).first()
+        )
+        if service_request is None or service_request.booking_id == booking.id:
+            return service_request
+        escrow = getattr(booking, "escrow", None)
+        usable = (
+            service_request.booking_id is None and service_request.status in OPEN_JOB_STATUSES
+            and service_request.quote_approved and service_request.quoted_amount_xaf == booking.amount_xaf
+        )
+        if not usable:
+            if escrow is not None and escrow.status == EscrowStatus.HELD:
+                settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"service request #{service_request.pk}")
+                refunded = True
+            else:
+                refunded = False
+        else:
+            service_request.booking = booking
+            service_request.save(update_fields=["booking"])
+    if not usable:
+        if refunded:
+            _notify(
+                service_request.requester, "SERVICE_REQUEST_REFUNDED", "Your payment was refunded",
+                f"{booking.amount_xaf} XAF arrived after this job was cancelled or its price changed, so it was returned to your Oaziland wallet.", service_request,
+            )
+        return service_request
     if service_request.technician_id:
         _notify(
             service_request.technician, "SERVICE_REQUEST_FUNDED", "The job is paid into escrow",
             f"{service_request.quoted_amount_xaf} XAF is secured — you can start the job.", service_request,
         )
-    return escrow
+    return service_request
 
 
 def _assigned_technician_or_raise(service_request: ServiceRequest, technician):
@@ -899,8 +950,9 @@ def complete_service_request_with_payment(
     resulting Booking back to this ServiceRequest — proving 'service
     payments must use Oaziland's own escrow system, never Taskln's
     payment rails directly', per Prompt 10's explicit requirement."""
-    from transactions.services import reserve_booking, confirm_payment, initiate_booking_payment
+    from transactions.services import reserve_booking, confirm_sandbox_payment, initiate_booking_payment
     from transactions.models import BookingType
+    from payments.gateways import confirms_instantly
 
     if _held_escrow(service_request) is not None:
         # Already paid into escrow before work started: confirming the job releases that money.
@@ -916,6 +968,11 @@ def complete_service_request_with_payment(
             _notify(service_request.technician, "SERVICE_REQUEST_COMPLETED", "Job completed and paid", "Your payment has been released to your wallet.", service_request)
         return booking, escrow
 
+    if not confirms_instantly(payment_gateway):
+        # A real payment is only confirmed later by the provider's webhook, and a job is completed only once its
+        # money is held, so it has to be paid into escrow first.
+        raise ServiceRequestStateError("Pay into escrow first; the job can be confirmed once the payment is held.")
+
     booking = reserve_booking(
         lock_client=lock_client, requester=service_request.requester,
         booking_type=BookingType.SERVICE_REQUEST,
@@ -923,11 +980,7 @@ def complete_service_request_with_payment(
         amount_xaf=amount_xaf,
     )
     initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
-    escrow = confirm_payment(
-        lock_client=lock_client, booking=booking, provider="MTN_MOMO",
-        provider_reference=booking.idempotency_key, payment_gateway=payment_gateway,
-        raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
-    )
+    escrow = confirm_sandbox_payment(lock_client=lock_client, booking=booking, payment_gateway=payment_gateway)
 
     from django.utils import timezone
     with db_transaction.atomic():

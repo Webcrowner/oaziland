@@ -136,10 +136,9 @@ class PaymentEscrow(models.Model):
         self.released_at = timezone.now()
         self.save(update_fields=["status", "released_at"])
 
-    def refund(self):
-        self.status = EscrowStatus.REFUNDED
-        self.refunded_amount_xaf = self.gross_amount_xaf
-        self.save(update_fields=["status", "refunded_amount_xaf"])
+    # There is deliberately no refund() here: marking an escrow REFUNDED without crediting the payer's wallet leaves
+    # their money nowhere. Give a held payment back with transactions.services.settle_escrow (the full amount to the
+    # payer), which credits the wallet, records the refund and cancels the booking in one step.
 
 
 class Commission(models.Model):

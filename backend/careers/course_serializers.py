@@ -1,10 +1,14 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
-from .course_services import MAX_PDF_BYTES, MAX_VIDEO_BYTES, VIDEO_CONTENT_TYPES, may_publish, staff_role_for
+from .course_services import MAX_PDF_BYTES, MAX_VIDEO_BYTES, VIDEO_CONTENT_TYPES, may_publish, parse_number, staff_role_for
 from .models import (
-    CourseModule, CourseStaff, Lesson, LessonKind, QuizChoice, QuizQuestion, TrainingProgram,
+    CourseModule, CourseStaff, Lesson, LessonKind, QuizChoice, QuizQuestion, QuizQuestionKind, TrainingProgram,
 )
 from .serializers import cover_image_url
+
+MAX_ACCEPTED_ANSWERS = 20
 
 
 class QuizChoiceStaffSerializer(serializers.ModelSerializer):
@@ -15,11 +19,13 @@ class QuizChoiceStaffSerializer(serializers.ModelSerializer):
 
 
 class QuizQuestionStaffSerializer(serializers.ModelSerializer):
-    choices = QuizChoiceStaffSerializer(many=True)
+    choices = QuizChoiceStaffSerializer(many=True, required=False)
+    accepted_answers = serializers.ListField(child=serializers.CharField(max_length=200, allow_blank=False), required=False, max_length=MAX_ACCEPTED_ANSWERS)
+    tolerance = serializers.DecimalField(max_digits=12, decimal_places=4, required=False, min_value=Decimal("0"))
 
     class Meta:
         model = QuizQuestion
-        fields = ["id", "lesson", "text", "explanation", "position", "choices"]
+        fields = ["id", "lesson", "text", "explanation", "position", "kind", "choices", "accepted_answers", "tolerance"]
         read_only_fields = ["id"]
 
     def validate_lesson(self, lesson):
@@ -27,12 +33,33 @@ class QuizQuestionStaffSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Questions can only be added to a quiz lesson.")
         return lesson
 
-    def validate_choices(self, choices):
-        if len(choices) < 2:
-            raise serializers.ValidationError("A question needs at least two choices.")
-        if not any(c.get("is_correct") for c in choices):
-            raise serializers.ValidationError("Mark at least one choice as correct.")
-        return choices
+    def validate(self, attrs):
+        kind = attrs.get("kind", self.instance.kind if self.instance else QuizQuestionKind.CHOICE)
+        choices = attrs.get("choices", None if self.instance else [])
+        if kind == QuizQuestionKind.CHOICE:
+            if choices is None:  # a partial update that doesn't touch the choices
+                if self.instance.kind != kind:
+                    raise serializers.ValidationError({"choices": "A question needs at least two choices."})
+                return attrs
+            if len(choices) < 2:
+                raise serializers.ValidationError({"choices": "A question needs at least two choices."})
+            if not any(c.get("is_correct") for c in choices):
+                raise serializers.ValidationError({"choices": "Mark at least one choice as correct."})
+            attrs["accepted_answers"], attrs["tolerance"] = [], Decimal("0")
+            return attrs
+
+        accepted = [a.strip() for a in attrs.get("accepted_answers", self.instance.accepted_answers if self.instance else []) if a.strip()]
+        if not accepted:
+            raise serializers.ValidationError({"accepted_answers": "Give at least one accepted answer."})
+        if kind == QuizQuestionKind.NUMBER:
+            if parse_number(accepted[0]) is None:
+                raise serializers.ValidationError({"accepted_answers": "The accepted answer must be a number."})
+            accepted = accepted[:1]
+        else:
+            attrs["tolerance"] = Decimal("0")
+        attrs["accepted_answers"] = accepted
+        attrs["choices"] = []  # only multiple-choice questions keep choices
+        return attrs
 
     @staticmethod
     def _write_choices(question, choices):
@@ -43,7 +70,7 @@ class QuizQuestionStaffSerializer(serializers.ModelSerializer):
         )
 
     def create(self, validated_data):
-        choices = validated_data.pop("choices")
+        choices = validated_data.pop("choices", [])
         question = QuizQuestion.objects.create(**validated_data)
         self._write_choices(question, choices)
         return question
@@ -73,7 +100,7 @@ class LessonStaffSerializer(serializers.ModelSerializer):
         fields = [
             "id", "module", "title", "kind", "position", "content_text", "video_url",
             "video_file", "remove_video_file", "video_file_url",
-            "pdf_file", "remove_pdf", "pdf_url", "pass_mark_percent", "questions",
+            "pdf_file", "remove_pdf", "pdf_url", "pass_mark_percent", "is_preview", "peer_review", "questions",
         ]
         read_only_fields = ["id"]
 
@@ -123,6 +150,11 @@ class LessonStaffSerializer(serializers.ModelSerializer):
         has_pdf = bool(attrs.get("pdf_file")) or bool(current and current.pdf_file and not attrs.get("remove_pdf"))
         if kind == LessonKind.PDF and not has_pdf:
             raise serializers.ValidationError({"pdf_file": "A PDF lesson needs a PDF file."})
+        # Each flag only means something for some kinds of lesson, so it's cleared for the others (e.g. after the kind changes).
+        if kind in (LessonKind.QUIZ, LessonKind.ASSIGNMENT):
+            attrs["is_preview"] = False
+        if kind != LessonKind.ASSIGNMENT:
+            attrs["peer_review"] = False
         return attrs
 
     def create(self, validated_data):
@@ -146,7 +178,7 @@ class CourseModuleStaffSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CourseModule
-        fields = ["id", "program", "title", "position", "lessons"]
+        fields = ["id", "program", "title", "position", "due_after_days", "lessons"]
         read_only_fields = ["id"]
 
     def update(self, instance, validated_data):

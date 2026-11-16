@@ -8,8 +8,11 @@ import {
 } from "@/lib/api";
 
 import LessonVideo from "@/components/LessonVideo";
+import LessonText from "@/components/LessonText";
 import CourseDiscussions from "@/components/CourseDiscussions";
+import PeerReviewPanel from "@/components/PeerReviewPanel";
 import { loginHref } from "@/lib/authRedirect";
+import { relativeTime } from "@/lib/relativeTime";
 
 export default function CoursePlayer({ programId }: { programId: string }) {
   const t = useTranslations("CoursePlayer");
@@ -25,6 +28,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
   const [pdf, setPdf] = useState<File | null>(null);
   const [pdfError, setPdfError] = useState("");
   const [quizError, setQuizError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const articleRef = useRef<HTMLElement>(null);
   const completedRef = useRef<HTMLDivElement>(null);
   const lastStatus = useRef<string | null>(null);
@@ -90,6 +94,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
     setPdf(null);
     setPdfError("");
     setQuizError("");
+    setMenuOpen(false);
     // From the Previous/Next buttons at the bottom: bring the new lesson's title into view.
     if (scroll) window.requestAnimationFrame(() => articleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
@@ -175,6 +180,10 @@ export default function CoursePlayer({ programId }: { programId: string }) {
     });
   }
 
+  function typeAnswer(questionId: string, value: string) {
+    setAnswers((prev) => ({ ...prev, [questionId]: [value] }));
+  }
+
   if (state === "loading") return <p className="py-16 text-center text-slate-500">{t("loading")}</p>;
   if (state === "signin") {
     return (
@@ -198,7 +207,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
   if (!outline) return null;
 
   const finished = outline.status === "COMPLETED";
-  const quizReady = lesson?.questions?.length && lesson.questions.every((q) => (answers[q.id] ?? []).length > 0);
+  const quizReady = lesson?.questions?.length && lesson.questions.every((q) => (answers[q.id] ?? []).some((a) => a.trim() !== ""));
   // A passed quiz shows the learner's passing attempt with the answers; otherwise the latest graded attempt (if any).
   const review = lesson?.kind === "QUIZ" && !result ? lesson.review ?? null : null;
   const graded = result ?? review;
@@ -226,7 +235,13 @@ export default function CoursePlayer({ programId }: { programId: string }) {
             <span>{t("progress", { done: outline.progress.done, total: outline.progress.total })}</span>
             <span className="text-base font-bold text-white">{outline.progress.percent}%</span>
           </div>
-          <div className="h-2.5 w-full overflow-hidden rounded-full bg-white/15" role="progressbar" aria-valuenow={outline.progress.percent} aria-valuemin={0} aria-valuemax={100}>
+          <div
+            className="h-2.5 w-full overflow-hidden rounded-full bg-white/15"
+            role="progressbar"
+            aria-label={t("progressBarLabel", { title: outline.program.title })}
+            aria-valuetext={t("progress", { done: outline.progress.done, total: outline.progress.total })}
+            aria-valuenow={outline.progress.percent} aria-valuemin={0} aria-valuemax={100}
+          >
             <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500" style={{ width: `${outline.progress.percent}%` }} />
           </div>
         </div>
@@ -246,6 +261,10 @@ export default function CoursePlayer({ programId }: { programId: string }) {
           )}
           <Link href={`/trainings/${programId}#reviews`} className="ml-3 mt-2 inline-block text-sm font-semibold text-emerald-900 underline">★ {t("rateCourse")}</Link>
         </div>
+      )}
+
+      {!finished && outline.overdue_modules > 0 && (
+        <p role="status" className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">⏰ {t("behindBanner", { count: outline.overdue_modules })}</p>
       )}
 
       {lessons.length === 0 ? (
@@ -269,18 +288,44 @@ export default function CoursePlayer({ programId }: { programId: string }) {
         </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-[19rem_1fr]">
-          <nav className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm md:sticky md:top-4 md:max-h-[calc(100vh-2rem)] md:self-start md:overflow-y-auto">
+          <div className="md:sticky md:top-4 md:max-h-[calc(100vh-2rem)] md:self-start">
+          {/* Phones: the lesson list folds into one bar above the lesson, so it doesn't push the lesson off screen. */}
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={menuOpen}
+            aria-controls="course-contents"
+            className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm shadow-sm md:hidden"
+          >
+            <span className="flex-1">
+              <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">{t("courseContents")}</span>
+              <span className="block font-semibold text-slate-900">{t("lessonPosition", { current: lessonIndex + 1, total: lessons.length })}</span>
+            </span>
+            <span className={`text-slate-400 transition-transform ${menuOpen ? "rotate-180" : ""}`} aria-hidden>▾</span>
+          </button>
+          <nav
+            id="course-contents"
+            aria-label={t("courseContents")}
+            className={`${menuOpen ? "mt-2 block" : "hidden"} max-h-[70vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm md:mt-0 md:block md:max-h-[calc(100vh-2rem)]`}
+          >
             {outline.modules.map((m, mi) => (
               <div key={m.id} className="mb-4 last:mb-0">
                 <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--navy)] text-[10px] text-white">{mi + 1}</span>
                   {m.title}
                 </p>
+                {m.due_at && !m.lessons.every((l) => l.completed) && (
+                  <p className={`-mt-1 mb-2 ml-7 text-[11px] ${m.overdue ? "font-semibold text-amber-700" : "text-slate-500"}`}>
+                    {m.overdue
+                      ? t("behindPace", { date: new Date(m.due_at).toLocaleDateString(locale, { dateStyle: "medium" }) })
+                      : t("suggestedBy", { date: new Date(m.due_at).toLocaleDateString(locale, { dateStyle: "medium" }) })}
+                  </p>
+                )}
                 <ul className="space-y-0.5">
                   {m.lessons.map((l) => (
                     <li key={l.id}>
                       <button
-                        onClick={() => select(l.id)}
+                        onClick={() => select(l.id, menuOpen)}
                         aria-current={l.id === lesson?.id}
                         className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${l.id === lesson?.id ? "bg-[var(--navy)]/[0.07] font-semibold text-[var(--navy)] ring-1 ring-[var(--navy)]/15" : "text-slate-700 hover:bg-slate-50"}`}
                       >
@@ -299,13 +344,14 @@ export default function CoursePlayer({ programId }: { programId: string }) {
               </div>
             ))}
           </nav>
+          </div>
 
           {lesson && (
             <article ref={articleRef} className="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
               <p className="text-xs font-bold uppercase tracking-wider text-amber-700">{t(`kind${lesson.kind}`)}</p>
               <h2 className="mb-5 mt-1 font-[family-name:var(--font-display)] text-2xl font-bold text-slate-900">{lesson.title}</h2>
 
-              {lesson.kind === "TEXT" && <div className="whitespace-pre-wrap text-base leading-relaxed text-slate-800">{lesson.content_text}</div>}
+              {lesson.kind === "TEXT" && <LessonText text={lesson.content_text} />}
 
               {lesson.kind === "VIDEO" && (
                 <>
@@ -317,15 +363,28 @@ export default function CoursePlayer({ programId }: { programId: string }) {
                       🔗 {t("videoSource")}: <a href={videoLink} target="_blank" rel="noopener noreferrer" className="font-medium text-[var(--navy)] underline">{videoLink}</a>
                     </p>
                   )}
-                  {lesson.content_text && <p className="mt-4 whitespace-pre-wrap leading-relaxed text-slate-700">{lesson.content_text}</p>}
+                  {lesson.content_text && <LessonText text={lesson.content_text} className="mt-4" />}
                 </>
               )}
 
               {lesson.kind === "PDF" && (
                 <>
-                  {lesson.content_text && <p className="mb-4 whitespace-pre-wrap leading-relaxed text-slate-700">{lesson.content_text}</p>}
-                  <iframe src={lesson.pdf_url} title={lesson.title} className="h-[34rem] w-full rounded-xl border border-slate-200" />
-                  <a href={lesson.pdf_url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm font-semibold text-[var(--navy)] underline">{t("openPdf")}</a>
+                  {lesson.content_text && <LessonText text={lesson.content_text} className="mb-4" />}
+                  {/* Phone browsers don't reliably show a PDF inside the page: they get a button to their PDF viewer. */}
+                  <a
+                    href={lesson.pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:bg-slate-100 md:hidden"
+                  >
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-50 text-2xl" aria-hidden>📄</span>
+                    <span className="flex-1">
+                      <span className="block font-bold text-[var(--navy)]">{t("openPdfMobile")}</span>
+                      <span className="block text-xs text-slate-500">{t("openPdfMobileHint")}</span>
+                    </span>
+                  </a>
+                  <iframe src={lesson.pdf_url} title={lesson.title} className="hidden h-[34rem] w-full rounded-xl border border-slate-200 md:block" />
+                  <a href={lesson.pdf_url} target="_blank" rel="noopener noreferrer" className="mt-3 hidden text-sm font-semibold text-[var(--navy)] underline md:inline-block">{t("openPdf")}</a>
                 </>
               )}
 
@@ -371,7 +430,21 @@ export default function CoursePlayer({ programId }: { programId: string }) {
                         <li key={q.id} className="rounded-xl border border-slate-200 p-4">
                           <fieldset disabled={!!graded || attemptsLeft === 0}>
                             <legend className="mb-1 font-semibold text-slate-900">{index + 1}. {q.text}</legend>
-                            <p className="mb-3 text-xs text-slate-500">{q.multiple ? t("chooseAll") : t("chooseOne")}</p>
+                            <p className="mb-3 text-xs text-slate-500">{q.kind === "NUMBER" ? t("typeNumber") : q.kind === "SHORT_TEXT" ? t("typeAnswer") : q.multiple ? t("chooseAll") : t("chooseOne")}</p>
+                            {q.kind !== "CHOICE" && (
+                              <input
+                                type="text" inputMode={q.kind === "NUMBER" ? "decimal" : "text"} maxLength={200} autoComplete="off"
+                                value={shownAnswers[q.id]?.[0] ?? ""} onChange={(e) => typeAnswer(q.id, e.target.value)}
+                                aria-label={t("yourAnswer")} placeholder={t("yourAnswer")}
+                                className={`w-full max-w-sm rounded-lg border px-3 py-2.5 text-sm ${gradedQuestion?.correct_answers ? (gradedQuestion.correct ? "border-emerald-300 bg-emerald-50" : "border-red-300 bg-red-50") : "border-slate-300"}`}
+                              />
+                            )}
+                            {q.kind !== "CHOICE" && gradedQuestion?.correct_answers && !gradedQuestion.correct && (
+                              <p className="mt-2 text-sm text-slate-700">
+                                {t("acceptedAnswers")}: <span className="font-semibold">{gradedQuestion.correct_answers.join(" · ")}</span>
+                                {gradedQuestion.tolerance && Number(gradedQuestion.tolerance) > 0 ? ` (± ${gradedQuestion.tolerance})` : ""}
+                              </p>
+                            )}
                             {q.choices.map((c) => {
                               const checked = (shownAnswers[q.id] ?? []).includes(c.id);
                               const isRight = gradedQuestion?.correct_choices?.includes(c.id);
@@ -416,7 +489,7 @@ export default function CoursePlayer({ programId }: { programId: string }) {
 
               {lesson.kind === "ASSIGNMENT" && (
                 <div>
-                  {lesson.content_text && <p className="mb-4 whitespace-pre-wrap leading-relaxed text-slate-800">{lesson.content_text}</p>}
+                  {lesson.content_text && <LessonText text={lesson.content_text} className="mb-4" />}
                   <p className="mb-4 text-sm text-slate-600">{t("assignmentHint")}</p>
                   {lesson.submission && (
                     <div
@@ -424,8 +497,23 @@ export default function CoursePlayer({ programId }: { programId: string }) {
                       className={`mb-4 rounded-xl border p-4 text-sm ${lesson.submission.status === "APPROVED" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : lesson.submission.status === "CHANGES_REQUESTED" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-sky-200 bg-sky-50 text-sky-900"}`}
                     >
                       <p className="font-semibold">{t(`submission${lesson.submission.status}`)}</p>
+                      {lesson.submission.status === "SUBMITTED" && (
+                        <p className="mt-1">
+                          {t("submittedWhen", { when: relativeTime(lesson.submission.submitted_at, locale) })}{" "}
+                          {outline.typical_review_hours
+                            ? t("typicalReview", {
+                                duration: outline.typical_review_hours <= 36
+                                  ? t("hoursCount", { count: outline.typical_review_hours })
+                                  : t("daysCount", { count: Math.round(outline.typical_review_hours / 24) }),
+                              })
+                            : t("reviewByHand")}
+                        </p>
+                      )}
+                      {lesson.submission.status === "SUBMITTED" && lesson.peer_review && (
+                        <p className="mt-1">{t("peerProgress", { done: lesson.submission.peer_reviews_received ?? 0, required: lesson.peer?.required ?? 2 })}</p>
+                      )}
                       {lesson.submission.feedback && (
-                        <p className="mt-1"><span className="font-medium">{t("reviewerFeedback")}:</span> {lesson.submission.feedback}</p>
+                        <p className="mt-1 whitespace-pre-line"><span className="font-medium">{lesson.peer_review ? t("classmateFeedback") : t("reviewerFeedback")}:</span> {lesson.submission.feedback}</p>
                       )}
                       <button onClick={viewSubmission} className="mt-2 font-medium underline">{t("viewMySubmission")}</button>
                     </div>
@@ -439,6 +527,14 @@ export default function CoursePlayer({ programId }: { programId: string }) {
                     </div>
                   )}
                   {pdfError && <p role="alert" className="mt-2 text-sm text-red-600">{pdfError}</p>}
+                  {lesson.peer_review && enrollment && !finished && (
+                    <PeerReviewPanel
+                      key={`${lesson.id}:${lesson.submission?.submitted_at ?? "none"}`}
+                      enrollmentId={enrollment.id} lessonId={lesson.id} handedIn={Boolean(lesson.submission)}
+                      required={lesson.peer?.required ?? 2} given={lesson.peer?.given ?? 0}
+                      onReviewed={() => { const token = localStorage.getItem("access_token"); if (token) void refresh(enrollment.id, token).catch(() => undefined); }}
+                    />
+                  )}
                 </div>
               )}
 

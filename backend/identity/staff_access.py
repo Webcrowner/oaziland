@@ -11,6 +11,7 @@ How it works
   matching permission; reading elsewhere is allowed. Because DRF authenticates every API request, no endpoint
   can be missed — anything not listed below is read-only for staff.
 - StaffActivityMiddleware records every change made in a staff session, for the owner to review.
+- The same authentication and middleware also run admins' platform sessions (see identity.platform_account).
 """
 from datetime import timedelta
 
@@ -37,7 +38,7 @@ NEVER_ALLOWED_PREFIXES = (
     "consent/", "my-creator-premium/", "ad-campaigns/", "my-ad-campaigns/", "social-accounts/", "my-parent-access-grants/",
     "my-guardian-accesses/", "my-emergency-contact/", "my-blocked-users/", "verification-requests/", "my-driver-profile/",
     "my-vehicles/", "rides/", "my-technician-", "my-referrals/", "my-presence-settings/", "my-agency-dashboard/add-agent",
-    "my-agency-dashboard/remove-agent", "data/", "webhooks/",
+    "my-agency-dashboard/remove-agent", "data/", "webhooks/", "marketplace-cart/",
 )
 # Actions that move money or commit the owner to pay, matched as whole path segments.
 NEVER_ALLOWED_ACTIONS = {
@@ -51,7 +52,7 @@ SCOPES = {
     StaffPermission.LISTINGS: (
         "listings/", "my-listings/", "houses/", "lands/", "shops/", "stores/", "warehouses/", "businesses/", "cars/", "goods/",
         "hotels/", "venues/", "guest-houses/", "student-hostels/", "hostel-rooms/", "my-landlord-portfolio/", "wanted-listings/",
-        "media/upload/",
+        "media/upload/", "marketplace-coupons/", "marketplace-shop/",
     ),
     StaffPermission.MESSAGES: ("conversations/", "disputes/"),
     StaffPermission.BOOKINGS: (
@@ -60,7 +61,7 @@ SCOPES = {
     ),
     StaffPermission.POSTS: ("posts/", "comments/", "flyers/", "my-agent-profile/", "media/upload/"),
     StaffPermission.REVIEWS: ("reviews/", "ratings/", "my-ratings/"),
-    StaffPermission.EARNINGS_VIEW: ("wallet/", "my-earnings-report/", "my-agent-dashboard/", "my-agency-dashboard/"),
+    StaffPermission.EARNINGS_VIEW: ("wallet/", "my-earnings-report/", "my-agent-dashboard/", "my-agency-dashboard/", "marketplace-seller/"),
 }
 READ_ONLY_SCOPES = {StaffPermission.REVIEWS, StaffPermission.EARNINGS_VIEW}
 
@@ -107,6 +108,8 @@ class DelegatedJWTAuthentication(JWTAuthentication):
         if result is None:
             return None
         user, token = result
+        if token.get("act_platform_admin") or getattr(user, "is_platform_account", False):
+            return self._platform_session(request, user, token)
         grant_id = token.get("act_grant")
         if not grant_id:
             return result
@@ -120,6 +123,20 @@ class DelegatedJWTAuthentication(JWTAuthentication):
         user.acting_staff = grant.staff
         return user, token
 
+    def _platform_session(self, request, user, token):
+        """Oaziland's own account is only ever used through an admin's platform session (identity.platform_account)."""
+        from .platform_account import admin_for_session, check_platform_request
+
+        admin = admin_for_session(token) if getattr(user, "is_platform_account", False) else None
+        if admin is None:
+            raise exceptions.AuthenticationFailed("This platform session has ended. Switch back to your own account.", code="platform_session_ended")
+        problem = check_platform_request(admin, request.method, request.path)
+        if problem:
+            raise exceptions.PermissionDenied(problem)
+        request._request.platform_admin = admin
+        user.acting_admin = admin
+        return user, token
+
 
 class StaffActivityMiddleware:
     """Writes one StaffActionLog row for every change made in a staff session (whatever the outcome)."""
@@ -129,6 +146,12 @@ class StaffActivityMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
+        if getattr(request, "platform_admin", None) is not None and request.method not in SAFE_METHODS:
+            try:
+                from .platform_account import record_platform_action
+                record_platform_action(request, response)
+            except Exception:  # never let logging break the response
+                pass
         grant = getattr(request, "staff_grant", None)
         if grant is not None and request.method not in SAFE_METHODS:
             try:

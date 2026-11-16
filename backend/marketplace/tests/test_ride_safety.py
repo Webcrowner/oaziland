@@ -11,7 +11,7 @@ from identity.models import User, AdminProfile
 from marketplace.models import RideBooking, RideStatus
 from marketplace.services import expire_stale_rides
 from notifications.models import Notification
-from marketplace.tests.test_marketplace_api import _verify, _auth_client
+from marketplace.tests.test_marketplace_api import _verify, _auth_client, RIDE_POINTS
 
 
 _admin_counter = iter(range(100000, 999999))
@@ -29,42 +29,42 @@ def _verified_driver(name, phone, category="STANDARD"):
 
 
 def _request_ride(rider, **extra):
-    payload = {"pickup_description": "Bastos roundabout", "dropoff_description": "Airport", "distance_km": "5", **extra}
+    payload = {"pickup_description": "Bastos roundabout", "dropoff_description": "Airport", **RIDE_POINTS, **extra}
     response = _auth_client(rider).post("/api/rides/", payload)
     assert response.status_code == 201, response.data
     return response.data
 
 
 @pytest.mark.django_db
-def test_a_tiny_typed_distance_cannot_dodge_the_fare():
+def test_a_ride_needs_both_map_points_and_the_quote_matches_what_is_charged(road):
     rider = _verify(User.objects.create(username="rs_rider1", phone="+237699300001"))
-    # Roughly 17 km apart: Bastos to Nsimalen airport.
-    far = _request_ride(
-        rider, distance_km="0.1",
-        pickup_latitude="3.8800000", pickup_longitude="11.5210000", dropoff_latitude="3.7226000", dropoff_longitude="11.5533000",
-    )
-    assert Decimal(far["fare_estimate_xaf"]) > Decimal("2500")
-    # Without coordinates the typed distance is all there is, as before.
-    plain = _request_ride(rider, distance_km="5")
-    assert Decimal(plain["fare_estimate_xaf"]) == Decimal("1250.00")
-    # A distance larger than the straight line is respected (roads wind).
-    longer = _request_ride(
-        rider, distance_km="30",
-        pickup_latitude="3.8800000", pickup_longitude="11.5210000", dropoff_latitude="3.7226000", dropoff_longitude="11.5533000",
-    )
-    assert Decimal(longer["fare_estimate_xaf"]) == Decimal("500") + Decimal("30") * Decimal("150")
+    no_dropoff = {k: v for k, v in RIDE_POINTS.items() if not k.startswith("dropoff")}
+    response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", "distance_km": "5", **no_dropoff})
+    assert response.status_code == 400 and "map" in response.data["detail"]
+
+    road.km = Decimal("7.31")
+    quote = _auth_client(rider).post("/api/rides/quote/", RIDE_POINTS)
+    assert quote.status_code == 200, quote.data
+    assert quote.data["distance_km"] == "7.31" and quote.data["duration_minutes"] == 12 and quote.data["source"] == "google"
+    assert set(quote.data["fares"]) == {"MOTO", "STANDARD", "COMFORT", "VAN", "TRUCK"}
+    # Whole francs: 800 + 7.31 * 220 = 2408.2 -> 2408.
+    assert quote.data["fares"]["COMFORT"] == "2408"
+    booked = _request_ride(rider, ride_category="COMFORT")
+    assert Decimal(booked["fare_estimate_xaf"]) == Decimal(quote.data["fares"]["COMFORT"]) and booked["distance_km"] == "7.31"
+    assert road.calls[-1] == ((Decimal("3.8800000"), Decimal("11.5210000")), (Decimal("3.8200000"), Decimal("11.5200000")))
+
+    assert _auth_client(rider).post("/api/rides/quote/", {**RIDE_POINTS, "pickup_latitude": "123"}).status_code == 400
+    assert APIClient().post("/api/rides/quote/", RIDE_POINTS).status_code == 401
 
 
 @pytest.mark.django_db
-def test_a_ride_keeps_the_distance_its_fare_was_charged_on():
+def test_a_ride_keeps_the_distance_its_fare_was_charged_on(road):
     rider = _verify(User.objects.create(username="rs_rider8", phone="+237699300081"))
-    far = _request_ride(
-        rider, distance_km="0.1",
-        pickup_latitude="3.8800000", pickup_longitude="11.5210000", dropoff_latitude="3.7226000", dropoff_longitude="11.5533000",
-    )
-    assert Decimal(far["distance_km"]) > Decimal("10")
-    assert Decimal(_request_ride(rider, distance_km="5")["distance_km"]) == Decimal("5.00")
-    assert _auth_client(rider).get(f"/api/rides/{far['id']}/").data["distance_km"] == far["distance_km"]
+    road.km = Decimal("17.4")
+    far = _request_ride(rider)
+    road.km = Decimal("5")
+    assert Decimal(_request_ride(rider)["distance_km"]) == Decimal("5.00")
+    assert _auth_client(rider).get(f"/api/rides/{far['id']}/").data["distance_km"] == far["distance_km"] == "17.40"
 
     # A ride created before distance_km existed still reports the distance implied by its fare.
     RideBooking.objects.filter(pk=far["id"]).update(distance_km=None)
@@ -80,9 +80,28 @@ def test_rider_can_cancel_before_the_trip_starts_and_driver_is_told():
 
     assert driver_client.post(f"/api/rides/{ride['id']}/cancel/").status_code == 403
     assert _auth_client(rider).post(f"/api/rides/{ride['id']}/cancel/").status_code == 200
-    assert RideBooking.objects.get(pk=ride["id"]).status == RideStatus.CANCELLED
+    cancelled = RideBooking.objects.get(pk=ride["id"])
+    assert cancelled.status == RideStatus.CANCELLED and cancelled.cancelled_at is not None and cancelled.cancellation_reason == ""
     assert Notification.objects.filter(recipient=driver, notification_type="RIDE_UPDATE").exists()
     assert _auth_client(rider).post(f"/api/rides/{ride['id']}/cancel/").status_code == 400
+
+
+@pytest.mark.django_db
+def test_rider_cancellation_reason_is_saved_and_told_to_the_driver():
+    rider = _verify(User.objects.create(username="rs_rider9", phone="+237699300091"))
+    driver, driver_client, vehicle_id = _verified_driver("rs_driver9", "+237699300092")
+    ride = _request_ride(rider)
+    driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
+    rider_client = _auth_client(rider)
+
+    # The expiry-only reason can't be picked by a rider.
+    assert rider_client.post(f"/api/rides/{ride['id']}/cancel/", {"reason": "NO_DRIVER_FOUND"}).status_code == 400
+    response = rider_client.post(f"/api/rides/{ride['id']}/cancel/", {"reason": "WAITED_TOO_LONG", "note": "20 min, no show"})
+    assert response.status_code == 200
+    assert response.data["cancellation_reason"] == "WAITED_TOO_LONG" and response.data["cancellation_note"] == "20 min, no show"
+    told = Notification.objects.filter(recipient=driver, notification_type="RIDE_UPDATE").latest("created_at")
+    assert "Waited too long" in told.message and "20 min, no show" in told.message
+    assert driver_client.get(f"/api/rides/{ride['id']}/").data["cancellation_reason"] == "WAITED_TOO_LONG"
 
 
 @pytest.mark.django_db
@@ -113,13 +132,39 @@ def test_driver_can_release_an_accepted_ride_and_it_reopens():
 
 
 @pytest.mark.django_db
+def test_release_reason_reaches_the_rider_but_not_other_drivers():
+    rider = _verify(User.objects.create(username="rs_rider10", phone="+237699300101"))
+    driver, driver_client, vehicle_id = _verified_driver("rs_driver10", "+237699300102")
+    other, other_client, other_vehicle = _verified_driver("rs_other10", "+237699300104")
+    ride = _request_ride(rider)
+    driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
+
+    assert driver_client.post(f"/api/rides/{ride['id']}/release/", {"reason": "NOT_A_REASON"}).status_code == 400
+    assert driver_client.post(f"/api/rides/{ride['id']}/release/", {"reason": "VEHICLE_PROBLEM", "note": "Flat tyre"}).status_code == 200
+    seen_by_rider = _auth_client(rider).get(f"/api/rides/{ride['id']}/").data
+    assert seen_by_rider["release_reason"] == "VEHICLE_PROBLEM" and seen_by_rider["release_note"] == "Flat tyre"
+    told = Notification.objects.filter(recipient=rider, notification_type="RIDE_UPDATE").latest("created_at")
+    assert "Vehicle problem" in told.message and "Flat tyre" in told.message
+
+    open_row = next(r for r in other_client.get("/api/rides/open/").data["results"] if r["id"] == ride["id"])
+    assert open_row["release_reason"] == "" and open_row["release_note"] == ""
+    assert other_client.get(f"/api/rides/{ride['id']}/").data["release_note"] == ""
+
+    # Once a new driver takes it, the previous driver's reason is gone.
+    other_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": other_vehicle})
+    accepted = other_client.get(f"/api/rides/{ride['id']}/").data
+    assert accepted["release_reason"] == "" and accepted["release_note"] == ""
+
+
+@pytest.mark.django_db
 def test_stale_ride_requests_expire():
     rider = _verify(User.objects.create(username="rs_rider5", phone="+237699300041"))
     old, fresh = _request_ride(rider), _request_ride(rider)
     RideBooking.objects.filter(pk=old["id"]).update(requested_at=timezone.now() - timedelta(hours=3))
 
     assert [r.pk for r in expire_stale_rides()] == [RideBooking.objects.get(pk=old["id"]).pk]
-    assert RideBooking.objects.get(pk=old["id"]).status == RideStatus.CANCELLED
+    expired = RideBooking.objects.get(pk=old["id"])
+    assert expired.status == RideStatus.CANCELLED and expired.cancellation_reason == "NO_DRIVER_FOUND"
     assert RideBooking.objects.get(pk=fresh["id"]).status == RideStatus.REQUESTED
 
     RideBooking.objects.filter(pk=fresh["id"]).update(requested_at=timezone.now() - timedelta(hours=3))
@@ -349,3 +394,73 @@ def test_marketplace_search_rejects_bad_filter_values_instead_of_crashing():
     assert client.get("/api/warehouses/?min_price=abc").status_code == 400
     assert client.get("/api/warehouses/?quarter_id=not-a-uuid").status_code == 400
     assert client.get("/api/warehouses/?min_price=100&max_price=900").status_code == 200
+
+@pytest.mark.django_db
+def test_rider_and_driver_can_report_a_trip_problem_and_an_admin_resolves_it():
+    rider = _verify(User.objects.create(username="rs_rider20", phone="+237699300201"))
+    outsider = _verify(User.objects.create(username="rs_outsider20", phone="+237699300202"))
+    driver, driver_client, vehicle_id = _verified_driver("rs_driver20", "+237699300203")
+    ride = _request_ride(rider)
+    rider_client = _auth_client(rider)
+    report_url = f"/api/rides/{ride['id']}/report-issue/"
+    payload = {"category": "FARE", "description": "I was asked for extra cash at drop-off."}
+
+    # Nothing to report until a driver has taken the trip.
+    assert rider_client.post(report_url, payload, format="json").status_code == 400
+    driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
+
+    assert _auth_client(outsider).post(report_url, payload, format="json").status_code == 403
+    assert rider_client.post(report_url, {"category": "FARE", "description": "short"}, format="json").status_code == 400
+    created = rider_client.post(report_url, payload, format="json")
+    assert created.status_code == 201 and created.data["status"] == "OPEN" and created.data["reporter_role"] == "RIDER"
+    assert Notification.objects.filter(notification_type="RIDE_ISSUE", recipient__username="rs_driver20_admin").exists()
+    # One open report per person per trip, but the driver can file their own.
+    assert rider_client.post(report_url, payload, format="json").status_code == 400
+    driver_report = driver_client.post(report_url, {"category": "RIDER_BEHAVIOUR", "description": "Rider was abusive on the phone."}, format="json")
+    assert driver_report.status_code == 201 and driver_report.data["reporter_role"] == "DRIVER"
+
+    admin_client = _auth_client(User.objects.get(username="rs_driver20_admin"))
+    assert rider_client.get("/api/admin/ride-issues/").status_code == 403
+    queue = admin_client.get("/api/admin/ride-issues/").data
+    assert queue["count"] == 2 and queue["results"][0]["id"] == created.data["id"]
+    assert queue["results"][0]["ride_summary"]["pickup_description"] == "Bastos roundabout"
+
+    resolved = admin_client.post(f"/api/admin/ride-issues/{created.data['id']}/resolve/", {"notes": "Driver warned."}, format="json")
+    assert resolved.status_code == 200 and resolved.data["status"] == "RESOLVED" and resolved.data["resolution_notes"] == "Driver warned."
+    assert admin_client.post(f"/api/admin/ride-issues/{created.data['id']}/resolve/", {}, format="json").status_code == 400
+    told = Notification.objects.filter(recipient=rider, notification_type="RIDE_UPDATE").latest("created_at")
+    assert told.message == "Driver warned."
+    assert admin_client.get("/api/admin/ride-issues/").data["count"] == 1
+    assert admin_client.get("/api/admin/ride-issues/?status=resolved").data["count"] == 1
+    # Once resolved, the rider may report a new problem on the same trip.
+    assert rider_client.post(report_url, {"category": "LOST_ITEM", "description": "Left my phone charger in the car."}, format="json").status_code == 201
+
+
+@pytest.mark.django_db
+def test_admin_can_find_a_trip_and_see_everything_about_it():
+    rider = _verify(User.objects.create(username="rs_rider21", phone="+237699300211", first_name="Clarisse", last_name="Mbah"))
+    other_rider = _verify(User.objects.create(username="rs_rider21b", phone="+237699300212"))
+    driver, driver_client, vehicle_id = _verified_driver("rs_driver21", "+237699300213")
+    ride = _request_ride(rider)
+    _request_ride(other_rider)
+    driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
+    _auth_client(rider).post(f"/api/rides/{ride['id']}/messages/", {"text": "I'm at the gate"}, format="json")
+    _auth_client(rider).post(f"/api/rides/{ride['id']}/cancel/", {"reason": "DRIVER_NOT_MOVING"}, format="json")
+    _auth_client(rider).post(f"/api/rides/{ride['id']}/report-issue/", {"category": "DRIVER_BEHAVIOUR", "description": "Driver never came and stopped answering."}, format="json")
+
+    admin_client = _auth_client(User.objects.get(username="rs_driver21_admin"))
+    assert _auth_client(rider).get("/api/admin/rides/").status_code == 403
+    assert admin_client.get("/api/admin/rides/").data["count"] == 2
+    by_name = admin_client.get("/api/admin/rides/?q=clarisse").data
+    assert by_name["count"] == 1 and by_name["results"][0]["id"] == ride["id"] and by_name["results"][0]["open_issue_count"] == 1
+    assert admin_client.get("/api/admin/rides/?q=699300213").data["count"] == 1
+    assert admin_client.get(f"/api/admin/rides/?q={ride['id']}").data["count"] == 1
+    assert admin_client.get("/api/admin/rides/?status=cancelled").data["count"] == 1
+    assert admin_client.get("/api/admin/rides/?has_issue=open").data["count"] == 1
+
+    detail = admin_client.get(f"/api/admin/rides/{ride['id']}/").data
+    assert detail["rider"]["phone"] == "+237699300211" and detail["driver"]["phone"] == "+237699300213"
+    assert detail["vehicle_details"]["plate_number"] == "LT-r21"
+    assert detail["cancellation_reason"] == "DRIVER_NOT_MOVING" and detail["payment"] is None
+    assert [m["text"] for m in detail["messages"]] == ["I'm at the gate"]
+    assert detail["issue_reports"][0]["category"] == "DRIVER_BEHAVIOUR"

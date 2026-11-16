@@ -8,10 +8,11 @@
 // Server Components (SSR) and the browser need different URLs in dev:
 // SSR runs inside the Next.js server process and can reach the Django
 // server directly; the browser needs a URL it can actually resolve.
-// In production these would both point at the same real public API domain.
+// In production these would both point at the same real public API domain;
+// localhost is only a development fallback.
 export const API_BASE_URL =
   typeof window === "undefined"
-    ? process.env.API_INTERNAL_URL || "http://localhost:8000"
+    ? process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
     : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // One shared refresh so several simultaneous 401s don't each burn the refresh token.
@@ -99,7 +100,11 @@ export interface StaffGrant {
   usable: boolean;
   i_am_owner: boolean;
 }
-export interface StaffSessionInfo { grantId: string; ownerName: string; ownerUsername: string; title: string; permissions: StaffPermission[]; expiresAt: number }
+export interface StaffSessionInfo {
+  grantId: string; ownerName: string; ownerUsername: string; title: string; permissions: StaffPermission[]; expiresAt: number;
+  /** "platform": an admin managing Oaziland's own offers (see startPlatformSession). */
+  kind?: "staff" | "platform";
+}
 
 export function currentStaffSession(): StaffSessionInfo | null {
   if (typeof window === "undefined") return null;
@@ -158,6 +163,30 @@ export async function startStaffSession(grantId: string, accessToken: string): P
   const info: StaffSessionInfo = {
     grantId, ownerName: data.owner.name, ownerUsername: data.owner.username, title: data.title, permissions: data.permissions,
     expiresAt: Date.now() + data.expires_in * 1000,
+  };
+  localStorage.setItem(STAFF_SAVED_KEY, JSON.stringify({ access: accessToken, refresh: localStorage.getItem("refresh_token") || "" }));
+  localStorage.setItem("access_token", data.access);
+  localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(info));
+  window.dispatchEvent(new Event(STAFF_SESSION_EVENT));
+  return info;
+}
+
+/** Whether this admin may manage Oaziland's own offers (hotels, listings, store...) through a platform session. */
+export async function getPlatformSessionStatus(accessToken: string): Promise<{ can_act: boolean; account?: { id: string; username: string; name: string } }> {
+  const res = await fetch(`${API_BASE_URL}/api/platform-session/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) return { can_act: false };
+  return res.json();
+}
+
+/** Switches this browser to Oaziland's own account for an hour, like a staff session: every normal page then
+ * creates and manages things as Oaziland, and the admin's own sign-in waits until they switch back. */
+export async function startPlatformSession(accessToken: string): Promise<StaffSessionInfo> {
+  const res = await fetch(`${API_BASE_URL}/api/platform-session/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiStatusError(data.detail || "Could not switch to Oaziland's account.", res.status);
+  const info: StaffSessionInfo = {
+    grantId: "platform", ownerName: data.account.name, ownerUsername: data.account.username, title: "", permissions: [],
+    expiresAt: Date.now() + data.expires_in * 1000, kind: "platform",
   };
   localStorage.setItem(STAFF_SAVED_KEY, JSON.stringify({ access: accessToken, refresh: localStorage.getItem("refresh_token") || "" }));
   localStorage.setItem("access_token", data.access);
@@ -905,11 +934,84 @@ export async function convertCurrency(amountXaf: string, currencyCode: string): 
 
 export interface RoomTypeSummary {
   id: string;
+  name: string;
   category: string;
   capacity: number;
   base_rate_xaf: string;
   amenities?: string[];
+  bed_setup?: string;
+  size_sqm?: string | null;
+  description?: string;
+  photos: { id: number; url: string }[];
+  /** Rooms of this type that can be sold (not out of order/service). */
+  room_count: number;
+  /** Owner view only. */
+  is_active?: boolean;
+  total_rooms?: number;
 }
+
+export interface HotelStayOption {
+  room_type: string;
+  rooms_free: number;
+  nights: number;
+  subtotal_xaf: string;
+  length_of_stay_discount_xaf: string;
+  last_minute_adjustment_applied: boolean;
+  total_xaf: string;
+}
+
+/** Places whose rooms are booked through the hotel room-type engine. */
+export type RoomTypePlaceEndpoint = "hotels" | "guest-houses";
+
+/** Each room type's free rooms and exact price for the stay — the same price the reservation will charge. */
+export async function getStayAvailability(
+  endpoint: RoomTypePlaceEndpoint,
+  placeId: string,
+  checkIn: string,
+  checkOut: string
+): Promise<{ check_in: string; check_out: string; room_types: HotelStayOption[] }> {
+  const params = new URLSearchParams({ check_in: checkIn, check_out: checkOut });
+  const res = await fetch(`${API_BASE_URL}/api/${endpoint}/${placeId}/availability/?${params}`, { cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Availability check failed: ${res.status}`);
+  return data;
+}
+
+export interface HotelRoomTypeInput {
+  room_type?: string;
+  name: string;
+  category: string;
+  capacity: number | string;
+  base_rate_xaf: number | string;
+  bed_setup?: string;
+  size_sqm?: number | string | null;
+  description?: string;
+  amenities?: string[];
+  room_count?: number | string;
+}
+
+async function roomTypeOwnerAction<T>(endpoint: RoomTypePlaceEndpoint, placeId: string, path: string, body: object, accessToken: string): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/${endpoint}/${placeId}/${path}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Request failed: ${res.status}`);
+  return data;
+}
+
+/* Owner set-up of a hotel's or guest house's room types; each returns the place as its owner now sees it. */
+export const saveRoomType = <T>(endpoint: RoomTypePlaceEndpoint, placeId: string, input: HotelRoomTypeInput, accessToken: string) =>
+  roomTypeOwnerAction<T>(endpoint, placeId, "room-types", input, accessToken);
+export const setRoomTypeVisibility = <T>(endpoint: RoomTypePlaceEndpoint, placeId: string, roomTypeId: string, isActive: boolean, accessToken: string) =>
+  roomTypeOwnerAction<T>(endpoint, placeId, "room-type-visibility", { room_type: roomTypeId, is_active: isActive }, accessToken);
+export const deleteRoomType = <T>(endpoint: RoomTypePlaceEndpoint, placeId: string, roomTypeId: string, accessToken: string) =>
+  roomTypeOwnerAction<T>(endpoint, placeId, "delete-room-type", { room_type: roomTypeId }, accessToken);
+export const addRoomTypePhoto = <T>(endpoint: RoomTypePlaceEndpoint, placeId: string, roomTypeId: string, url: string, accessToken: string) =>
+  roomTypeOwnerAction<T>(endpoint, placeId, "room-type-photos", { room_type: roomTypeId, url }, accessToken);
+export const removeRoomTypePhoto = <T>(endpoint: RoomTypePlaceEndpoint, placeId: string, roomTypeId: string, photoId: number, accessToken: string) =>
+  roomTypeOwnerAction<T>(endpoint, placeId, "room-type-photos", { room_type: roomTypeId, remove: photoId }, accessToken);
 
 export interface Hotel {
   id: string;
@@ -927,6 +1029,8 @@ export interface Hotel {
   longitude?: string | number | null;
   total_rooms: number;
   room_types: RoomTypeSummary[];
+  /** Cheapest nightly rate among the room types on offer. */
+  from_price_xaf?: string | null;
   photos: PropertyAssetPhotoItem[];
   description?: string;
   amenities?: string[];
@@ -953,17 +1057,15 @@ export async function verifyHotel(hotelId: string, accessToken: string) {
   return res;
 }
 
-export async function listHotelsForAdmin(accessToken: string): Promise<PaginatedResponse<Hotel>> {
-  const res = await fetch(`${API_BASE_URL}/api/hotels/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+export async function listHotelsForAdmin(accessToken: string, onlyUnverified = false): Promise<PaginatedResponse<Hotel>> {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/${onlyUnverified ? "?verified=false" : ""}`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error(`Hotel fetch failed: ${res.status}`);
   return res.json();
 }
 
-/** Same endpoint as listHotelsForAdmin — for a non-admin owner this
- * returns every verified hotel plus their own (verified or not), so
- * the caller must still filter by owner === profile.id client-side. */
-export async function listMyHotels(accessToken: string): Promise<PaginatedResponse<Hotel>> {
-  const res = await fetch(`${API_BASE_URL}/api/hotels/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+/** Every hotel the signed-in user owns (verified or not), in one unpaginated list. */
+export async function listMyHotels(accessToken: string): Promise<Hotel[]> {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/?mine=1`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
   if (!res.ok) throw new Error(`Hotel fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1003,7 +1105,7 @@ export async function createHotel(
     star_rating?: number;
     latitude?: number | string;
     longitude?: number | string;
-    room_types: { category: string; capacity: number; base_rate_xaf: string }[];
+    room_types: { name?: string; category: string; capacity: number; base_rate_xaf: string; room_count?: number }[];
   },
   accessToken: string
 ) {
@@ -1046,9 +1148,62 @@ export interface Reservation {
   adults: number;
   children: number;
   rate_xaf: string;
+  /** PENDING_PAYMENT until the payment provider confirms the money arrived, then CONFIRMED. */
   status: string;
+  /** The payment's own progress while the guest approves it on their phone (PAYMENT_PROCESSING, PAYMENT_FAILED...). */
+  payment_status?: string | null;
   special_requests: string;
   created_at: string;
+  guest_house?: string | null;
+  guest_name?: string;
+  place_name?: string;
+  place_kind?: "hotel" | "guest_house";
+  place_id?: string;
+  room_type_name?: string;
+  /** The guest's payment is still held in escrow (not yet paid to the owner or refunded). */
+  payment_held?: boolean;
+  /** When the owner is paid automatically if nobody reports a problem. */
+  payout_due_at?: string;
+  /** What cancelling now would cost the guest; null when it can't be cancelled. */
+  cancellation?: { free: boolean; free_until: string; fee_xaf: string; refund_xaf: string } | null;
+}
+
+export type StayActionName = "cancel" | "no-show" | "confirm-stay" | "dispute" | "check-in" | "checkout";
+
+/** Follows every page of a reservations list, so a guest or host with many stays never loses the later ones. */
+async function allReservations(firstUrl: string, accessToken: string, failure: string): Promise<Reservation[]> {
+  const rows: Reservation[] = [];
+  let url: string | null = firstUrl;
+  for (let page = 0; url && page < 50; page += 1) {
+    const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+    if (!res.ok) throw new Error(failure);
+    const data = await res.json();
+    rows.push(...(data.results ?? []));
+    url = data.next ?? null;
+  }
+  return rows;
+}
+
+/** The signed-in user's own reservations (as a guest). */
+export async function listMyReservations(accessToken: string): Promise<Reservation[]> {
+  return allReservations(`${API_BASE_URL}/api/reservations/`, accessToken, "Could not load your stays");
+}
+
+/** Reservations made at the hotels / guest houses the user owns. */
+export async function listHostingReservations(accessToken: string, place?: "hotel" | "guest_house"): Promise<Reservation[]> {
+  const params = new URLSearchParams({ role: "hosting", ...(place ? { place } : {}) });
+  return allReservations(`${API_BASE_URL}/api/reservations/?${params}`, accessToken, "Could not load reservations");
+}
+
+export async function stayAction(reservationId: string, action: StayActionName, accessToken: string, reason?: string) {
+  const res = await fetch(`${API_BASE_URL}/api/reservations/${reservationId}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "That could not be done");
+  return data;
 }
 
 export async function createReservation(
@@ -1108,8 +1263,8 @@ export async function verifyVenue(venueId: string, accessToken: string) {
   return res;
 }
 
-export async function listVenuesForAdmin(accessToken: string): Promise<PaginatedResponse<Venue>> {
-  const res = await fetch(`${API_BASE_URL}/api/venues/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+export async function listVenuesForAdmin(accessToken: string, onlyUnverified = false): Promise<PaginatedResponse<Venue>> {
+  const res = await fetch(`${API_BASE_URL}/api/venues/${onlyUnverified ? "?verified=false" : ""}`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error(`Venue fetch failed: ${res.status}`);
   return res.json();
 }
@@ -1233,8 +1388,32 @@ export interface HostelUnitSummary {
   bed_capacity: number | null;
 }
 
+export type HostelPricePeriod = "MONTH" | "SEMESTER" | "YEAR";
+
+/** What students browse and book in a hostel: a kind of room with its own photos, price and free places. */
+export interface HostelRoomType {
+  id: string;
+  name: string;
+  unit_type: string;
+  occupancy_model: "PER_BED" | "PER_UNIT";
+  beds_per_room: number;
+  price_xaf: string;
+  price_period: HostelPricePeriod;
+  max_periods: number;
+  size_sqm: string | null;
+  private_bathroom: boolean;
+  furnished: boolean;
+  description: string;
+  photos: { id: number; url: string }[];
+  total_places: number;
+  available_places: number;
+}
+
 export interface StudentHostel {
   id: string;
+  name?: string;
+  listed_by?: string | null;
+  listed_by_name?: string | null;
   lister_role?: "OWNER" | "AGENT" | "AGENCY";
   lister_average_rating?: number | null;
   lister_rating_count?: number;
@@ -1247,6 +1426,8 @@ export interface StudentHostel {
   longitude?: string | number | null;
   units: HostelUnitSummary[];
   photos: PropertyAssetPhotoItem[];
+  room_types?: HostelRoomType[];
+  from_price?: { price_xaf: string; price_period: HostelPricePeriod } | null;
   description?: string;
   amenities?: string[];
 }
@@ -1258,7 +1439,7 @@ export async function searchStudentHostels(): Promise<PaginatedResponse<StudentH
 }
 
 export async function createStudentHostel(
-  payload: { quarter: string; property_type?: string; latitude?: number | string; longitude?: number | string },
+  payload: { quarter: string; name?: string; landlord?: string; property_type?: string; latitude?: number | string; longitude?: number | string },
   accessToken: string
 ) {
   const res = await fetch(`${API_BASE_URL}/api/student-hostels/`, {
@@ -1267,7 +1448,7 @@ export async function createStudentHostel(
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(JSON.stringify(data));
+  if (!res.ok) throw new Error(typeof data?.detail === "string" ? data.detail : JSON.stringify(data));
   return data;
 }
 
@@ -1298,6 +1479,7 @@ export interface GuestHouse {
   lister_rating_count?: number;
   owner?: string;
   owner_name?: string | null;
+  name?: string;
   is_coastal_leisure: boolean;
   quarter: string;
   quarter_name: string;
@@ -1307,6 +1489,67 @@ export interface GuestHouse {
   latitude?: string | number | null;
   longitude?: string | number | null;
   description?: string;
+  /** Rooms are booked through the same room-type engine as hotels. */
+  total_rooms: number;
+  room_types: RoomTypeSummary[];
+  from_price_xaf?: string | null;
+}
+
+export async function setGuestHouseName(guestHouseId: string, name: string, accessToken: string): Promise<GuestHouse> {
+  const res = await fetch(`${API_BASE_URL}/api/guest-houses/${guestHouseId}/set-name/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not update the name");
+  return data;
+}
+
+export type BookingSiteChannel = "AIRBNB" | "BOOKING_COM" | "EXPEDIA";
+
+/** A booking site connected to a guest house by calendar link: what it blocks here, and the private Oaziland
+ * calendar link the site should subscribe to so Oaziland bookings block nights there. */
+export interface ChannelConnection {
+  channel: BookingSiteChannel;
+  channel_name: string;
+  calendar_url: string;
+  feed_url: string;
+  last_synced_at: string | null;
+  last_error: string;
+  conflict_nights: string[];
+}
+
+async function channelRequest<T>(guestHouseId: string, action: string, accessToken: string, init?: { method: "GET" | "POST"; body?: object }): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/guest-houses/${guestHouseId}/${action}/`, {
+    method: init?.method ?? "GET",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: init?.body ? JSON.stringify(init.body) : undefined,
+    cache: "no-store",
+  });
+  const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { detail?: string }).detail || "That could not be done");
+  return data as T;
+}
+
+export const listChannelConnections = (guestHouseId: string, token: string) =>
+  channelRequest<ChannelConnection[]>(guestHouseId, "channels", token);
+export const connectChannel = (guestHouseId: string, channel: BookingSiteChannel, calendarUrl: string, token: string) =>
+  channelRequest<{ result: { added: number; removed: number; conflicts: string[] }; channel: ChannelConnection }>(
+    guestHouseId, "connect-channel", token, { method: "POST", body: { channel, calendar_url: calendarUrl } });
+export const syncChannel = (guestHouseId: string, channel: BookingSiteChannel, token: string) =>
+  channelRequest<{ result: { added: number; removed: number; conflicts: string[] }; channel: ChannelConnection }>(
+    guestHouseId, "sync-channel", token, { method: "POST", body: { channel } });
+export const disconnectChannel = (guestHouseId: string, channel: BookingSiteChannel, token: string) =>
+  channelRequest<object>(guestHouseId, "disconnect-channel", token, { method: "POST", body: { channel } });
+export const rotateChannelLink = (guestHouseId: string, channel: BookingSiteChannel, token: string) =>
+  channelRequest<ChannelConnection>(guestHouseId, "rotate-channel-link", token, { method: "POST", body: { channel } });
+
+/** Every guest house the signed-in user owns, in one unpaginated list. */
+export async function listMyGuestHouses(accessToken: string): Promise<GuestHouse[]> {
+  const res = await fetch(`${API_BASE_URL}/api/guest-houses/?mine=1`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error(`Guest house fetch failed: ${res.status}`);
+  return res.json();
 }
 
 async function getAssetById<T>(path: string, id: string): Promise<T> {
@@ -1354,6 +1597,8 @@ export async function searchGuestHouses(): Promise<PaginatedResponse<GuestHouse>
 export async function createGuestHouse(
   payload: {
     quarter: string;
+    name?: string;
+    room_types?: { name: string; category: string; capacity: number; base_rate_xaf: string; room_count: number }[];
     is_coastal_leisure?: boolean;
     finish_level?: string;
     latitude?: number | string;
@@ -1495,6 +1740,7 @@ export async function getAgentPublicProfile(userId: string): Promise<AgentPublic
 // ---------------------------------------------------------------------------
 export interface UserRoleIndexHotel {
   id: string;
+  name?: string;
   quarter_name: string;
   star_rating: number | null;
   total_rooms: number;
@@ -1508,6 +1754,7 @@ export interface UserRoleIndexHotel {
 
 export interface UserRoleIndexHostel {
   id: string;
+  name?: string;
   quarter_name: string;
   property_type: string;
   total_units: number;
@@ -1806,11 +2053,11 @@ export async function fileReportAgainstListing(listingId: string, reason: string
 
 /** Everything a report can be about. "listing" is a property or marketplace listing. */
 export type ReportKind =
-  | "listing" | "hotel" | "guest_house" | "venue" | "student_hostel" | "job_posting" | "comment"
+  | "listing" | "post" | "hotel" | "guest_house" | "venue" | "student_hostel" | "job_posting" | "comment"
   | "review" | "service_review" | "hostel_review" | "venue_review" | "caterer_review" | "agent_video";
 
 export async function fileContentReport(kind: ReportKind, id: string, reason: string, notes: string, accessToken: string) {
-  const target = kind === "listing" ? { target_listing_id: id } : { target_kind: kind, target_id: id };
+  const target = kind === "listing" ? { target_listing_id: id } : kind === "post" ? { target_post: id } : { target_kind: kind, target_id: id };
   const res = await fetch(`${API_BASE_URL}/api/content-reports/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
@@ -2117,6 +2364,21 @@ export interface Faq {
 }
 
 /** Published FAQs in the given language (`homepageOnly` keeps the ones flagged for the homepage). */
+export interface PolicyDocument {
+  document_type: "TERMS_OF_SERVICE" | "PRIVACY_POLICY" | "COMMUNITY_GUIDELINES";
+  version: string;
+  body_text: string;
+}
+
+/** The current published text of a policy, or null when none has been published yet. */
+export async function getCurrentPolicy(documentType: PolicyDocument["document_type"]): Promise<PolicyDocument | null> {
+  const res = await fetch(`${API_BASE_URL}/api/policy-documents/`, { next: { revalidate: 300 } });
+  if (!res.ok) throw new Error(`Policy fetch failed: ${res.status}`);
+  const data = await res.json();
+  const rows: PolicyDocument[] = Array.isArray(data) ? data : data.results ?? [];
+  return rows.find((d) => d.document_type === documentType) ?? null;
+}
+
 export async function listPublicFaqs(locale: string, homepageOnly = false): Promise<Faq[]> {
   const query = new URLSearchParams({ lang: locale });
   if (homepageOnly) query.set("homepage", "1");
@@ -2185,10 +2447,10 @@ export interface TrainingProgram {
   learner_count: number;
 }
 
-export type CourseSyllabusLesson = { id: string; title: string; kind: LessonKind };
+export type CourseSyllabusLesson = { id: string; title: string; kind: LessonKind; is_preview: boolean };
 /** The public course page: the card's details plus the syllabus (titles only, never lesson content). */
 export interface TrainingProgramDetail extends TrainingProgram {
-  syllabus: { id: string; title: string; lessons: CourseSyllabusLesson[] }[];
+  syllabus: { id: string; title: string; due_after_days: number | null; lessons: CourseSyllabusLesson[] }[];
 }
 
 export async function getTraining(id: string): Promise<TrainingProgramDetail | null> {
@@ -2488,6 +2750,10 @@ export interface TrainingEnrollmentItem {
   certificate_issued_at: string | null;
   /** Printed on the certificate and checkable by anyone at /certificates/<code>. */
   certificate_code: string | null;
+  /** The first unfinished lesson (where "Continue" opens), for active enrollments; null when none is left. */
+  next_lesson?: { id: string; title: string; kind: LessonKind } | null;
+  /** When the learner last finished a lesson, took a quiz or handed in work; null before they start. */
+  last_activity_at?: string | null;
 }
 
 export async function getMyEnrollments(accessToken: string): Promise<{ count: number; results: TrainingEnrollmentItem[] }> {
@@ -2523,18 +2789,27 @@ export type LessonKind = "TEXT" | "VIDEO" | "PDF" | "QUIZ" | "ASSIGNMENT";
 
 export type SubmissionStatus = "SUBMITTED" | "APPROVED" | "CHANGES_REQUESTED";
 
+export type QuestionKind = "CHOICE" | "SHORT_TEXT" | "NUMBER";
+
 export interface CourseSubmissionInfo {
   status: SubmissionStatus;
   feedback: string;
   submitted_at: string;
+  /** How many classmates have reviewed it so far (peer-reviewed assignments). */
+  peer_reviews_received?: number;
 }
 
 export interface CourseOutlineQuestion {
   id: string;
   text: string;
+  kind: QuestionKind;
+  /** Multiple-choice only: more than one choice is right, so the learner ticks several. */
   multiple: boolean;
+  /** Empty for short-answer and number questions, which are typed. */
   choices: { id: string; text: string }[];
 }
+
+export interface CoursePeerInfo { required: number; given: number; can_review: boolean }
 
 export interface CourseOutlineLesson {
   id: string;
@@ -2546,6 +2821,9 @@ export interface CourseOutlineLesson {
   pdf_url: string;
   completed: boolean;
   submission?: CourseSubmissionInfo | null;
+  /** Assignments only: classmates review each other's work. */
+  peer_review?: boolean;
+  peer?: CoursePeerInfo;
   pass_mark_percent?: number;
   best_score_percent?: number | null;
   questions?: CourseOutlineQuestion[];
@@ -2558,7 +2836,16 @@ export interface CourseOutlineLesson {
   review?: QuizReview | null;
 }
 
-export interface QuizGradedQuestion { question: string; correct: boolean; correct_choices?: string[]; explanation?: string }
+export interface QuizGradedQuestion {
+  question: string;
+  correct: boolean;
+  correct_choices?: string[];
+  /** Short-answer and number questions: what counted as right (revealed once the quiz is passed). */
+  correct_answers?: string[];
+  /** Number questions: how far off the answer could be and still be right. */
+  tolerance?: string;
+  explanation?: string;
+}
 export interface QuizReview { score_percent: number; answers: Record<string, string[]>; results: QuizGradedQuestion[] }
 
 export interface CourseProgress {
@@ -2573,7 +2860,15 @@ export interface CourseOutline {
   certificate_issued_at: string | null;
   certificate_code: string | null;
   progress: CourseProgress;
-  modules: { id: string; title: string; lessons: CourseOutlineLesson[] }[];
+  /** Median hours this course's assignments waited for review (null until there's enough history). */
+  typical_review_hours: number | null;
+  /** Modules whose suggested finish date has passed and that aren't finished yet. */
+  overdue_modules: number;
+  modules: {
+    id: string; title: string; lessons: CourseOutlineLesson[];
+    /** The suggested pace: finish this module within this many days of enrolling (null = none). */
+    due_after_days: number | null; due_at: string | null; overdue: boolean;
+  }[];
 }
 
 export interface QuizResult {
@@ -2637,6 +2932,31 @@ export async function openPrivatePdf(path: string, token: string): Promise<void>
 export const openMySubmission = (enrollmentId: string, lessonId: string, token: string) =>
   openPrivatePdf(`/my-enrollments/${enrollmentId}/assignments/${lessonId}/file/`, token);
 
+export interface PeerQueueItem { id: string; submitted_at: string; reviews: number }
+export const getPeerReviewQueue = (enrollmentId: string, lessonId: string, token: string) =>
+  courseRequest<{ required: number; items: PeerQueueItem[] }>(`/my-enrollments/${enrollmentId}/assignments/${lessonId}/peer/`, token);
+export const openPeerSubmission = (enrollmentId: string, submissionId: string, token: string) =>
+  openPrivatePdf(`/my-enrollments/${enrollmentId}/peer/${submissionId}/file/`, token);
+export const submitPeerReview = (enrollmentId: string, submissionId: string, decision: "APPROVED" | "CHANGES_REQUESTED", feedback: string, token: string) =>
+  courseRequest<{ reviewed: boolean }>(`/my-enrollments/${enrollmentId}/peer/${submissionId}/review/`, token, { method: "POST", body: JSON.stringify({ decision, feedback }) });
+
+/** A lesson anyone can open without enrolling or paying. */
+export interface CoursePreviewLesson {
+  id: string;
+  title: string;
+  kind: LessonKind;
+  module_title: string;
+  content_text: string;
+  video_url: string;
+  video_file_url: string;
+  pdf_url: string;
+}
+export async function getCoursePreview(courseId: string): Promise<CoursePreviewLesson[]> {
+  const res = await fetch(`${API_BASE_URL}/api/trainings/${courseId}/preview/`);
+  if (!res.ok) throw new Error(`Could not load the preview (${res.status})`);
+  return res.json();
+}
+
 export interface CourseSubmissionRow {
   id: string;
   lesson: string;
@@ -2648,6 +2968,9 @@ export interface CourseSubmissionRow {
   submitted_at: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  /** The assignment is reviewed by classmates; their anonymous verdicts are listed for staff. */
+  peer_review: boolean;
+  peer_reviews: { decision: SubmissionStatus; feedback: string }[];
 }
 export const listCourseSubmissions = (courseId: string, token: string) =>
   courseRequest<CourseSubmissionRow[]>(`/manage/courses/${courseId}/submissions/`, token);
@@ -2657,7 +2980,10 @@ export const reviewCourseSubmission = (courseId: string, submissionId: string, d
   courseRequest<{ status: SubmissionStatus }>(`/manage/courses/${courseId}/submissions/${submissionId}/review/`, token, { method: "POST", body: JSON.stringify({ decision, feedback }) });
 
 export interface ManageChoice { id?: string; text: string; is_correct: boolean }
-export interface ManageQuestion { id: string; lesson: string; text: string; explanation: string; position: number; choices: ManageChoice[] }
+export interface ManageQuestion {
+  id: string; lesson: string; text: string; explanation: string; position: number; choices: ManageChoice[];
+  kind: QuestionKind; accepted_answers: string[]; tolerance: string;
+}
 export interface ManageLesson {
   id: string;
   module: string;
@@ -2669,9 +2995,13 @@ export interface ManageLesson {
   video_file_url: string;
   pdf_url: string;
   pass_mark_percent: number;
+  /** Readings, videos and PDFs only: open to everyone as a free preview. */
+  is_preview: boolean;
+  /** Assignments only: classmates review each other's work. */
+  peer_review: boolean;
   questions: ManageQuestion[];
 }
-export interface ManageModule { id: string; program: string; title: string; position: number; lessons: ManageLesson[] }
+export interface ManageModule { id: string; program: string; title: string; position: number; due_after_days: number | null; lessons: ManageLesson[] }
 export interface ManageCourse {
   id: string;
   title: string;
@@ -2800,7 +3130,10 @@ export const updateCourseLesson = (id: string, input: LessonInput, token: string
   courseRequest<ManageLesson>(`/manage/lessons/${id}/`, token, { method: "PATCH", body: lessonBody(input) });
 export const deleteCourseLesson = (id: string, token: string) => courseRequest<void>(`/manage/lessons/${id}/`, token, { method: "DELETE" });
 
-export type QuestionInput = { lesson?: string; text: string; explanation: string; choices: ManageChoice[] };
+export type QuestionInput = {
+  lesson?: string; text: string; explanation: string; kind: QuestionKind;
+  choices?: ManageChoice[]; accepted_answers?: string[]; tolerance?: string;
+};
 export const createCourseQuestion = (input: QuestionInput, token: string) =>
   courseRequest<ManageQuestion>("/manage/questions/", token, { method: "POST", body: JSON.stringify(input) });
 export const updateCourseQuestion = (id: string, input: QuestionInput, token: string) =>
@@ -3471,6 +3804,25 @@ export interface AdminUser {
   kyc_status: string | null;
   /** True for the admin's own row — used to hide actions an admin may not take on themselves. */
   is_self: boolean;
+  /** Only set for administrators; a limited admin may be allowed to manage Oaziland's own offers. */
+  admin_access?: "full" | "limited" | null;
+  platform_access?: boolean;
+}
+
+export async function setAdminUserAccess(
+  userId: string,
+  level: "full" | "limited",
+  platformListings: boolean,
+  accessToken: string
+): Promise<AdminUser> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/admin-access/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...adminHeaders(accessToken) },
+    body: JSON.stringify({ level, platform_listings: platformListings }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not change admin access");
+  return data;
 }
 
 export interface AdminPricing {
@@ -3788,12 +4140,18 @@ export interface HostelPerson {
 export interface HostelSummary {
   id: string;
   label: string;
+  name: string;
   quarter: string;
   owner: HostelPerson | null;
   rooms: number;
   places: number;
   housed_now: number;
   waiting: number;
+}
+
+export interface HostelOwnerRoomType extends Omit<HostelRoomType, "max_periods"> {
+  is_active: boolean;
+  rooms: string[];
 }
 
 export interface HostelPlaceHolder {
@@ -3803,8 +4161,22 @@ export interface HostelPlaceHolder {
   allocated_by: string;
 }
 
+export interface HostelManagerRow {
+  contract: string;
+  name: string;
+  username: string;
+  manager_type: "OWNER_DIRECT" | "STAFF" | "AGENT" | "AGENCY";
+  scope: "FULL" | "BOOKINGS_ONLY" | "MAINTENANCE_ONLY" | "BILLING_ONLY";
+  since: string;
+  can_revoke: boolean;
+}
+
 export interface HostelBoard {
   hostel: HostelSummary;
+  is_owner: boolean;
+  listed_by: HostelPerson | null;
+  managers: HostelManagerRow[];
+  room_types: HostelOwnerRoomType[];
   institutions: { id: number; name: string }[];
   semesters: { id: number; name: string; institution: string; start_date: string; end_date: string; billing_due_date: string }[];
   semester_id: number | null;
@@ -3813,6 +4185,7 @@ export interface HostelBoard {
     room_code: string;
     unit_type: string;
     occupancy_model: "PER_BED" | "PER_UNIT";
+    room_type: string | null;
     places: { bed: number | null; allocation: HostelPlaceHolder | null }[];
     has_history: boolean;
   }[];
@@ -3993,6 +4366,68 @@ export async function getAdminPaymentsSummary(days: number, accessToken: string)
   return res.json();
 }
 
+export interface AdminReturnRow {
+  id: string;
+  status: MarketplaceReturnStatus;
+  kind: MarketplaceReturnKind;
+  reason: MarketplaceReturnReason;
+  description: string;
+  evidence_urls: string[];
+  requested_amount_xaf: string | null;
+  seller_note: string;
+  created_at: string;
+  responded_at: string | null;
+  resolved_at: string | null;
+  respond_by: string | null;
+  buyer_decide_by: string | null;
+  age_hours: number;
+  order: {
+    id: string;
+    status: string;
+    amount_xaf: string;
+    quantity: number;
+    listing_id: string;
+    listing_title: string;
+    category: string;
+    delivery_method: string;
+    shipment_status: string;
+  };
+  buyer: { id: string; name: string; username: string };
+  seller: { id: string; name: string; username: string };
+  dispute_id: string | null;
+}
+
+export type AdminReturnState = "waiting" | "rejected" | "escalated" | "accepted" | "closed" | "all";
+
+export interface AdminReturnsSummary {
+  waiting: number;
+  rejected: number;
+  escalated: number;
+  accepted: number;
+  closed: number;
+  waiting_over_48h: number;
+  total: number;
+}
+
+export async function listAdminMarketplaceReturns(
+  filters: { state?: AdminReturnState; q?: string; page?: number },
+  accessToken: string
+): Promise<{ count: number; next: string | null; previous: string | null; results: AdminReturnRow[] }> {
+  const params = new URLSearchParams();
+  params.set("state", filters.state ?? "all");
+  if (filters.q) params.set("q", filters.q);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/marketplace-returns/?${params.toString()}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Returns fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getAdminMarketplaceReturnsSummary(accessToken: string): Promise<AdminReturnsSummary> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/marketplace-returns/summary/`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error(`Returns summary fetch failed: ${res.status}`);
+  return res.json();
+}
+
 export interface AdminAreaRequest {
   id: string;
   region_name: string;
@@ -4088,6 +4523,126 @@ export async function listAdminSosRides(accessToken: string, status: "open" | "r
 
 export async function resolveAdminSosRide(rideId: string, accessToken: string) {
   return fetch(`${API_BASE_URL}/api/admin/sos-rides/${rideId}/resolve/`, { method: "POST", headers: adminHeaders(accessToken) });
+}
+
+export const RIDE_ISSUE_CATEGORIES = [
+  "FARE", "ROUTE", "DRIVER_BEHAVIOUR", "RIDER_BEHAVIOUR", "VEHICLE", "LOST_ITEM", "DAMAGE", "OTHER",
+] as const;
+export type RideIssueCategory = (typeof RIDE_ISSUE_CATEGORIES)[number];
+
+export interface RideIssueReport {
+  id: number;
+  ride: string;
+  reported_by: AdminSosPerson | null;
+  reporter_role: "RIDER" | "DRIVER";
+  category: RideIssueCategory;
+  description: string;
+  status: "OPEN" | "RESOLVED";
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by_name: string | null;
+  resolution_notes: string;
+}
+
+export interface AdminRideIssue extends RideIssueReport {
+  ride_summary: { pickup_description: string; dropoff_description: string; status: string; fare_estimate_xaf: string; requested_at: string };
+}
+
+export interface AdminRide {
+  id: string;
+  status: string;
+  ride_category: string;
+  transport_type: string;
+  pickup_description: string;
+  dropoff_description: string;
+  fare_estimate_xaf: string;
+  requested_at: string;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  sos_raised_at: string | null;
+  sos_resolved_at: string | null;
+  rider: AdminSosPerson | null;
+  driver: AdminSosPerson | null;
+  open_issue_count: number;
+}
+
+export interface AdminRideDetail extends AdminRide {
+  vehicle_details: { vehicle_category: string; make: string; model: string; plate_number: string } | null;
+  distance_km: string | null;
+  has_luggage: boolean;
+  luggage_count: number | null;
+  luggage_size: string;
+  cargo_description: string;
+  pickup_latitude: string | null;
+  pickup_longitude: string | null;
+  dropoff_latitude: string | null;
+  dropoff_longitude: string | null;
+  cancellation_reason: string;
+  cancellation_note: string;
+  release_reason: string;
+  release_note: string;
+  sos_raised_by: AdminSosPerson | null;
+  sos_latitude: string | null;
+  sos_longitude: string | null;
+  sos_note: string;
+  payment: { booking_id: string; booking_status: string; amount_xaf: string; escrow_status: string | null; provider_reference: string | null } | null;
+  messages: { id: number; sender: string; sender_name: string; text: string; created_at: string }[];
+  issue_reports: RideIssueReport[];
+}
+
+export async function listAdminRides(
+  accessToken: string,
+  filters: { q?: string; status?: string; hasOpenIssue?: boolean; page?: number } = {},
+): Promise<{ count: number; next: string | null; results: AdminRide[] }> {
+  const params = new URLSearchParams();
+  if (filters.q) params.set("q", filters.q);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.hasOpenIssue) params.set("has_issue", "open");
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/admin/rides/?${params}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new ApiStatusError(`Rides fetch failed: ${res.status}`, res.status);
+  return res.json();
+}
+
+export async function getAdminRide(rideId: string, accessToken: string): Promise<AdminRideDetail> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/rides/${rideId}/`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new ApiStatusError(`Ride fetch failed: ${res.status}`, res.status);
+  return res.json();
+}
+
+export async function listAdminRideIssues(
+  accessToken: string,
+  status: "open" | "resolved" | "all" = "open",
+): Promise<{ count: number; results: AdminRideIssue[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/ride-issues/?status=${status}`, { headers: adminHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new ApiStatusError(`Ride issues fetch failed: ${res.status}`, res.status);
+  return res.json();
+}
+
+export async function resolveAdminRideIssue(issueId: number, notes: string, accessToken: string): Promise<AdminRideIssue> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/ride-issues/${issueId}/resolve/`, {
+    method: "POST",
+    headers: { ...adminHeaders(accessToken), "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not resolve this report");
+  return data;
+}
+
+export async function reportRideIssue(
+  rideId: string,
+  payload: { category: RideIssueCategory; description: string },
+  accessToken: string,
+): Promise<RideIssueReport> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/report-issue/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.description?.[0] || "Could not send your report");
+  return data;
 }
 
 export async function listAdminUsers(
@@ -4260,6 +4815,13 @@ export async function setMyComparison(listingIds: string[], accessToken: string)
   return res.json();
 }
 
+export interface NotificationTarget {
+  kind: string;
+  id: string | number;
+  role?: string;
+  category?: string;
+}
+
 export interface AppNotification {
   id: string;
   notification_type: string;
@@ -4269,6 +4831,7 @@ export interface AppNotification {
   delivered: boolean;
   read_at: string | null;
   created_at: string;
+  target?: NotificationTarget | null;
 }
 
 export async function listMyNotifications(accessToken: string): Promise<{ count: number; results: AppNotification[] }> {
@@ -4585,6 +5148,7 @@ export async function registerUser(payload: {
   username: string;
   phone: string;
   password: string;
+  accept_terms: boolean;
   referral_code?: string;
   role?: SignupRole;
 }): Promise<{ id: string }> {
@@ -4863,6 +5427,19 @@ interface BaseMarketplaceListing {
   /** Listings leave the marketplace this long after their last renewal unless the lister renews them. */
   expires_at?: string;
   is_expired?: boolean;
+  /** Buyers may propose a lower price (the lister can switch this off). */
+  allow_offers?: boolean;
+  /** A paid TOP boost is running until boosted_until. */
+  is_boosted?: boolean;
+  boosted_until?: string | null;
+  /** Flash sales (goods only): what one unit costs while the sale runs. */
+  sale_price_xaf?: string | null;
+  sale_starts_at?: string | null;
+  sale_ends_at?: string | null;
+  on_sale?: boolean;
+  /** What one unit costs right now: the sale price while a sale runs, else the normal price. */
+  current_price_xaf?: string;
+  seller_on_vacation?: boolean;
 }
 
 /** Views, saves and chats on one of the caller's own listings (from the /mine/ lists). */
@@ -5072,10 +5649,39 @@ export const GOODS_CONDITIONS = ["NEW", "LIKE_NEW", "USED"] as const;
 export type GoodsCategory = (typeof GOODS_CATEGORIES)[number];
 export type GoodsCondition = (typeof GOODS_CONDITIONS)[number];
 
+export interface GoodsVariant {
+  id: string;
+  /** e.g. "Red / M". */
+  label: string;
+  options: Record<string, string>;
+  sku: string;
+  /** The final unit price of this version, flash sale included, in whole XAF. */
+  price_xaf: string;
+  price_delta_xaf: string;
+  quantity: number;
+  available: boolean;
+  photo_url: string | null;
+  is_active: boolean;
+}
+
 export interface GoodsListing extends BaseMarketplaceListing {
   item_category: GoodsCategory;
   condition: GoodsCondition;
+  /** Units in stock; each paid order takes its units and the listing is sold out at 0. With options it is the total across versions. */
   quantity: number;
+  /** A display-only "was" price, always above price_xaf. */
+  compare_at_price_xaf?: string | null;
+  has_variants?: boolean;
+  /** The cheapest in-stock version, when the listing has options. */
+  price_from_xaf?: string | null;
+  variants?: GoodsVariant[];
+  pickup_available?: boolean;
+  seller_delivery?: boolean;
+  seller_delivery_fee_xaf?: string;
+  seller_delivery_areas?: string;
+  courier_shipping?: boolean;
+  courier_fee_xaf?: string;
+  courier_note?: string;
 }
 
 /** The fields every category's browse card needs, whichever category the listing belongs to. */
@@ -5164,6 +5770,52 @@ export async function deleteMarketplaceListing(category: MarketplaceCategory, id
   if (!res.ok) throw new Error("Could not delete the listing");
 }
 
+export interface GoodsVariantInput {
+  id?: string;
+  /** 1-3 option names with the same names, in the same order, in every row. */
+  options: Record<string, string>;
+  /** Whole XAF added to (or, if negative, taken off) the listing price. */
+  price_delta_xaf: number;
+  quantity: number;
+  sku?: string;
+  photo_url?: string;
+  is_active?: boolean;
+}
+
+export interface GoodsVariantFieldError {
+  index?: number;
+  field: string;
+  message: string;
+}
+
+/** A rejected options save: `errors` points at the offending rows and fields. */
+export class GoodsVariantsError extends Error {
+  errors: GoodsVariantFieldError[];
+  constructor(message: string, errors: GoodsVariantFieldError[]) {
+    super(message);
+    this.errors = errors;
+  }
+}
+
+export async function getGoodsVariants(listingId: string, accessToken?: string): Promise<GoodsVariant[]> {
+  const res = await fetch(`${API_BASE_URL}/api/goods/${listingId}/variants/`, { headers: accessToken ? bearerHeaders(accessToken) : undefined, cache: "no-store" });
+  const data = await jsonOrThrow<{ variants: GoodsVariant[] }>(res, "Could not load the options");
+  return data.variants ?? [];
+}
+
+/** Replaces the whole set of options of a goods listing; an empty list removes them all. */
+export async function saveGoodsVariants(listingId: string, variants: GoodsVariantInput[], accessToken: string): Promise<{ variants: GoodsVariant[]; quantity: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/goods/${listingId}/variants/`, {
+    method: "PUT", headers: jsonAuth(accessToken), body: JSON.stringify({ variants }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const errors = Array.isArray(data?.errors) ? (data.errors as GoodsVariantFieldError[]) : [];
+    throw new GoodsVariantsError(apiErrorMessage(data, "Could not save the options"), errors);
+  }
+  return data as { variants: GoodsVariant[]; quantity: number };
+}
+
 export type MarketplaceOrderStatus = "PAYMENT_PENDING" | "PAID" | "HANDED_OVER" | "COMPLETED" | "CANCELLED" | "DISPUTED";
 
 export interface MarketplaceOrderItem {
@@ -5201,6 +5853,91 @@ export interface MarketplaceOrderItem {
   owner_approved_at?: string | null;
   /** Set while the request is unanswered: it expires (and is refunded) at this moment. */
   approval_deadline?: string | null;
+  /** The buyer of a completed order can leave a verified-purchase review once. */
+  can_review?: boolean;
+  my_review?: { score: number; text: string; created_at: string } | null;
+  delivery_method?: MarketplaceDeliveryMethod;
+  delivery_address?: string;
+  courier_name?: string;
+  tracking_number?: string;
+  shipment_status?: MarketplaceShipmentStatus | "";
+  shipped_at?: string | null;
+  delivered_at?: string | null;
+  delivery_proof_url?: string;
+  delivery_note?: string;
+  shipment_events?: MarketplaceShipmentEvent[];
+  /** The order is delivered by the seller or a courier, so shipment updates apply. */
+  is_tracked?: boolean;
+  receipt_available?: boolean;
+  return_request?: MarketplaceReturnRequest | null;
+  can_request_return?: boolean;
+  discount_xaf?: string;
+  coupon_code?: string;
+  /** The cart checkout (one Mobile Money payment) this order was split from, or null. */
+  checkout?: string | null;
+  /** The chosen version of a goods listing with options ("Red / M"), or "". */
+  variant_label?: string;
+}
+
+export type MarketplaceDeliveryMethod = "PICKUP" | "SELLER" | "COURIER" | "";
+export type MarketplaceShipmentStatus = "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED";
+
+export interface MarketplaceShipmentEvent {
+  status: MarketplaceShipmentStatus | "REPLACEMENT";
+  note: string;
+  at: string;
+}
+
+export type MarketplaceReturnKind = "REFUND" | "PARTIAL_REFUND" | "REPLACEMENT";
+export type MarketplaceReturnReason = "NOT_AS_DESCRIBED" | "DAMAGED" | "WRONG_ITEM" | "MISSING_PARTS" | "NOT_WORKING" | "OTHER";
+export type MarketplaceReturnStatus = "REQUESTED" | "ACCEPTED" | "REJECTED" | "ESCALATED" | "WITHDRAWN" | "CLOSED";
+
+export interface MarketplaceReturnRequest {
+  id: string;
+  kind: MarketplaceReturnKind;
+  reason: MarketplaceReturnReason;
+  description: string;
+  evidence_urls: string[];
+  requested_amount_xaf: string | null;
+  status: MarketplaceReturnStatus;
+  seller_note: string;
+  created_at: string;
+  responded_at: string | null;
+  /** The seller must answer by then, or the request goes to support. */
+  respond_by: string | null;
+  /** After a rejection the buyer must decide by then. */
+  buyer_decide_by: string | null;
+}
+
+export interface MarketplaceReviewItem {
+  id: number;
+  author_name: string;
+  score: number;
+  text: string;
+  created_at: string;
+  verified_purchase: boolean;
+}
+
+export interface MarketplaceReviews {
+  average: number | null;
+  count: number;
+  distribution: Record<"1" | "2" | "3" | "4" | "5", number>;
+  results: MarketplaceReviewItem[];
+}
+
+export async function getMarketplaceListingReviews(category: MarketplaceCategory, id: string): Promise<MarketplaceReviews> {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/reviews/`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load the reviews");
+  return res.json();
+}
+
+export async function reviewMarketplaceOrder(orderId: string, score: number, text: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/review/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ score, text }),
+  });
+  return marketplaceOrderResponse(res, "Could not save your review");
 }
 
 async function marketplaceOrderResponse(res: Response, fallback: string): Promise<MarketplaceOrderItem> {
@@ -5215,13 +5952,357 @@ async function marketplaceOrderResponse(res: Response, fallback: string): Promis
 export async function placeMarketplaceOrder(
   category: MarketplaceCategory, listingId: string, phoneNumber: string, accessToken: string,
   rental?: { start_date: string; end_date: string; with_driver: boolean; delivery: boolean },
+  goods?: { quantity: number; variant_id?: string; delivery_method?: "PICKUP" | "SELLER" | "COURIER"; delivery_address?: string },
+  offerId?: string,
+  options?: { coupon_code?: string },
 ) {
   const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ category, listing_id: listingId, phone_number: phoneNumber, ...rental }),
+    body: JSON.stringify({
+      category, listing_id: listingId, phone_number: phoneNumber, ...rental, ...goods,
+      ...(offerId ? { offer_id: offerId } : {}), ...(options?.coupon_code ? { coupon_code: options.coupon_code } : {}),
+    }),
   });
   return marketplaceOrderResponse(res, "Could not place the order");
+}
+
+/** The first readable message in a DRF error body: {detail}, else the first field error. */
+export function apiErrorMessage(data: unknown, fallback: string): string {
+  if (data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+    if (typeof record.detail === "string") return record.detail;
+    const first = Object.values(record).flat()[0];
+    if (typeof first === "string") return first;
+  }
+  return fallback;
+}
+
+async function jsonOrThrow<T>(res: Response, fallback: string): Promise<T> {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(apiErrorMessage(data, fallback));
+  return data as T;
+}
+
+function jsonAuth(accessToken: string): HeadersInit {
+  return { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` };
+}
+
+// --- Cart: one Mobile Money payment per seller, split into one order per item once paid. ---
+
+export interface MarketplaceCartItem {
+  listing_id: string;
+  /** The chosen version of an item with options; one cart line per listing + version. */
+  variant_id: string | null;
+  variant_label: string;
+  title: string;
+  photo_url: string | null;
+  unit_price_xaf: string;
+  list_price_xaf: string;
+  on_sale: boolean;
+  sale_ends_at: string | null;
+  quantity: number;
+  stock: number;
+  available: boolean;
+  reason: string;
+  line_total_xaf: string;
+}
+
+export interface MarketplaceCartGroup {
+  seller_id: string;
+  seller_name: string;
+  subtotal_xaf: string;
+  can_checkout: boolean;
+  delivery_options: { method: "PICKUP" | "SELLER" | "COURIER"; fee_xaf: string }[];
+  items: MarketplaceCartItem[];
+}
+
+export interface MarketplaceCart {
+  item_count: number;
+  groups: MarketplaceCartGroup[];
+}
+
+export interface MarketplaceCartQuote {
+  subtotal_xaf: string;
+  discount_xaf: string;
+  delivery_fee_xaf: string;
+  total_xaf: string;
+  delivery_method: string;
+  coupon_error: string | null;
+}
+
+export interface MarketplaceCartRequest {
+  seller_id: string;
+  delivery_method: "PICKUP" | "SELLER" | "COURIER";
+  delivery_address?: string;
+  coupon_code?: string;
+}
+
+export async function getMarketplaceCart(accessToken: string): Promise<MarketplaceCart> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-cart/`, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  return jsonOrThrow(res, "Could not load your cart");
+}
+
+export async function setMarketplaceCartItem(listingId: string, quantity: number, accessToken: string, variantId?: string | null): Promise<MarketplaceCart> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-cart/items/`, {
+    method: "POST", headers: jsonAuth(accessToken),
+    body: JSON.stringify({ listing_id: listingId, quantity, ...(variantId ? { variant_id: variantId } : {}) }),
+  });
+  return jsonOrThrow(res, "Could not update your cart");
+}
+
+export async function removeMarketplaceCartItem(listingId: string, accessToken: string, variantId?: string | null): Promise<MarketplaceCart> {
+  const query = variantId ? `?variant_id=${encodeURIComponent(variantId)}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-cart/items/${listingId}/${query}`, { method: "DELETE", headers: bearerHeaders(accessToken) });
+  return jsonOrThrow(res, "Could not update your cart");
+}
+
+export async function quoteMarketplaceCart(request: MarketplaceCartRequest, accessToken: string): Promise<MarketplaceCartQuote> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-cart/quote/`, {
+    method: "POST", headers: jsonAuth(accessToken), body: JSON.stringify(request),
+  });
+  return jsonOrThrow(res, "Could not price your cart");
+}
+
+export async function checkoutMarketplaceCart(
+  request: MarketplaceCartRequest & { phone_number: string }, accessToken: string,
+): Promise<{ checkout_id: string; total_xaf: string; orders: MarketplaceOrderItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-cart/checkout/`, {
+    method: "POST", headers: jsonAuth(accessToken), body: JSON.stringify(request),
+  });
+  return jsonOrThrow(res, "Could not place the order");
+}
+
+// --- Coupons ---
+
+export type MarketplaceCouponKind = "PERCENT" | "FIXED";
+
+export interface MarketplaceCoupon {
+  id: number | string;
+  code: string;
+  kind: MarketplaceCouponKind;
+  value: string | number;
+  min_order_xaf: string | number;
+  max_uses: number | null;
+  uses: number;
+  starts_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+}
+
+export type MarketplaceCouponInput = Omit<MarketplaceCoupon, "id" | "uses">;
+
+export async function listMarketplaceCoupons(accessToken: string): Promise<MarketplaceCoupon[]> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/`, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  const data = await jsonOrThrow<{ results?: MarketplaceCoupon[] } | MarketplaceCoupon[]>(res, "Could not load your coupons");
+  return Array.isArray(data) ? data : data.results ?? [];
+}
+
+export async function createMarketplaceCoupon(input: Partial<MarketplaceCouponInput>, accessToken: string): Promise<MarketplaceCoupon> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/`, { method: "POST", headers: jsonAuth(accessToken), body: JSON.stringify(input) });
+  return jsonOrThrow(res, "Could not create the coupon");
+}
+
+export async function updateMarketplaceCoupon(id: number | string, input: Partial<MarketplaceCouponInput>, accessToken: string): Promise<MarketplaceCoupon> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/${id}/`, { method: "PATCH", headers: jsonAuth(accessToken), body: JSON.stringify(input) });
+  return jsonOrThrow(res, "Could not update the coupon");
+}
+
+export async function deleteMarketplaceCoupon(id: number | string, accessToken: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupons/${id}/`, { method: "DELETE", headers: bearerHeaders(accessToken) });
+  if (!res.ok) throw new Error("Could not delete the coupon");
+}
+
+export interface MarketplaceCouponCheck {
+  valid: boolean;
+  message: string;
+  discount_xaf: string;
+  code: string;
+}
+
+export async function checkMarketplaceCoupon(listingId: string, quantity: number, code: string, accessToken: string): Promise<MarketplaceCouponCheck> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-coupon-check/`, {
+    method: "POST", headers: jsonAuth(accessToken), body: JSON.stringify({ listing_id: listingId, quantity, code }),
+  });
+  return jsonOrThrow(res, "Could not check the coupon");
+}
+
+// --- Shops ---
+
+export interface MarketplaceShopSettings {
+  name: string;
+  tagline: string;
+  description: string;
+  logo_url: string;
+  banner_url: string;
+  shipping_policy: string;
+  return_policy: string;
+  announcement: string;
+  on_vacation: boolean;
+  vacation_message: string;
+  vacation_until: string | null;
+}
+
+export interface MarketplaceShop extends MarketplaceShopSettings {
+  user_id: string;
+  seller: MarketplaceSellerSummary;
+  listing_count: number;
+  deal_count: number;
+  coupon_available: boolean;
+  follower_count: number;
+  is_following: boolean;
+  is_owner: boolean;
+}
+
+export async function getMarketplaceShop(userId: string, accessToken?: string | null): Promise<MarketplaceShop> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-shops/${userId}/`, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  return jsonOrThrow(res, "Could not load the shop");
+}
+
+export async function getMyMarketplaceShop(accessToken: string): Promise<MarketplaceShopSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-shop/me/`, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  return jsonOrThrow(res, "Could not load your shop");
+}
+
+export async function updateMyMarketplaceShop(settings: MarketplaceShopSettings, accessToken: string): Promise<MarketplaceShopSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-shop/me/`, { method: "PUT", headers: jsonAuth(accessToken), body: JSON.stringify(settings) });
+  return jsonOrThrow(res, "Could not save your shop");
+}
+
+// --- Search assist ---
+
+export interface MarketplaceSearchAssist {
+  query: string;
+  did_you_mean: string | null;
+  synonyms: string[];
+}
+
+export async function getMarketplaceSearchAssist(q: string, signal?: AbortSignal): Promise<MarketplaceSearchAssist> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-search/assist/?${new URLSearchParams({ q })}`, { signal });
+  return jsonOrThrow(res, "Search suggestions are unavailable");
+}
+
+export async function getTrendingMarketplaceSearches(days = 7): Promise<{ term: string; count: number }[]> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-search/trending/?days=${days}`);
+  const data = await jsonOrThrow<{ results?: { term: string; count: number }[] }>(res, "Trending searches are unavailable");
+  return data.results ?? [];
+}
+
+export class VisualSearchError extends Error {
+  constructor(message: string, readonly unavailable: boolean) {
+    super(message);
+  }
+}
+
+export async function searchMarketplaceByImage(image: File): Promise<{ keywords: string[]; q: string }> {
+  const body = new FormData();
+  body.append("image", image);
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-search/image/`, { method: "POST", body });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new VisualSearchError(apiErrorMessage(data, "Could not search by photo"), res.status === 503);
+  return data;
+}
+
+export type MarketplaceOfferStatus = "PENDING" | "COUNTERED" | "ACCEPTED" | "PAID" | "DECLINED" | "WITHDRAWN" | "EXPIRED";
+
+export interface MarketplaceOfferItem {
+  id: string;
+  listing_id: string;
+  listing_title: string;
+  listing_price_xaf: string;
+  price_basis: string;
+  category: MarketplaceCategory | "";
+  photo_url: string | null;
+  buyer: string;
+  buyer_name: string;
+  seller: string;
+  seller_name: string;
+  amount_xaf: string;
+  counter_amount_xaf: string | null;
+  /** The price to pay: set while the offer is ACCEPTED (or PAID). */
+  agreed_amount_xaf: string | null;
+  message: string;
+  status: MarketplaceOfferStatus;
+  created_at: string;
+  responded_at: string | null;
+  accepted_at: string | null;
+  /** An accepted offer must be paid before this moment. */
+  pay_by: string | null;
+  /** An unanswered offer (or counter-offer) lapses at this moment. */
+  respond_by: string | null;
+}
+
+/** Offers still going: the buyer can't make another one on the listing until these are settled. */
+export const OPEN_OFFER_STATUSES: MarketplaceOfferStatus[] = ["PENDING", "COUNTERED", "ACCEPTED"];
+
+async function marketplaceOfferResponse(res: Response, fallback: string): Promise<MarketplaceOfferItem> {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : fallback));
+  }
+  return data;
+}
+
+export async function makeMarketplaceOffer(
+  category: MarketplaceCategory, listingId: string, amountXaf: number, message: string, accessToken: string,
+) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-offers/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ category, listing_id: listingId, amount_xaf: amountXaf, message }),
+  });
+  return marketplaceOfferResponse(res, "Could not send your offer");
+}
+
+export async function listMyMarketplaceOffers(
+  role: "buying" | "selling", accessToken: string, listingId?: string,
+): Promise<{ count: number; results: MarketplaceOfferItem[] }> {
+  const query = new URLSearchParams({ role, ...(listingId ? { listing_id: listingId } : {}) });
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-offers/?${query}`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load your offers");
+  return res.json();
+}
+
+export type MarketplaceOfferActionName = "accept" | "decline" | "counter" | "withdraw";
+
+export async function marketplaceOfferAction(offerId: string, action: MarketplaceOfferActionName, accessToken: string, amountXaf?: number) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-offers/${offerId}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(action === "counter" ? { amount_xaf: amountXaf } : {}),
+  });
+  return marketplaceOfferResponse(res, "That action could not be completed");
+}
+
+export interface MarketplaceBoostOption {
+  duration_unit: "DAILY" | "MONTHLY";
+  unit_price_xaf: string;
+  max_quantity: number;
+}
+
+export async function getMarketplaceBoostOptions(): Promise<MarketplaceBoostOption[]> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-boost-options/`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load the boost prices");
+  return (await res.json()).options;
+}
+
+export async function boostMarketplaceListing(
+  category: MarketplaceCategory, id: string,
+  payload: { duration_unit: "DAILY" | "MONTHLY"; quantity: number; pay_with: "WALLET" | "MOMO"; phone_number?: string },
+  accessToken: string,
+) {
+  const res = await fetch(`${API_BASE_URL}/api/${MARKETPLACE_ENDPOINTS[category]}/${id}/boost/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ phone_number: "", ...payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const firstFieldError = Object.values(data).flat()[0];
+    throw new Error(data.detail || (typeof firstFieldError === "string" ? firstFieldError : "Could not boost the listing"));
+  }
+  return data as { id: string; boosted_until: string; price_xaf: string };
 }
 
 export async function listMyMarketplaceOrders(role: "buying" | "selling", accessToken: string): Promise<{ count: number; results: MarketplaceOrderItem[] }> {
@@ -5239,6 +6320,152 @@ export async function marketplaceOrderAction(orderId: string, action: Marketplac
     body: JSON.stringify(action === "dispute" || action === "claim-deposit" ? { reason } : {}),
   });
   return marketplaceOrderResponse(res, "That action could not be completed");
+}
+
+export interface MarketplaceShipmentPayload {
+  status: MarketplaceShipmentStatus;
+  courier_name?: string;
+  tracking_number?: string;
+  note?: string;
+  proof_url?: string;
+}
+
+export async function updateMarketplaceShipment(orderId: string, payload: MarketplaceShipmentPayload, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/shipment/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(payload),
+  });
+  return marketplaceOrderResponse(res, "Could not save the delivery update");
+}
+
+export interface MarketplaceReturnRequestPayload {
+  kind: MarketplaceReturnKind;
+  reason: MarketplaceReturnReason;
+  description: string;
+  evidence_urls?: string[];
+  requested_amount_xaf?: string;
+}
+
+async function marketplaceOrderPost(orderId: string, path: string, body: object, accessToken: string, fallback: string) {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-orders/${orderId}/${path}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(body),
+  });
+  return marketplaceOrderResponse(res, fallback);
+}
+
+export function requestMarketplaceReturn(orderId: string, payload: MarketplaceReturnRequestPayload, accessToken: string) {
+  return marketplaceOrderPost(orderId, "return-request", payload, accessToken, "Could not send your request");
+}
+
+export function respondToMarketplaceReturn(orderId: string, decision: "ACCEPT" | "REJECT", note: string, accessToken: string) {
+  return marketplaceOrderPost(orderId, "return-respond", { decision, note }, accessToken, "Could not send your answer");
+}
+
+export function withdrawMarketplaceReturn(orderId: string, accessToken: string) {
+  return marketplaceOrderPost(orderId, "return-withdraw", {}, accessToken, "Could not withdraw the request");
+}
+
+export function escalateMarketplaceReturn(orderId: string, accessToken: string) {
+  return marketplaceOrderPost(orderId, "return-escalate", {}, accessToken, "Could not send the request to support");
+}
+
+export function filenameFromContentDisposition(header: string | null, fallback: string): string {
+  const match = header?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  if (!match) return fallback;
+  try {
+    return decodeURIComponent(match[1]).trim() || fallback;
+  } catch {
+    return match[1].trim() || fallback;
+  }
+}
+
+/** Fetches a file that needs the Authorization header and hands it to the browser as a download. */
+async function downloadAuthenticatedFile(url: string, accessToken: string, fallbackName: string, fallbackError: string) {
+  const res = await fetch(url, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || fallbackError);
+  }
+  const blob = await res.blob();
+  const link = document.createElement("a");
+  const objectUrl = URL.createObjectURL(blob);
+  link.href = objectUrl;
+  link.download = filenameFromContentDisposition(res.headers.get("Content-Disposition"), fallbackName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+export function downloadMarketplaceReceipt(orderId: string, lang: string, accessToken: string) {
+  return downloadAuthenticatedFile(
+    `${API_BASE_URL}/api/marketplace-orders/${orderId}/receipt/?lang=${lang === "fr" ? "fr" : "en"}`,
+    accessToken, `oaziland-receipt-${orderId}.pdf`, "Could not download the document",
+  );
+}
+
+export type SellerPeriod = "7d" | "30d" | "90d" | "365d" | "all";
+
+export interface SellerDashboard {
+  period: SellerPeriod;
+  since: string | null;
+  summary: {
+    orders_total: number;
+    orders_completed: number;
+    orders_cancelled: number;
+    orders_open: number;
+    items_sold: number;
+    gross_sales_xaf: string;
+    platform_fees_xaf: string;
+    net_earnings_xaf: string;
+    refunded_xaf: string;
+    held_in_escrow_xaf: string;
+    average_order_xaf: string;
+    wallet_balance_xaf: string;
+    listing_views: number;
+    conversion_pct: number | null;
+  };
+  series: { bucket: "day" | "month"; points: { date: string; orders: number; gross_xaf: string; net_xaf: string }[] };
+  by_category: { category: MarketplaceCategory; orders: number; gross_xaf: string; net_xaf: string }[];
+  top_listings: { listing_id: string; title: string; category: MarketplaceCategory; orders: number; gross_xaf: string }[];
+  returns: { open: number };
+}
+
+export interface SellerPayoutRow {
+  order_id: string;
+  listing_id: string;
+  listing_title: string;
+  buyer_name: string;
+  quantity: number;
+  paid_at: string;
+  gross_xaf: string;
+  fee_xaf: string;
+  refunded_xaf: string;
+  net_xaf: string;
+}
+
+export async function getSellerDashboard(period: SellerPeriod, accessToken: string): Promise<SellerDashboard> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-seller/dashboard/?period=${period}`, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load your dashboard");
+  return res.json();
+}
+
+export async function getSellerPayouts(
+  period: SellerPeriod, page: number, accessToken: string,
+): Promise<{ count: number; next: string | null; previous: string | null; results: SellerPayoutRow[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/marketplace-seller/payouts/?period=${period}&page=${page}`, { headers: bearerHeaders(accessToken), cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load your payouts");
+  return res.json();
+}
+
+export function downloadSellerSalesCsv(period: SellerPeriod, accessToken: string) {
+  return downloadAuthenticatedFile(
+    `${API_BASE_URL}/api/marketplace-seller/sales.csv?period=${period}`,
+    accessToken, `oaziland-sales-${period}.csv`, "Could not export your sales",
+  );
 }
 
 export async function getMarketplaceListing<T>(category: MarketplaceCategory, id: string, accessToken?: string | null): Promise<T> {
@@ -5275,6 +6502,13 @@ export interface RideBookingItem {
   cargo_description: string;
   requested_at: string;
   completed_at: string | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: RideCancelReason | "";
+  cancellation_note?: string;
+  release_reason?: RideReleaseReason | "";
+  release_note?: string;
+  /** True while the request is being offered to nearby drivers one at a time. */
+  matching?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -5312,7 +6546,10 @@ export async function createGenericBooking(
     booking_type: string;
     target_content_type: string;
     target_id: string;
+    // Shown for reference only: the server always prices the booking itself.
     amount_xaf: string | number;
+    // How many price periods (months, semesters...) to pay for, where the target is priced per period.
+    quantity?: number;
   },
   accessToken: string
 ): Promise<BookingItem> {
@@ -5341,6 +6578,20 @@ export async function payGenericBooking(
   return data;
 }
 
+export async function getReservation(reservationId: string, accessToken: string): Promise<Reservation> {
+  const res = await fetch(`${API_BASE_URL}/api/reservations/${reservationId}/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not check your reservation");
+  return data;
+}
+
+export async function getBookingById(bookingId: string, accessToken: string): Promise<BookingItem> {
+  const res = await fetch(`${API_BASE_URL}/api/bookings/${bookingId}/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not check your booking");
+  return data;
+}
+
 export async function payReservation(
   reservationId: string,
   phoneNumber: string,
@@ -5354,6 +6605,79 @@ export async function payReservation(
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
   return data;
+}
+
+export interface EventBookingPayState extends EventBooking {
+  venue_id: string;
+  space_name: string;
+  deposit_paid: boolean;
+  balance_paid: boolean;
+  is_organiser: boolean;
+  is_owner: boolean;
+  organiser_name: string;
+  owner_payout_xaf: string | null;
+  payment_held: boolean;
+  payout_due_at: string | null;
+  balance_due_at: string | null;
+  cancellation: { free: boolean; free_until: string; fee_xaf: string; refund_xaf: string } | null;
+}
+
+export type EventActionName = "cancel" | "confirm-event" | "dispute" | "complete";
+
+export async function eventBookingAction(id: string, action: EventActionName, accessToken: string, reason?: string): Promise<EventBookingPayState> {
+  const res = await fetch(`${API_BASE_URL}/api/event-bookings/${id}/${action}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(action === "dispute" ? { reason } : {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "That action could not be completed");
+  return data;
+}
+
+export async function listMyEventBookings(accessToken: string): Promise<EventBookingPayState[]> {
+  return (await fetchEventBookings(accessToken)).filter((b) => b.is_organiser);
+}
+
+/** Bookings made at the venues the signed-in user owns. */
+export async function listVenueBookings(accessToken: string): Promise<EventBookingPayState[]> {
+  return (await fetchEventBookings(accessToken)).filter((b) => b.is_owner && !b.is_organiser);
+}
+
+async function fetchEventBookings(accessToken: string): Promise<EventBookingPayState[]> {
+  const rows: EventBookingPayState[] = [];
+  let url: string | null = `${API_BASE_URL}/api/event-bookings/`;
+  for (let page = 0; url && page < 50; page += 1) {
+    const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "Could not load your venue bookings");
+    if (Array.isArray(data)) return data;
+    rows.push(...(data.results ?? []));
+    url = data.next ?? null;
+  }
+  return rows;
+}
+
+export async function getEventBooking(id: string, accessToken: string): Promise<EventBookingPayState> {
+  const res = await fetch(`${API_BASE_URL}/api/event-bookings/${id}/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not check your venue booking");
+  return data;
+}
+
+/** Starts the Mobile Money payment of a venue booking's deposit or balance. `confirmed` is true when the money is
+ * already held (sandbox); otherwise the provider confirms it after the payer approves on their phone. */
+export async function payEventBooking(
+  id: string, part: "deposit" | "balance", phoneNumber: string, accessToken: string
+): Promise<{ confirmed: boolean; booking: EventBookingPayState }> {
+  const res = await fetch(`${API_BASE_URL}/api/event-bookings/${id}/pay-${part}/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ phone_number: phoneNumber }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "The payment could not be started");
+  return { confirmed: res.status === 200, booking: data };
 }
 
 export async function openDispute(bookingId: string, reason: string, accessToken: string) {
@@ -5673,11 +6997,10 @@ export async function requestRide(
   payload: {
     pickup_description: string;
     dropoff_description: string;
-    distance_km: string;
-    pickup_latitude?: number | string | null;
-    pickup_longitude?: number | string | null;
-    dropoff_latitude?: number | string | null;
-    dropoff_longitude?: number | string | null;
+    pickup_latitude: number;
+    pickup_longitude: number;
+    dropoff_latitude: number;
+    dropoff_longitude: number;
     ride_category?: string;
     transport_type?: string;
     has_luggage?: boolean;
@@ -5695,6 +7018,34 @@ export async function requestRide(
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "Could not request ride");
+  return data;
+}
+
+export interface RideQuote {
+  distance_km: string;
+  duration_minutes: number;
+  /** Google encoded polyline of the road route; empty when estimated. */
+  polyline: string;
+  /** "estimate" = straight line ×1.3, used when Google's route service is unavailable. */
+  source: "google" | "estimate";
+  /** Fare in XAF per ride category, exactly as a booking would be charged. */
+  fares: Record<string, string>;
+}
+
+/** Road distance, driving time and the fare for every vehicle category between two points, before booking. */
+export async function quoteRide(
+  points: { pickup_latitude: number; pickup_longitude: number; dropoff_latitude: number; dropoff_longitude: number },
+  accessToken: string,
+  signal?: AbortSignal,
+): Promise<RideQuote> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/quote/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(points),
+    signal,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not work out the price");
   return data;
 }
 
@@ -5747,6 +7098,26 @@ export async function listOpenRides(
   const res = await fetch(`${API_BASE_URL}/api/rides/open/${query}`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
   if (!res.ok) throw new Error("Could not load open requests");
   return res.json();
+}
+
+export interface RideOfferItem {
+  ride: OpenRideItem;
+  expires_at: string;
+  seconds_left: number;
+}
+
+/** The ride currently offered to this driver (or null). Calling it also moves matching along on the server. */
+export async function getMyRideOffer(accessToken: string): Promise<{ offer: RideOfferItem | null; offer_seconds: number }> {
+  const res = await fetch(`${API_BASE_URL}/api/rides/my-offer/`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error("Could not check for ride offers");
+  return res.json();
+}
+
+export async function declineRideOffer(rideId: string, accessToken: string) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/decline/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not decline the offer");
+  return data;
 }
 
 export interface DriverTracking {
@@ -5831,14 +7202,30 @@ export async function startRide(rideId: string, accessToken: string) {
   return res.json();
 }
 
-async function postRideAction(rideId: string, action: string, accessToken: string) {
-  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/${action}/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+async function postRideAction(rideId: string, action: string, accessToken: string, body?: object) {
+  const res = await fetch(`${API_BASE_URL}/api/rides/${rideId}/${action}/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "Action failed");
   return data;
 }
-export const cancelRide = (rideId: string, accessToken: string) => postRideAction(rideId, "cancel", accessToken);
-export const releaseRide = (rideId: string, accessToken: string) => postRideAction(rideId, "release", accessToken);
+
+export const RIDE_CANCEL_REASONS = [
+  "CHANGED_PLANS", "WAITED_TOO_LONG", "DRIVER_ASKED_TO_CANCEL", "DRIVER_NOT_MOVING", "WRONG_PICKUP", "FOUND_OTHER_TRANSPORT", "OTHER",
+] as const;
+export const RIDE_RELEASE_REASONS = [
+  "RIDER_UNREACHABLE", "PICKUP_TOO_FAR", "VEHICLE_PROBLEM", "LOAD_DOES_NOT_FIT", "SAFETY_CONCERN", "OTHER",
+] as const;
+export type RideCancelReason = (typeof RIDE_CANCEL_REASONS)[number] | "NO_DRIVER_FOUND";
+export type RideReleaseReason = (typeof RIDE_RELEASE_REASONS)[number];
+
+export const cancelRide = (rideId: string, accessToken: string, reason?: { reason: RideCancelReason; note?: string }) =>
+  postRideAction(rideId, "cancel", accessToken, reason);
+export const releaseRide = (rideId: string, accessToken: string, reason?: { reason: RideReleaseReason; note?: string }) =>
+  postRideAction(rideId, "release", accessToken, reason);
 
 export interface EmergencyContact {
   name: string;

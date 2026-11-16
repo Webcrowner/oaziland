@@ -6,11 +6,15 @@ that had NO way to create a post, view a feed, react, or comment,
 anywhere at any layer.
 """
 import pytest
+from django.conf import settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from identity.models import User
 from social.models import Post, Comment, Reaction, ContentStatus, EmojiType
+from social.tests.test_video_feed_api import _listing
+
+MEDIA = f"{settings.BACKEND_BASE_URL.rstrip('/')}/media/"
 
 
 def _auth_client(user):
@@ -151,11 +155,10 @@ def test_unpublished_posts_are_not_visible_reactable_or_commentable_by_others():
 
 @pytest.mark.django_db
 def test_logged_in_feed_keeps_the_ranking_order_real_estate_first():
-    import uuid
     author = User.objects.create(username="rank_author", phone="+237699888815")
     viewer = User.objects.create(username="rank_viewer", phone="+237699888816")
     plain_ids = [_make_post(author, f"plain {i}")["id"] for i in range(3)]
-    property_id = _make_post(author, "a property", linked_listing_id=str(uuid.uuid4()))["id"]
+    property_id = _make_post(author, "a property", linked_listing_id=str(_listing(author).id))["id"]
 
     results = _auth_client(viewer).get("/api/posts/").data["results"]
     assert results[0]["id"] == property_id
@@ -164,10 +167,9 @@ def test_logged_in_feed_keeps_the_ranking_order_real_estate_first():
 
 @pytest.mark.django_db
 def test_anonymous_feed_and_topic_feed_put_real_estate_first():
-    import uuid
     author = User.objects.create(username="anon_rank_author", phone="+237699888817")
     _make_post(author, "newer plain", tags=["Bastos"])
-    property_id = _make_post(author, "older property", tags=["Bastos"], linked_listing_id=str(uuid.uuid4()))["id"]
+    property_id = _make_post(author, "older property", tags=["Bastos"], linked_listing_id=str(_listing(author).id))["id"]
     _make_post(author, "newest plain", tags=["Bastos"])
 
     assert APIClient().get("/api/posts/").data["results"][0]["id"] == property_id
@@ -219,7 +221,7 @@ def test_post_validation_and_media_type_detection():
     assert client.post("/api/posts/", {"caption": "x" * 2201}, format="json").status_code == 400
 
     data = _make_post(
-        author, "", media_urls=["https://cdn.example.com/a.jpg", "https://cdn.example.com/b.MP4?x=1", "https://cdn.example.com/c.mp3"],
+        author, "", media_urls=[f"{MEDIA}a.jpg", f"{MEDIA}b.MP4?x=1", f"{MEDIA}c.mp3"],
     )
     assert [m["media_type"] for m in data["media"]] == ["PHOTO", "VIDEO", "AUDIO"]
 

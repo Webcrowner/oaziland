@@ -6,7 +6,7 @@ import ContactListingButton from "@/components/ContactListingButton";
 import EscrowBookingButton from "@/components/EscrowBookingButton";
 import JoinWaitlistButton from "@/components/JoinWaitlistButton";
 import FavoriteButton from "@/components/FavoriteButton";
-import WhatsAppShareButton from "@/components/WhatsAppShareButton";
+import ShareButton from "@/components/ShareButton";
 import CompareButton from "@/components/CompareButton";
 import PropertyMap from "@/components/PropertyMap";
 import PhotoGallery from "@/components/PhotoGallery";
@@ -21,6 +21,7 @@ import type { Metadata } from "next";
 const LISTER_ROLE_LABEL_KEYS: Record<string, string> = {
   AGENT: "listerAgentFull",
   AGENCY: "listerAgencyFull",
+  PLATFORM: "listerPlatformFull",
 };
 
 function listerRoleLabelKey(role: string, listingType: string): string {
@@ -248,7 +249,7 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
               />
               <ContactListingButton listingId={listing.id} listerId={listing.lister_id} />
               <JoinWaitlistButton listingId={listing.id} />
-              <WhatsAppShareButton
+              <ShareButton
                 variant="detail"
                 title={listing.property_asset.type.toLowerCase()}
                 location={listing.property_asset.quarter_name}

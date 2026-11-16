@@ -212,16 +212,28 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(service_request).data)
 
     @action(detail=True, methods=["post"])
-    @extend_schema(request=FundServiceRequestSerializer, responses={200: ServiceRequestSerializer, 400: dict, 403: dict})
+    @extend_schema(request=FundServiceRequestSerializer, responses={200: ServiceRequestSerializer, 202: ServiceRequestSerializer, 400: dict, 403: dict})
     def fund(self, request, pk=None):
-        """The requester pays the approved quote into escrow before work starts."""
+        """The requester pays the approved quote into escrow before work starts. 200 once the money is held
+        (sandbox); 202 while the requester approves on their phone and the provider's webhook confirms it."""
         from transactions.locks import get_booking_lock_client
         from payments.gateways import get_active_gateway
         input_serializer = FundServiceRequestSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
-        return self._run(
-            request, fund_service_request_escrow, requester=request.user, lock_client=get_booking_lock_client(),
-            payment_gateway=get_active_gateway(), phone_number=input_serializer.validated_data["phone_number"],
+        service_request = self.get_object()
+        try:
+            escrow = fund_service_request_escrow(
+                service_request=service_request, requester=request.user, lock_client=get_booking_lock_client(),
+                payment_gateway=get_active_gateway(), phone_number=input_serializer.validated_data["phone_number"],
+            )
+        except NotPartyToServiceRequestError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except (ServiceRequestStateError, InvalidQuoteError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        service_request.refresh_from_db()
+        return Response(
+            self.get_serializer(service_request).data,
+            status=status.HTTP_200_OK if escrow is not None else status.HTTP_202_ACCEPTED,
         )
 
     @action(detail=True, methods=["post"])
@@ -252,7 +264,7 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
                 lock_client=get_booking_lock_client(), payment_gateway=get_active_gateway(),
                 phone_number=phone_number,
             )
-        except ValueError as e:
+        except (ValueError, ServiceRequestStateError) as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(service_request).data)
 

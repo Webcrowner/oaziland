@@ -7,6 +7,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
+from django.conf import settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -15,8 +16,9 @@ from identity.models import User
 from property.models import House, Listing, ListingPhoto, ListingType, ListingStatus
 from social.models import Favorite, Follow, Post, ShareEvent
 
-VIDEO = "https://cdn.example.com/clips/tour.mp4"
-PHOTO = "https://cdn.example.com/clips/front.jpg"
+MEDIA = f"{settings.BACKEND_BASE_URL.rstrip('/')}/media/"
+VIDEO = f"{MEDIA}clips/tour.mp4"
+PHOTO = f"{MEDIA}clips/front.jpg"
 
 
 def _auth_client(user):
@@ -122,8 +124,8 @@ def test_views_count_for_everyone_except_the_author():
     author = _user("view_author", "+237699700008")
     post_id = _post_video(author)["id"]
 
-    assert APIClient().post(f"/api/posts/{post_id}/view/").data["view_count"] == 1
-    assert APIClient().post(f"/api/posts/{post_id}/view/").data["view_count"] == 2
+    assert APIClient().post(f"/api/posts/{post_id}/view/", REMOTE_ADDR="10.0.0.1").data["view_count"] == 1
+    assert APIClient().post(f"/api/posts/{post_id}/view/", REMOTE_ADDR="10.0.0.2").data["view_count"] == 2
     assert _auth_client(author).post(f"/api/posts/{post_id}/view/").data["view_count"] == 2
     assert Post.objects.get(id=post_id).view_count == 2
 
@@ -133,8 +135,8 @@ def test_trending_orders_by_engagement():
     author = _user("trend_author", "+237699700009")
     quiet = _post_video(author, caption="quiet")
     popular = _post_video(author, caption="popular")
-    for _ in range(3):
-        APIClient().post(f"/api/posts/{popular['id']}/view/")
+    for i in range(3):
+        APIClient().post(f"/api/posts/{popular['id']}/view/", REMOTE_ADDR=f"10.1.0.{i}")
 
     results = APIClient().get("/api/posts/reels/?scope=trending").data["results"]
 
@@ -187,3 +189,99 @@ def test_trending_tags_lists_tags_on_video_posts_only():
 
     assert tags[0] == {"name": "Bastos", "count": 2}
     assert {t["name"] for t in tags} == {"Bastos", "ForRent"}
+
+
+@pytest.mark.django_db
+def test_a_video_can_only_be_linked_to_a_property_its_author_listed():
+    owner = _user("link_owner", "+237699700020")
+    stranger = _user("link_stranger", "+237699700021")
+    listing = _listing(owner)
+    payload = {"caption": "Tour", "post_type": "REEL", "media_urls": [VIDEO]}
+
+    other = _auth_client(stranger).post("/api/posts/", {**payload, "linked_listing_id": str(listing.id)}, format="json")
+    missing = _auth_client(stranger).post("/api/posts/", {**payload, "linked_listing_id": str(uuid.uuid4())}, format="json")
+    own = _auth_client(owner).post("/api/posts/", {**payload, "linked_listing_id": str(listing.id)}, format="json")
+
+    assert other.status_code == 400 and "linked_listing_id" in other.data
+    assert missing.status_code == 400 and "linked_listing_id" in missing.data
+    assert own.status_code == 201
+    assert not Post.objects.filter(author=stranger).exists()
+
+
+@pytest.mark.django_db
+def test_media_must_be_hosted_by_oaziland():
+    author = _user("hotlink_author", "+237699700022")
+
+    response = _auth_client(author).post(
+        "/api/posts/", {"caption": "x", "post_type": "REEL", "media_urls": ["https://cdn.example.com/huge.mp4"]}, format="json",
+    )
+
+    assert response.status_code == 400 and "media_urls" in response.data
+    assert not Post.objects.filter(author=author).exists()
+
+
+@pytest.mark.django_db
+def test_a_video_can_be_reported_once_and_not_by_its_author():
+    author = _user("report_author", "+237699700023")
+    viewer = _user("report_viewer", "+237699700024")
+    post_id = _post_video(author)["id"]
+    body = {"target_post": post_id, "reason": "INAPPROPRIATE_CONTENT", "notes": "not ok"}
+
+    assert _auth_client(viewer).post("/api/content-reports/", body, format="json").status_code == 201
+    assert _auth_client(viewer).post("/api/content-reports/", body, format="json").status_code == 400
+    assert _auth_client(author).post("/api/content-reports/", body, format="json").status_code == 400
+
+@pytest.mark.django_db
+def test_the_same_viewer_counts_once_per_clip():
+    author = _user("dedupe_author", "+237699700030")
+    viewer = _user("dedupe_viewer", "+237699700031")
+    post_id = _post_video(author)["id"]
+
+    for _ in range(3):
+        assert _auth_client(viewer).post(f"/api/posts/{post_id}/view/").status_code == 200
+        APIClient().post(f"/api/posts/{post_id}/view/", REMOTE_ADDR="10.2.0.1")
+
+    assert Post.objects.get(id=post_id).view_count == 2
+
+
+@pytest.mark.django_db
+def test_poster_role_follows_the_account_type():
+    from decimal import Decimal
+    from identity.models import AgencyProfile, AgentProfile
+
+    owner = _user("role_owner", "+237699700032")
+    independent = _user("role_independent", "+237699700033")
+    agency_user = _user("role_agency", "+237699700034")
+    employed = _user("role_employed", "+237699700035")
+    AgentProfile.objects.create(user=independent, agent_commission_percent=Decimal("10"))
+    agency = AgencyProfile.objects.create(user=agency_user, registration_number="RC-ROLE-1", agency_commission_percent=Decimal("20"))
+    AgentProfile.objects.create(user=employed, agency=agency, agent_commission_percent=Decimal("10"))
+
+    roles = {u.username: _post_video(u)["poster_role"] for u in (owner, independent, agency_user, employed)}
+
+    assert roles == {
+        "role_owner": "LANDLORD", "role_independent": "INDEPENDENT_AGENT",
+        "role_agency": "AGENCY_AGENT", "role_employed": "AGENCY_AGENT",
+    }
+
+
+@pytest.mark.django_db
+def test_comments_are_moderated():
+    from trust_safety.models import ContentReport
+
+    author = _user("cmt_author", "+237699700036")
+    commenter = _user("cmt_commenter", "+237699700037")
+    post_id = _post_video(author)["id"]
+    client = _auth_client(commenter)
+
+    clean = client.post("/api/comments/", {"post": post_id, "text": "Nice place"}, format="json")
+    blocked = client.post("/api/comments/", {"post": post_id, "text": "this is a badword"}, format="json")
+    flagged = client.post("/api/comments/", {"post": post_id, "text": "reviewtest please"}, format="json")
+
+    assert clean.status_code == 201
+    assert blocked.status_code == 400 and "text" in blocked.data
+    assert flagged.status_code == 201
+    assert [c["text"] for c in APIClient().get(f"/api/posts/{post_id}/comments/").data] == ["Nice place", "reviewtest please"]
+    report = ContentReport.objects.get(target_kind="comment", target_object_id=str(flagged.data["id"]))
+    assert report.reported_by.is_platform_account and report.status == "OPEN"
+    assert ContentReport.objects.count() == 1

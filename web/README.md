@@ -44,6 +44,18 @@ npm run dev
 Requires the Django backend (`/backend`) running on the URL configured
 in `.env.local` (defaults to `http://localhost:8000`).
 
+## Checks
+
+```bash
+npm test                           # Vitest + Testing Library component tests (*.test.ts/tsx)
+npx tsc --noEmit                   # type check
+npm run lint
+node scripts/check-i18n-keys.cjs   # every t("...") key exists in en.json and fr.json
+```
+
+`.npmrc` sets `legacy-peer-deps=true`: the lockfile was resolved that way, and
+`npm ci` (also used by the Dockerfile) rejects it without the same setting.
+
 ## What's NOT built yet
 - Google/Facebook OAuth (actions hidden, backend not connected — needs real
   credentials, per Prompt 2)

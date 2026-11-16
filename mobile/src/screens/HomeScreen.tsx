@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Activi
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { listQuarters, Quarter } from "../lib/api";
+import LanguageToggle from "../components/LanguageToggle";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Home">;
 
@@ -27,6 +28,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <LanguageToggle />
       <Text style={styles.title}>Find your next home in Cameroon</Text>
       <Text style={styles.subtitle}>Verified listings, secure Mobile Money payments.</Text>
 
@@ -98,6 +100,7 @@ export default function HomeScreen({ navigation }: Props) {
           { label: "Compare Properties", screen: "Comparison" as const },
           { label: "Messages", screen: "Messages" as const },
           { label: "Social Feed", screen: "Feed" as const },
+          { label: "Videos", screen: "Videos" as const },
           { label: "My Dashboard", screen: "AgentDashboard" as const },
           { label: "Property Management", screen: "PropertyManagement" as const },
           { label: "Agents", screen: "Agents" as const },
@@ -108,6 +111,7 @@ export default function HomeScreen({ navigation }: Props) {
           { label: "Services", screen: "Services" as const },
           { label: "Premium", screen: "Premium" as const },
           { label: "Privacy Settings", screen: "PrivacySettings" as const },
+          { label: "Verify Identity", screen: "Kyc" as const },
           { label: "Referrals", screen: "Referrals" as const },
           { label: "Technician Dashboard", screen: "TechnicianDashboard" as const },
           { label: "About", screen: "About" as const },

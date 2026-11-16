@@ -7,6 +7,7 @@ import { trainingTheme } from "@/lib/trainingCategories";
 import StarRating from "@/components/StarRating";
 import CourseEnrollPanel from "@/components/CourseEnrollPanel";
 import CourseReviews from "@/components/CourseReviews";
+import CoursePreview from "@/components/CoursePreview";
 
 type Params = Promise<{ locale: string; id: string }>;
 
@@ -149,6 +150,7 @@ export default async function CourseDetailPage({ params }: { params: Params }) {
                         <summary className="flex cursor-pointer list-none items-center gap-3 p-4">
                           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--navy)] text-sm font-bold text-white">{index + 1}</span>
                           <span className="flex-1 font-semibold text-slate-900">{module.title}</span>
+                          {module.due_after_days && <span className="text-xs text-slate-500">{t("suggestedPace", { days: module.due_after_days })}</span>}
                           <span className="text-xs text-slate-500">{tp("lessonsCount", { count: module.lessons.length })}</span>
                           <span className="text-slate-400 transition-transform group-open:rotate-90" aria-hidden>›</span>
                         </summary>
@@ -157,6 +159,9 @@ export default async function CourseDetailPage({ params }: { params: Params }) {
                             <li key={lesson.id} className="flex items-center gap-3 py-2 text-sm text-slate-700">
                               <span aria-hidden>{KIND_ICONS[lesson.kind]}</span>
                               <span className="flex-1">{lesson.title}</span>
+                              {lesson.is_preview && (
+                                <a href="#preview" className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">{t("previewBadge")}</a>
+                              )}
                               <span className="text-xs text-slate-400">{tk(`kind${lesson.kind}`)}</span>
                             </li>
                           ))}
@@ -168,6 +173,8 @@ export default async function CourseDetailPage({ params }: { params: Params }) {
               </>
             )}
           </section>
+
+          {lessons.some((l) => l.is_preview) && <CoursePreview programId={program.id} />}
 
           <section id="reviews" className="scroll-mt-24">
             <h2 className="mb-4 font-[family-name:var(--font-display)] text-2xl font-bold text-slate-900">{t("reviews")}</h2>

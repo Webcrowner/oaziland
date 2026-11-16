@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Linking } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { registerUser, type SignupRole } from "../lib/api";
@@ -15,6 +15,11 @@ const STRINGS = {
     roleLabel: "What do you want to do on Oaziland?",
     register: "Register",
     failed: "Registration failed",
+    accept: "I agree to the",
+    terms: "Terms of Service",
+    and: "and the",
+    privacy: "Privacy Policy",
+    acceptRequired: "Please accept the Terms of Service and Privacy Policy to create your account.",
     notice: "Multi-factor authentication and identity verification (KYC) will be set up on your next login, per the platform's security requirements.",
     roles: {
       renter: "Browse, rent or buy (normal user)",
@@ -33,6 +38,11 @@ const STRINGS = {
     roleLabel: "Que souhaitez-vous faire sur Oaziland ?",
     register: "S'inscrire",
     failed: "Échec de l'inscription",
+    accept: "J'accepte les",
+    terms: "Conditions d'utilisation",
+    and: "et la",
+    privacy: "Politique de confidentialité",
+    acceptRequired: "Veuillez accepter les Conditions d'utilisation et la Politique de confidentialité pour créer votre compte.",
     notice: "L'authentification multifacteur et la vérification d'identité (KYC) seront configurées lors de votre prochaine connexion, conformément aux exigences de sécurité de la plateforme.",
     roles: {
       renter: "Parcourir, louer ou acheter (utilisateur normal)",
@@ -60,12 +70,18 @@ export default function RegisterScreen({ navigation }: Props) {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const lang = deviceLang();
 
   async function handleSubmit() {
     setError("");
+    if (!accepted) {
+      setError(s.acceptRequired);
+      return;
+    }
     setLoading(true);
     try {
-      await registerUser(form);
+      await registerUser({ ...form, accept_terms: true });
       navigation.navigate("Login");
     } catch (err) {
       setError(err instanceof Error ? err.message : s.failed);
@@ -98,6 +114,16 @@ export default function RegisterScreen({ navigation }: Props) {
         })}
       </View>
 
+      <TouchableOpacity style={styles.acceptRow} onPress={() => setAccepted((v) => !v)} accessibilityRole="checkbox" accessibilityState={{ checked: accepted }}>
+        <View style={[styles.checkbox, accepted && styles.checkboxOn]}>{accepted ? <Text style={styles.checkMark}>✓</Text> : null}</View>
+        <Text style={styles.acceptText}>
+          {s.accept}{" "}
+          <Text style={styles.link} onPress={() => Linking.openURL(`https://oaziland.com/${lang}/terms`)}>{s.terms}</Text>{" "}
+          {s.and}{" "}
+          <Text style={styles.link} onPress={() => Linking.openURL(`https://oaziland.com/${lang}/privacy`)}>{s.privacy}</Text>
+        </Text>
+      </TouchableOpacity>
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={loading}>
@@ -123,6 +149,12 @@ const styles = StyleSheet.create({
   roleChipText: { fontSize: 14, color: "#374151" },
   roleChipTextSelected: { color: "#1B2A4A", fontWeight: "600" },
   error: { color: "#DC2626", marginBottom: 12, fontSize: 13 },
+  acceptRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 },
+  checkbox: { width: 22, height: 22, borderWidth: 1.5, borderColor: "#9CA3AF", borderRadius: 5, alignItems: "center", justifyContent: "center", marginTop: 1 },
+  checkboxOn: { backgroundColor: "#C9A227", borderColor: "#C9A227" },
+  checkMark: { color: "#1B2A4A", fontWeight: "800", fontSize: 14 },
+  acceptText: { flex: 1, fontSize: 13, color: "#374151", lineHeight: 19 },
+  link: { color: "#8A6D14", fontWeight: "700", textDecorationLine: "underline" },
   button: { backgroundColor: "#C9A227", borderRadius: 8, paddingVertical: 14, alignItems: "center" },
   buttonText: { color: "#1B2A4A", fontWeight: "bold", fontSize: 16 },
   notice: { fontSize: 12, color: "#6B7280", marginTop: 16 },

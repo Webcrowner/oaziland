@@ -8,7 +8,7 @@ from marketplace.models import DriverProfile
 
 
 def _register(role=None, n=1):
-    payload = {"username": f"su_user_{n}", "phone": f"+23769900{n:04d}", "password": "StrongPass123!"}
+    payload = {"username": f"su_user_{n}", "phone": f"+23769900{n:04d}", "password": "StrongPass123!", "accept_terms": True}
     if role is not None:
         payload["role"] = role
     return APIClient().post("/api/auth/register/", payload, format="json")

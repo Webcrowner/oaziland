@@ -9,18 +9,41 @@ class RegisterSerializer(serializers.ModelSerializer):
     referral_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
     # What the person wants to do here; "renter" is the normal-user default and adds no extra role.
     role = serializers.ChoiceField(choices=SELF_SERVICE_ROLES, write_only=True, required=False, default="renter")
+    # Agreeing to the Terms of Service and Privacy Policy is required; the acceptance is recorded with the version.
+    accept_terms = serializers.BooleanField(write_only=True)
 
     class Meta:
         model = User
-        fields = ["id", "username", "phone", "email", "password", "preferred_language", "referral_code", "role"]
+        fields = ["id", "username", "phone", "email", "password", "preferred_language", "referral_code", "role", "accept_terms"]
+
+    def validate_password(self, value):
+        return _checked_password(value)
+
+    def validate_accept_terms(self, value):
+        if not value:
+            raise serializers.ValidationError("You must accept the Terms of Service and Privacy Policy to create an account.")
+        return value
+
+    @staticmethod
+    def _record_terms_consent(user):
+        from compliance.models import ConsentType, PolicyDocumentType
+        from compliance.services import get_current_policy, record_consent
+        for consent, document in (
+            (ConsentType.TERMS_OF_SERVICE, PolicyDocumentType.TERMS_OF_SERVICE),
+            (ConsentType.PRIVACY_POLICY, PolicyDocumentType.PRIVACY_POLICY),
+        ):
+            policy = get_current_policy(document)
+            record_consent(user=user, consent_type=consent, version=policy.version if policy else "unpublished")
 
     def create(self, validated_data):
+        validated_data.pop("accept_terms", None)
         password = validated_data.pop("password")
         referral_code = validated_data.pop("referral_code", "").strip()
         role = validated_data.pop("role", "renter")
         user = User(**validated_data)
         user.set_password(password)  # never store a plain-text password — Django's hashing, applied explicitly here
         user.save()
+        self._record_terms_consent(user)
         grant_role(user, role)
 
         if referral_code:
@@ -182,6 +205,9 @@ class ChangePasswordSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True, min_length=8)
 
+    def validate_new_password(self, value):
+        return _checked_password(value, self.context.get("request"))
+
 
 class PasswordResetRequestSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -190,3 +216,18 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 class PasswordResetConfirmSerializer(serializers.Serializer):
     token = serializers.CharField()
     new_password = serializers.CharField(min_length=8)
+
+    def validate_new_password(self, value):
+        return _checked_password(value)
+
+
+def _checked_password(value, request=None):
+    """Applies the platform's password rules (common and all-numeric passwords are refused)."""
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    user = request.user if request is not None and request.user.is_authenticated else None
+    try:
+        validate_password(value, user)
+    except DjangoValidationError as e:
+        raise serializers.ValidationError(list(e.messages))
+    return value

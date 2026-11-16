@@ -145,8 +145,19 @@ def create_post(*, author, caption: str = "", post_type=None, tags=None, linked_
     for order, url in enumerate(media_urls or []):
         PostMedia.objects.create(post=post, media_type=_infer_media_type(url), file_url=url, order=order)
 
-    PosterAttribution.objects.create(post=post, poster_role=poster_role or PosterRole.LANDLORD)
+    PosterAttribution.objects.create(post=post, poster_role=poster_role or poster_role_for(author))
     return post
+
+
+def poster_role_for(user):
+    """Who a viewer is dealing with: an agency, an agent (independent, or working for an agency), else the owner."""
+    from .models import PosterRole
+    if hasattr(user, "agency_profile"):
+        return PosterRole.AGENCY_AGENT
+    agent = getattr(user, "agent_profile", None)
+    if agent is not None:
+        return PosterRole.AGENCY_AGENT if agent.agency_id else PosterRole.INDEPENDENT_AGENT
+    return PosterRole.LANDLORD
 
 
 def publish_users_post(post):
@@ -173,8 +184,14 @@ def remove_reaction(*, post, author):
 
 
 def add_comment(*, post, author, text):
+    """Saves a comment after the same automatic check posts get: clear violations are refused
+    (ContentBlockedError); anything else the check flags stays up but is queued for a person
+    as a report from the platform account, so an admin can remove it and strike the author."""
     from .models import Comment
-    return Comment.objects.create(post=post, author=author, text=text)
+    from trust_safety.services import moderate_comment
+    comment = Comment.objects.create(post=post, author=author, text=text)
+    moderate_comment(comment)
+    return comment
 
 
 def delete_comment(*, comment, requester):

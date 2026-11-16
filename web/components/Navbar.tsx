@@ -9,6 +9,7 @@ import {
   IconHome, IconHotel, IconMessageCircle, IconParty, IconSearch, IconShoppingBag, IconSparkles, IconUsers, IconWrench,
 } from "./Icons";
 import { getMyProfile, listQuarters, type Quarter, type UserProfile } from "@/lib/api";
+import { disablePush } from "@/lib/push";
 
 export interface NavMenuItem {
   href: string;
@@ -215,6 +216,7 @@ export function MobileGroup({ title, items, onNavigate }: { title: string; items
 /** The site's three main link groups, shared by the desktop navbar and the mobile Explore sheet. */
 export function useSiteMenus() {
   const t = useTranslations("Header");
+  const td = useTranslations("MarketplaceDeals");
   const propertiesMenu: NavMenuItem[] = [
     { href: "/search?listing_type=RENT", label: t("rent"), icon: IconHome },
     { href: "/buy", label: t("buy"), icon: IconBuilding },
@@ -232,6 +234,7 @@ export function useSiteMenus() {
     { href: "/taskln-service", label: t("homeServices"), icon: IconWrench },
     { href: "/oazigo", label: t("rides"), icon: IconCar },
     { href: "/marketplace", label: t("marketplace"), icon: IconShoppingBag },
+    { href: "/marketplace/deals", label: td("navLabel"), icon: IconSparkles },
     { href: "/trainings", label: t("trainings"), icon: IconGraduationCap },
     { href: "/careers", label: t("careers"), icon: IconBriefcase },
     { href: "/how-it-works", label: t("howItWorks"), icon: IconSparkles },
@@ -268,6 +271,7 @@ export default function Navbar(): ReactNode {
   }, [pathname]);
 
   function handleLogOut() {
+    void disablePush(localStorage.getItem("access_token"));
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     setIsLoggedIn(false);

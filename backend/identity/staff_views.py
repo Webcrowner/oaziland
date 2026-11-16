@@ -100,3 +100,36 @@ class StaffSessionView(APIView):
         if grant is None:
             return Response({"active": False})
         return Response({"active": True, **grant_payload(grant, grant.staff)})
+
+
+class PlatformSessionView(APIView):
+    """GET: whether you may manage Oaziland's own offers, and which account that is.
+    POST: switch into a one-hour platform session (see identity.platform_account) — returns its access token."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from .platform_account import can_act_as_platform, get_platform_account
+
+        if not can_act_as_platform(request.user):
+            return Response({"can_act": False})
+        account = get_platform_account()
+        return Response({"can_act": True, "account": {"id": str(account.pk), "username": account.username, "name": account.full_name}})
+
+    @extend_schema(request=None, responses={201: dict, 403: dict})
+    def post(self, request):
+        from .platform_account import PlatformAccountError, start_platform_session
+        from trust_safety.models import AuditLog
+
+        if getattr(request._request, "staff_grant", None) is not None:
+            return Response({"detail": "Switch back to your own account first."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            session = start_platform_session(request.user)
+        except PlatformAccountError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        AuditLog.objects.create(
+            actor=request.user, actor_username=request.user.username, action="platform-account session started",
+            target_type="platform_account", target_id=session["account"]["id"], target_label="Oaziland", status_code=201,
+            ip_address=request.META.get("REMOTE_ADDR") or None,
+        )
+        return Response(session, status=status.HTTP_201_CREATED)

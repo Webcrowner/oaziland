@@ -9,6 +9,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import Panel from "@/components/ui/Panel";
 import StatCard from "@/components/ui/StatCard";
 import ShareAndQrModal from "@/components/ShareAndQrModal";
+import GuestHouseRoomsManager from "@/components/GuestHouseRoomsManager";
 import {
   IconShare, IconQrCode, IconArrowUpRight, IconHome, IconClock, IconCheckCircle, IconSparkles,
 } from "@/components/Icons";
@@ -118,6 +119,8 @@ export default function HostDashboardPage() {
         value={trend.percent_change === null ? "—" : `${trend.percent_change > 0 ? "+" : ""}${trend.percent_change}%`}
         hint={trend.percent_change === null ? t("noHistoryYet") : t("vsLastPeriod")}
       />
+
+      {userId && <GuestHouseRoomsManager userId={userId} />}
 
       {userId && (
         <ShareAndQrModal

@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { getHotel } from "@/lib/api";
 import AssetDetailView from "@/components/AssetDetailView";
+import HotelRoomBooking from "@/components/HotelRoomBooking";
 
 export default async function HotelDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,8 +21,8 @@ export default async function HotelDetailPage({ params }: { params: Promise<{ id
     <AssetDetailView
       backHref="/hotels"
       backLabel={t("backToHotels")}
-      title={t("hotelIn", { quarter: hotel.quarter_name })}
-      shareTitle="hotel"
+      title={hotel.name || t("hotelIn", { quarter: hotel.quarter_name })}
+      shareTitle={hotel.name || t("hotelIn", { quarter: hotel.quarter_name })}
       location={hotel.quarter_name}
       photos={hotel.photos}
       listerRole={hotel.lister_role}
@@ -31,12 +32,7 @@ export default async function HotelDetailPage({ params }: { params: Promise<{ id
       description={hotel.description}
       amenities={hotel.amenities}
       facts={facts}
-      sectionTitle={t("roomTypes")}
-      rows={hotel.room_types.map((r) => ({
-        primary: r.category.replace(/_/g, " ").toLowerCase(),
-        secondary: [t("sleeps", { count: r.capacity }), ...(r.amenities ?? []).map((a) => a.replace(/_/g, " ").toLowerCase())].join(" · "),
-        right: `${Number(r.base_rate_xaf).toLocaleString()} XAF ${t("perNight")}`,
-      }))}
+      detailsSlot={<HotelRoomBooking hotel={hotel} title={hotel.name || t("hotelIn", { quarter: hotel.quarter_name })} />}
       latitude={hotel.latitude}
       longitude={hotel.longitude}
       sharePath={`/hotels/${hotel.id}`}

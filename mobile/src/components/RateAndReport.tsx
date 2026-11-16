@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { rateUser, fileReportAgainstUser, getRatingEligibility } from "../lib/api";
+import { useI18n } from "../i18n";
+import type { MessageKey } from "../i18n/messages";
 
 const REPORT_REASONS = ["SCAM_SUSPECTED", "HARASSMENT", "MISLEADING_LISTING", "USER_BEHAVIOR", "OTHER"];
 
@@ -11,6 +13,7 @@ const REPORT_REASONS = ["SCAM_SUSPECTED", "HARASSMENT", "MISLEADING_LISTING", "U
  * only content they'd posted could ever be flagged.
  */
 export default function RateAndReport({ subjectUserId }: { subjectUserId: string }) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"idle" | "reporting" | "rated" | "reported">("idle");
   const [reason, setReason] = useState(REPORT_REASONS[0]);
   const [notes, setNotes] = useState("");
@@ -28,7 +31,7 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
       await rateUser(subjectUserId, score);
       setMode("rated");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setError(err instanceof Error ? err.message : t("rate.failed"));
     }
   }
 
@@ -37,32 +40,32 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
       await fileReportAgainstUser(subjectUserId, reason, notes);
       setMode("reported");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setError(err instanceof Error ? err.message : t("rate.failed"));
     }
   }
 
-  if (mode === "rated") return <Text style={styles.successText}>✓ Thanks for your rating!</Text>;
-  if (mode === "reported") return <Text style={styles.successText}>✓ Report submitted. Our team will review it.</Text>;
+  if (mode === "rated") return <Text style={styles.successText}>{t("rate.thanks")}</Text>;
+  if (mode === "reported") return <Text style={styles.successText}>{t("rate.reported")}</Text>;
 
   if (mode === "reporting") {
     return (
       <View style={styles.reportCard}>
-        <Text style={styles.reportTitle}>Report this person</Text>
+        <Text style={styles.reportTitle}>{t("rate.reportTitle")}</Text>
         <View style={styles.reasonRow}>
           {REPORT_REASONS.map((r) => (
             <TouchableOpacity key={r} style={[styles.reasonChip, reason === r && styles.reasonChipActive]} onPress={() => setReason(r)}>
-              <Text style={[styles.reasonChipText, reason === r && styles.reasonChipTextActive]}>{r.replace(/_/g, " ")}</Text>
+              <Text style={[styles.reasonChipText, reason === r && styles.reasonChipTextActive]}>{t(`reportReason.${r}` as MessageKey)}</Text>
             </TouchableOpacity>
           ))}
         </View>
-        <TextInput style={styles.notesInput} placeholder="Add details (optional)..." value={notes} onChangeText={setNotes} multiline numberOfLines={2} />
+        <TextInput style={styles.notesInput} placeholder={t("rate.notesPlaceholder")} value={notes} onChangeText={setNotes} multiline numberOfLines={2} />
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
         <View style={styles.reportButtonRow}>
           <TouchableOpacity style={styles.submitReportButton} onPress={handleReport}>
-            <Text style={styles.submitReportButtonText}>Submit Report</Text>
+            <Text style={styles.submitReportButtonText}>{t("rate.submitReport")}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setMode("idle")}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{t("common.cancel")}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -72,11 +75,11 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
   return (
     <View style={styles.row}>
       {canRate === false && (
-        <Text style={styles.rateLabel}>You can rate after completing a purchase, rental, booking, ride or job with them.</Text>
+        <Text style={styles.rateLabel}>{t("rate.notYet")}</Text>
       )}
       {canRate && (
       <View style={styles.starsRow}>
-        <Text style={styles.rateLabel}>Rate this person:</Text>
+        <Text style={styles.rateLabel}>{t("rate.ratePerson")}</Text>
         {[1, 2, 3, 4, 5].map((star) => (
           <TouchableOpacity key={star} onPress={() => handleRate(star)}>
             <Text style={styles.star}>★</Text>
@@ -85,7 +88,7 @@ export default function RateAndReport({ subjectUserId }: { subjectUserId: string
       </View>
       )}
       <TouchableOpacity onPress={() => setMode("reporting")}>
-        <Text style={styles.reportLink}>Report</Text>
+        <Text style={styles.reportLink}>{t("rate.report")}</Text>
       </TouchableOpacity>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>

@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import ListerRoleBadge from "@/components/ListerRoleBadge";
 import ListerRatingChip from "@/components/ListerRatingChip";
-import WhatsAppShareButton from "@/components/WhatsAppShareButton";
+import ShareButton from "@/components/ShareButton";
 import { IconMapPin } from "./Icons";
 
 interface AssetCardProps {
@@ -19,6 +19,8 @@ interface AssetCardProps {
   /** Shown on the photo, bottom-left. Omit when the asset has no price. */
   price?: string;
   priceUnit?: string;
+  /** Shown before the price, e.g. "From" when it is the cheapest of several room types. */
+  pricePrefix?: string;
   typeLabel: string;
   location: string;
   mapsHref?: string;
@@ -44,6 +46,7 @@ export default function AssetCard({
   share,
   price,
   priceUnit,
+  pricePrefix,
   typeLabel,
   location,
   mapsHref,
@@ -62,12 +65,13 @@ export default function AssetCard({
         )}
 
         <ListerRoleBadge role={listerRole} variant="overlay" />
-        <WhatsAppShareButton variant="overlay" {...share} />
+        <ShareButton variant="overlay" {...share} />
         {statusBadge && <div className="absolute top-12 left-2">{statusBadge}</div>}
 
         {price && (
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 pt-8 pb-2">
             <p className="text-white text-xl font-bold drop-shadow">
+              {pricePrefix && <span className="text-sm font-medium">{pricePrefix} </span>}
               {price} <span className="text-sm font-medium">XAF{priceUnit ? ` ${priceUnit}` : ""}</span>
             </p>
           </div>

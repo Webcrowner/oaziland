@@ -1,11 +1,11 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import Badge from "@/components/ui/Badge";
-import { IconCar, IconMapPin, IconChevronRight } from "@/components/Icons";
+import { IconCar, IconMapPin, IconChevronRight, IconClock, IconCompass, IconShieldCheck, IconShoppingBag } from "@/components/Icons";
 import { useOaziGo } from "@/components/oazigo/OaziGoProvider";
 import HowItWorks from "@/components/oazigo/HowItWorks";
-import { ACTIVE_RIDE_STATUSES, RIDE_CATEGORIES, STATUS_VARIANT, cardCls } from "@/components/oazigo/styles";
+import { RideStatusBadge, TripProgress } from "@/components/oazigo/RideStatus";
+import { ACTIVE_RIDE_STATUSES, RIDE_CATEGORIES, cardCls } from "@/components/oazigo/styles";
 
 /**
  * OaziGo hub — Oaziland's own-branded ride and transport service.
@@ -14,13 +14,13 @@ import { ACTIVE_RIDE_STATUSES, RIDE_CATEGORIES, STATUS_VARIANT, cardCls } from "
  */
 export default function OaziGoPage() {
   const t = useTranslations("OaziGoPage");
-  const { status, myRides: rides, driverProfile, vehicles } = useOaziGo();
+  const { status, myRides: rides, driverProfile, vehicles, myUserId } = useOaziGo();
 
   const activeRides = rides.filter((r) => ACTIVE_RIDE_STATUSES.includes(r.status));
   const latest = activeRides[0];
 
   const driveState = status === "loading"
-    ? t("loadingTrips")
+    ? t("loading")
     : !driverProfile
     ? t("driveCardNotRegistered")
     : !driverProfile.is_verified
@@ -28,17 +28,17 @@ export default function OaziGoPage() {
       : t("driveCardVerified", { count: vehicles.length });
 
   const cards = [
-    { href: "/oazigo/request", icon: "🚕", title: t("navRequest"), desc: t("requestCardDesc") },
+    { href: "/oazigo/request", icon: IconMapPin, title: t("navRequest"), desc: t("requestCardDesc") },
     {
-      href: "/oazigo/trips", icon: "🧾", title: t("navTrips"),
-      desc: status === "loading" ? t("loadingTrips") : t("tripsCardDesc", { count: activeRides.length }),
+      href: "/oazigo/trips", icon: IconClock, title: t("navTrips"),
+      desc: status === "loading" ? t("loading") : t("tripsCardDesc", { count: activeRides.length }),
     },
-    { href: "/oazigo/drive", icon: "🚗", title: t("navDrive"), desc: driveState },
+    { href: "/oazigo/drive", icon: IconCar, title: t("navDrive"), desc: driveState },
     ...(driverProfile?.is_verified
-      ? [{ href: "/oazigo/requests", icon: "📡", title: t("navRequests"), desc: driverProfile.is_online ? t("onlineHint") : t("offlineHint") }]
+      ? [{ href: "/oazigo/requests", icon: IconCompass, title: t("navRequests"), desc: driverProfile.is_online ? t("onlineHint") : t("offlineHint") }]
       : []),
-    { href: "/oazigo/cars", icon: "🚙", title: t("navCars"), desc: t("carsCardDesc") },
-    { href: "/oazigo/safety", icon: "🆘", title: t("navSafety"), desc: t("safetyCardDesc") },
+    { href: "/oazigo/safety", icon: IconShieldCheck, title: t("navSafety"), desc: t("safetyCardDesc") },
+    { href: "/oazigo/cars", icon: IconShoppingBag, title: t("navCars"), desc: t("carsCardDesc") },
   ];
 
   return (
@@ -76,16 +76,25 @@ export default function OaziGoPage() {
                 <IconChevronRight size={14} className="shrink-0 text-slate-400" />
                 <span>{latest.dropoff_description}</span>
               </p>
+              {latest.driver && latest.driver_name && (
+                <p className="mt-1 text-xs text-slate-500">
+                  {latest.rider === myUserId ? t("yourDriver", { name: latest.driver_name }) : t("yourRider", { name: latest.rider_name })}
+                  {latest.vehicle_details && ` · ${latest.vehicle_details.make} ${latest.vehicle_details.model} · ${latest.vehicle_details.plate_number}`}
+                </p>
+              )}
             </div>
-            <Badge variant={STATUS_VARIANT[latest.status] || "neutral"}>{latest.status.replace("_", " ")}</Badge>
+            <RideStatusBadge status={latest.status} />
           </div>
+          <TripProgress status={latest.status} />
         </Link>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {cards.map((c) => (
           <Link key={c.href} href={c.href} className={`${cardCls} group flex items-start gap-4 transition-shadow hover:shadow-md`}>
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-xl">{c.icon}</span>
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+              <c.icon size={20} />
+            </span>
             <span className="min-w-0 flex-1">
               <span className="block text-base font-black tracking-tight text-slate-900">{c.title}</span>
               <span className="mt-0.5 block text-sm text-slate-500">{c.desc}</span>

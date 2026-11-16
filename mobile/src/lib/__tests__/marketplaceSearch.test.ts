@@ -18,11 +18,11 @@ describe("searchMarketplace", () => {
       return { count: 1, results: [listing(category)] };
     };
     const outcome = await searchMarketplace("depot", list);
-    expect(calls.map(([category]) => category)).toEqual(["warehouses", "stores", "businesses", "cars"]);
+    expect(calls.map(([category]) => category)).toEqual(["warehouses", "stores", "businesses", "cars", "goods"]);
     expect(calls.every(([, filters]) => filters.q === "depot" && filters.ordering === "newest")).toBe(true);
     expect(outcome).toMatchObject({ partial: false, failed: false });
     expect(outcome.results.map((r) => [r.category, r.id])).toEqual([
-      ["warehouses", "warehouses"], ["stores", "stores"], ["businesses", "businesses"], ["cars", "cars"],
+      ["warehouses", "warehouses"], ["stores", "stores"], ["businesses", "businesses"], ["cars", "cars"], ["goods", "goods"],
     ]);
   });
 
@@ -34,7 +34,7 @@ describe("searchMarketplace", () => {
     const outcome = await searchMarketplace("shop", list);
     expect(outcome.partial).toBe(true);
     expect(outcome.failed).toBe(false);
-    expect(outcome.results.map((r) => r.category)).toEqual(["warehouses", "businesses", "cars"]);
+    expect(outcome.results.map((r) => r.category)).toEqual(["warehouses", "businesses", "cars", "goods"]);
   });
 
   it("reports a failure only when every category fails", async () => {

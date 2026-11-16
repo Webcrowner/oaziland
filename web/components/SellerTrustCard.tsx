@@ -11,6 +11,7 @@ import RateAndReport from "@/components/RateAndReport";
  * since, items sold, other listings and how quickly they usually reply. */
 export default function SellerTrustCard({ sellerId, listerRole, isSale }: { sellerId: string; listerRole?: string; isSale?: boolean }) {
   const t = useTranslations("SellerCard");
+  const tShop = useTranslations("ShopStorefront");
   const format = useFormatter();
   const [seller, setSeller] = useState<MarketplaceSellerSummary | null>(null);
 
@@ -24,9 +25,10 @@ export default function SellerTrustCard({ sellerId, listerRole, isSale }: { sell
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">
       <ListerRoleBadge role={listerRole} isSale={isSale} />
-      <div className="mt-1 flex items-center gap-2">
-        <Link href={`/user/${sellerId}`} className="font-semibold text-[var(--navy)] hover:text-[var(--gold)]">{seller?.name ?? t("seller")}</Link>
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Link href={`/marketplace/shop/${sellerId}`} className="inline-flex min-h-8 items-center font-semibold text-[var(--navy)] hover:text-[var(--gold)]">{seller?.name ?? t("seller")}</Link>
         {seller?.id_verified && <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800">✓ {t("idVerified")}</span>}
+        <Link href={`/user/${sellerId}`} className="text-xs text-slate-500 underline">{tShop("profileLink")}</Link>
       </div>
       {seller && (
         <ul className="mt-2 flex flex-col gap-1 text-slate-600">
@@ -36,7 +38,7 @@ export default function SellerTrustCard({ sellerId, listerRole, isSale }: { sell
               : t("noRatings")}
           </li>
           <li>{t("memberSince", { date: format.dateTime(new Date(`${seller.member_since}T12:00:00`), { month: "long", year: "numeric" }) })}</li>
-          <li>{t("itemsSold", { count: seller.items_sold })} · <Link href={`/user/${sellerId}`} className="underline">{t("activeListings", { count: seller.active_listings })}</Link></li>
+          <li>{t("itemsSold", { count: seller.items_sold })} · <Link href={`/marketplace/shop/${sellerId}`} className="underline">{t("activeListings", { count: seller.active_listings })}</Link></li>
           {seller.reply_time_hours != null && seller.reply_rate_pct != null && (
             <li>⏱ {replyText(seller.reply_time_hours)} · {t("replyRate", { pct: seller.reply_rate_pct })}</li>
           )}

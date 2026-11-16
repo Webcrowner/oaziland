@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 import { useState, useEffect } from "react";
 import { Link } from "@/i18n/navigation";
 import { listMyRoomAllocations, listMyBookings, type MyRoomAllocationItem, type BookingItem } from "@/lib/api";
@@ -16,6 +17,7 @@ import {
 import Button from "@/components/ui/Button";
 
 export default function StudentDashboardPage() {
+  const tSignIn = useTranslations("SignInPrompt");
   const [allocations, setAllocations] = useState<MyRoomAllocationItem[]>([]);
   const [bookings, setBookings] = useState<BookingItem[]>([]);
   const [status, setStatus] = useState<"loading" | "signedOut" | "ready">("loading");
@@ -49,8 +51,8 @@ export default function StudentDashboardPage() {
         subtitle="Manage your university accommodation, room allocations, and verified hostel stays."
       >
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
-          <p className="text-slate-600 mb-4 font-semibold text-sm">Please sign in to view your Student Housing Dashboard.</p>
-          <Button href="/login">Sign In</Button>
+          <p className="text-slate-600 mb-4 font-semibold text-sm">{tSignIn("studentDashboard")}</p>
+          <Button href="/login">{tSignIn("button")}</Button>
         </div>
       </DashboardLayout>
     );

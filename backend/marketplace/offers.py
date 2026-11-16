@@ -71,6 +71,15 @@ def make_offer(*, listing, buyer, amount_xaf: Decimal, message: str = ""):
         raise OfferError("This listing isn't available any more.")
     if not listing.allow_offers:
         raise OfferError("The seller isn't taking offers on this listing.")
+    if listing.on_sale():
+        raise OfferError("This item is on a flash sale: buy it at the sale price.")
+    if hasattr(listing, "has_variants") and listing.has_variants():
+        raise OfferError("Offers aren't available on items with options (size, colour...): buy the version you want.")
+    from .shops import ensure_not_on_vacation, ShopOnVacationError
+    try:
+        ensure_not_on_vacation(listing.lister_user_id)
+    except ShopOnVacationError as e:
+        raise OfferError(str(e))
     if amount_xaf >= listing.price_xaf:
         raise OfferError("Your offer is at or above the asking price: just buy or book it at that price.")
     if amount_xaf < (listing.price_xaf * MIN_OFFER_SHARE).quantize(Decimal("1")):
@@ -95,12 +104,29 @@ def _require(offer, user, side: str):
         raise PermissionError("Only the buyer who made the offer can do this.")
 
 
-def _accept(offer, now):
+_STATE_FIELDS = ("status", "counter_amount_xaf", "responded_at", "accepted_at", "pay_by")
+
+
+def _sync_locked(offer, locked=None):
+    """Reloads the offer's state from a row locked FOR UPDATE (call inside a transaction), so a status check made
+    after this can't be overtaken by a concurrent request changing the same offer."""
+    from .models import MarketplaceOffer
+    if locked is None:
+        locked = MarketplaceOffer.objects.select_for_update().get(pk=offer.pk)
+    for field in _STATE_FIELDS:
+        setattr(offer, field, getattr(locked, field))
+    return offer
+
+
+def _accept(offer, now, expected_status: str, error: str):
     from django.db import transaction as db_transaction
     from .models import MarketplaceOffer, OfferStatus
     with db_transaction.atomic():
         # Locking the listing's offers stops two offers being accepted at the same moment.
-        list(MarketplaceOffer.objects.select_for_update().filter(listing_id=offer.listing_id))
+        locked = {o.pk: o for o in MarketplaceOffer.objects.select_for_update().filter(listing_id=offer.listing_id).order_by("pk")}
+        _sync_locked(offer, locked[offer.pk])
+        if offer.status != expected_status:
+            raise OfferError(error)
         other = reserving_offer(offer.listing, now=now)
         if other is not None and other.pk != offer.pk:
             raise OfferError(f"Another offer is already accepted on this item until {other.pay_by:%d %b %H:%M}.")
@@ -114,9 +140,7 @@ def _accept(offer, now):
 def accept_offer(*, offer, seller):
     from django.utils import timezone
     _require(offer, seller, "seller")
-    if offer.status != "PENDING":
-        raise OfferError("Only an offer waiting for your answer can be accepted.")
-    _accept(offer, timezone.now())
+    _accept(offer, timezone.now(), "PENDING", "Only an offer waiting for your answer can be accepted.")
     _notify(
         offer.buyer, "Your offer was accepted",
         f"The seller accepted {_xaf(offer.agreed_amount_xaf)} for \"{offer.listing.title}\". Pay within {PAY_WINDOW_HOURS} hours "
@@ -127,14 +151,17 @@ def accept_offer(*, offer, seller):
 
 
 def counter_offer(*, offer, seller, amount_xaf: Decimal):
+    from django.db import transaction as db_transaction
     from django.utils import timezone
     _require(offer, seller, "seller")
-    if offer.status != "PENDING":
-        raise OfferError("You can only counter an offer that's waiting for your answer.")
     if not offer.amount_xaf < amount_xaf < offer.listing.price_xaf:
         raise OfferError(f"A counter-offer must be between the buyer's {_xaf(offer.amount_xaf)} and your asking {_xaf(offer.listing.price_xaf)}.")
-    offer.status, offer.counter_amount_xaf, offer.responded_at = "COUNTERED", amount_xaf, timezone.now()
-    offer.save(update_fields=["status", "counter_amount_xaf", "responded_at"])
+    with db_transaction.atomic():
+        _sync_locked(offer)
+        if offer.status != "PENDING":
+            raise OfferError("You can only counter an offer that's waiting for your answer.")
+        offer.status, offer.counter_amount_xaf, offer.responded_at = "COUNTERED", amount_xaf, timezone.now()
+        offer.save(update_fields=["status", "counter_amount_xaf", "responded_at"])
     _notify(
         offer.buyer, "The seller made a counter-offer",
         f"The seller of \"{offer.listing.title}\" would accept {_xaf(amount_xaf)} (you offered {_xaf(offer.amount_xaf)}). "
@@ -147,9 +174,7 @@ def counter_offer(*, offer, seller, amount_xaf: Decimal):
 def accept_counter(*, offer, buyer):
     from django.utils import timezone
     _require(offer, buyer, "buyer")
-    if offer.status != "COUNTERED":
-        raise OfferError("There is no counter-offer to accept.")
-    _accept(offer, timezone.now())
+    _accept(offer, timezone.now(), "COUNTERED", "There is no counter-offer to accept.")
     _notify(
         offer.listing.lister_user, "Your counter-offer was accepted",
         f"The buyer accepted {_xaf(offer.agreed_amount_xaf)} for \"{offer.listing.title}\" and has {PAY_WINDOW_HOURS} hours to pay.",
@@ -159,12 +184,15 @@ def accept_counter(*, offer, buyer):
 
 
 def decline_offer(*, offer, seller):
+    from django.db import transaction as db_transaction
     from django.utils import timezone
     _require(offer, seller, "seller")
-    if offer.status not in ("PENDING", "COUNTERED"):
-        raise OfferError("This offer can no longer be declined.")
-    offer.status, offer.responded_at = "DECLINED", timezone.now()
-    offer.save(update_fields=["status", "responded_at"])
+    with db_transaction.atomic():
+        _sync_locked(offer)
+        if offer.status not in ("PENDING", "COUNTERED"):
+            raise OfferError("This offer can no longer be declined.")
+        offer.status, offer.responded_at = "DECLINED", timezone.now()
+        offer.save(update_fields=["status", "responded_at"])
     _notify(offer.buyer, "Your offer was declined", f"The seller declined your offer of {_xaf(offer.amount_xaf)} for \"{offer.listing.title}\".", offer)
     return offer
 
@@ -176,12 +204,15 @@ def _has_live_order(offer) -> bool:
 
 def withdraw_offer(*, offer, buyer):
     """The buyer takes back an offer (or turns down a counter-offer, or gives up an accepted price before paying)."""
+    from django.db import transaction as db_transaction
     from django.utils import timezone
     _require(offer, buyer, "buyer")
-    if offer.status not in OPEN_STATUSES or (offer.status == "ACCEPTED" and _has_live_order(offer)):
-        raise OfferError("This offer can no longer be withdrawn.")
-    offer.status, offer.responded_at = "WITHDRAWN", timezone.now()
-    offer.save(update_fields=["status", "responded_at"])
+    with db_transaction.atomic():
+        _sync_locked(offer)
+        if offer.status not in OPEN_STATUSES or (offer.status == "ACCEPTED" and _has_live_order(offer)):
+            raise OfferError("This offer can no longer be withdrawn.")
+        offer.status, offer.responded_at = "WITHDRAWN", timezone.now()
+        offer.save(update_fields=["status", "responded_at"])
     _notify(offer.listing.lister_user, "An offer was withdrawn", f"The buyer withdrew their offer on \"{offer.listing.title}\".", offer)
     return offer
 
@@ -218,8 +249,10 @@ def expire_offers(now=None) -> list:
             continue
         if offer.status == OfferStatus.ACCEPTED and _has_live_order(offer):
             continue
+        # Conditional update: skip the offer if a buyer/seller changed it since this sweep read it.
+        if not MarketplaceOffer.objects.filter(pk=offer.pk, status=offer.status).update(status=OfferStatus.EXPIRED):
+            continue
         offer.status = OfferStatus.EXPIRED
-        offer.save(update_fields=["status"])
         _notify(offer.buyer, "Your offer expired", f"Your offer on \"{offer.listing.title}\" expired without a deal.", offer)
         expired.append(offer)
     return expired

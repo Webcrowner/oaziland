@@ -191,7 +191,23 @@ class PostSerializer(serializers.ModelSerializer):
             from .services import has_video_url
             if not has_video_url(attrs.get("media_urls") or []):
                 raise serializers.ValidationError({"media_urls": "A video post needs a video file."})
+        if self.instance is None:
+            self._check_media_and_listing(attrs)
         return attrs
+
+    def _check_media_and_listing(self, attrs):
+        """Files must come from Oaziland's own uploads (which enforce the size and type limits and are what
+        moderation looks at), and a post can only be tied to a property its author listed: a property link
+        puts the post in the top ranking tier."""
+        from uploads.services import is_platform_media_url
+        if any(not is_platform_media_url(url) for url in attrs.get("media_urls") or []):
+            raise serializers.ValidationError({"media_urls": "Upload your photos and videos through Oaziland."})
+        listing_id = attrs.get("linked_listing_id")
+        if listing_id:
+            from property.models import Listing
+            request = self.context.get("request")
+            if not (request and Listing.objects.filter(pk=listing_id, listed_by=request.user).exists()):
+                raise serializers.ValidationError({"linked_listing_id": "You can only link a video to a property you have listed."})
 
     def get_author_name(self, post) -> str:
         return _display_name(post.author)

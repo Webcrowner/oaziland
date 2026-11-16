@@ -47,6 +47,8 @@ def _is_weekend_night(night_date: date) -> bool:
 
 
 def _seasonal_multiplier(hotel, night_date: date) -> Decimal:
+    if hotel is None:
+        return Decimal("1.00")
     for season in hotel.seasonal_rates.all():
         start = (season.start_month, season.start_day)
         end = (season.end_month, season.end_day)
@@ -63,6 +65,8 @@ def _seasonal_multiplier(hotel, night_date: date) -> Decimal:
 
 
 def _has_event_premium(hotel, night_date: date) -> bool:
+    if hotel is None:
+        return False
     for period in hotel.event_premium_periods.all():
         if abs((period.event_date - night_date).days) <= 7:
             return True
@@ -91,6 +95,8 @@ def compute_dynamic_rate(*, room_type, check_in: date, check_out: date, occupanc
     charged what they're being charged."""
     from django.utils import timezone
 
+    # Seasons, event premiums and the last-minute rate are hotel settings; a guest house room type gets the
+    # weekend premium and long-stay discounts only.
     hotel = room_type.hotel
     num_nights = (check_out - check_in).days
     if num_nights <= 0:
@@ -119,8 +125,8 @@ def compute_dynamic_rate(*, room_type, check_in: date, check_out: date, occupanc
     subtotal = sum(n["rate_xaf"] for n in nightly_breakdown)
 
     booking_made_at = booking_made_at or timezone.now()
-    is_last_minute = (check_in - booking_made_at.date()).days * 24 <= LAST_MINUTE_WINDOW_HOURS
-    if is_last_minute:
+    is_last_minute = hotel is not None and (check_in - booking_made_at.date()).days * 24 <= LAST_MINUTE_WINDOW_HOURS
+    if is_last_minute and hotel is not None:
         subtotal = (subtotal * hotel.last_minute_multiplier).quantize(Decimal("1"))
 
     stay_discount_rate = _length_of_stay_discount(num_nights)
@@ -153,14 +159,22 @@ def create_reservation(*, hotel, guest, room_type, check_in: date, check_out: da
     """Locks in the total rate from compute_dynamic_rate() at booking
     time — see Reservation.rate_xaf's own docstring for why. Starts in
     PENDING_PAYMENT — see confirm_reservation_payment() for the real
-    payment step that actually confirms it."""
-    from .models import Reservation
+    payment step that actually confirms it. The room type row is locked
+    while its rooms are counted, so two guests can't both take the last
+    free room for the same night (raises RoomTypeUnavailableError)."""
+    from django.db import transaction
+    from .models import Reservation, RoomType
+    from .room_types import ensure_free
 
-    pricing = compute_dynamic_rate(room_type=room_type, check_in=check_in, check_out=check_out, occupancy_rate=occupancy_rate)
-    return Reservation.objects.create(
-        hotel=hotel, guest=guest, room_type=room_type, check_in=check_in, check_out=check_out,
-        adults=adults, children=children, rate_xaf=pricing["total_xaf"], source=source, special_requests=special_requests,
-    )
+    with transaction.atomic():
+        room_type = RoomType.objects.select_for_update().select_related("hotel").get(pk=room_type.pk)
+        ensure_free(room_type, check_in, check_out)
+        pricing = compute_dynamic_rate(room_type=room_type, check_in=check_in, check_out=check_out, occupancy_rate=occupancy_rate)
+        return Reservation.objects.create(
+            hotel=room_type.hotel, guest_house=room_type.guest_house, guest=guest, room_type=room_type,
+            check_in=check_in, check_out=check_out,
+            adults=adults, children=children, rate_xaf=pricing["total_xaf"], source=source, special_requests=special_requests,
+        )
 
 
 def confirm_reservation_payment(*, reservation, lock_client, payment_gateway, phone_number: str):
@@ -171,24 +185,101 @@ def confirm_reservation_payment(*, reservation, lock_client, payment_gateway, ph
     reachable at all — a guest's reservation went straight to
     CONFIRMED with no Booking, no escrow, no money ever changing
     hands."""
-    from transactions.services import reserve_booking, initiate_booking_payment, confirm_payment
+    from transactions.services import (
+        reserve_booking, initiate_booking_payment, fail_payment, confirm_sandbox_payment, InventoryConflictError,
+    )
     from transactions.models import BookingType
-    from .models import ReservationStatus
+    from payments.gateways import confirms_instantly
+    from django.db import transaction
+    from django.utils import timezone
+    from .models import ReservationStatus, RoomType
+    from .room_types import RoomTypeError, RoomTypeUnavailableError, ensure_free
 
-    booking = reserve_booking(
-        lock_client=lock_client, requester=reservation.guest, booking_type=BookingType.HOTEL,
-        target_content_type="hotels.Reservation", target_id=reservation.id, amount_xaf=reservation.rate_xaf,
-    )
-    initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
-    escrow = confirm_payment(
-        lock_client=lock_client, booking=booking, provider="MTN_MOMO", provider_reference=booking.idempotency_key,
-        payment_gateway=payment_gateway, raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
-    )
-
+    if reservation.status != ReservationStatus.PENDING_PAYMENT:
+        raise RoomTypeError("This reservation is not awaiting payment.")
+    # Starting a payment (re)starts the room's hold, and a hold that had lapsed means the room may have been sold to
+    # someone else meanwhile, so it is checked again first.
+    with transaction.atomic():
+        room_type = RoomType.objects.select_for_update().get(pk=reservation.room_type_id)
+        ensure_free(room_type, reservation.check_in, reservation.check_out, exclude_id=reservation.pk)
+        type(reservation).objects.filter(pk=reservation.pk).update(created_at=timezone.now())
+    try:
+        booking = reserve_booking(
+            lock_client=lock_client, requester=reservation.guest, booking_type=BookingType.HOTEL,
+            target_content_type="hotels.Reservation", target_id=reservation.id, amount_xaf=reservation.rate_xaf,
+        )
+    except InventoryConflictError:
+        raise RoomTypeUnavailableError("A payment for this reservation is already in progress. Approve it on your phone.")
+    # Linked before the money moves, so the payment webhook can find the reservation it confirms.
     reservation.booking = booking
-    reservation.status = ReservationStatus.CONFIRMED
-    reservation.save(update_fields=["booking", "status"])
+    reservation.save(update_fields=["booking"])
+    debit = initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
+    if not debit.success:
+        fail_payment(lock_client=lock_client, booking=booking)
+        raise RoomTypeError("The payment could not be started. Check the phone number and try again.")
+    if not confirms_instantly(payment_gateway):
+        # A real payment is confirmed later, by the provider's webhook, once the guest approves it on their phone
+        # (see confirm_reservation_after_payment); until then the reservation stays pending.
+        return reservation, None
+    escrow = confirm_sandbox_payment(lock_client=lock_client, booking=booking, payment_gateway=payment_gateway)
+    confirm_reservation_after_payment(booking)
+    reservation.refresh_from_db()
     return reservation, escrow
+
+
+def confirm_reservation_after_payment(booking):
+    """Runs once the payment for a reservation is confirmed (by the provider's webhook, or at once for the sandbox).
+    The reservation becomes CONFIRMED. If its hold had lapsed and the room was sold to someone else meanwhile, the
+    guest is refunded in full instead of being given a room that isn't there. Safe to run twice."""
+    from django.db import transaction
+    from django.utils import timezone
+    from notifications.services import notify_important
+    from .models import Reservation, ReservationStatus, RoomType
+    from .room_types import PAYMENT_HOLD_MINUTES, RoomTypeUnavailableError, ensure_free
+
+    refunded = False
+    with transaction.atomic():
+        reservation = Reservation.objects.select_for_update().select_related("guest").filter(booking=booking).first()
+        if reservation is not None and reservation.status == ReservationStatus.CANCELLED:
+            # Cancelled while the payment was on its way: nothing to confirm, so the money goes straight back.
+            from .stays import held_escrow
+            from transactions.services import settle_escrow
+            escrow = held_escrow(reservation)
+            if escrow is not None:
+                settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"cancelled reservation #{reservation.pk}")
+            return reservation
+        if reservation is None or reservation.status != ReservationStatus.PENDING_PAYMENT:
+            return reservation
+        if reservation.created_at < timezone.now() - timedelta(minutes=PAYMENT_HOLD_MINUTES):
+            room_type = RoomType.objects.select_for_update().get(pk=reservation.room_type_id)
+            try:
+                ensure_free(room_type, reservation.check_in, reservation.check_out, exclude_id=reservation.pk)
+            except RoomTypeUnavailableError:
+                refunded = True
+        if refunded:
+            from transactions.services import settle_escrow
+            settle_escrow(escrow=booking.escrow, payer_amount_xaf=booking.escrow.gross_amount_xaf, reference=f"reservation #{reservation.pk}")
+            reservation.status = ReservationStatus.CANCELLED
+        else:
+            reservation.status = ReservationStatus.CONFIRMED
+        reservation.save(update_fields=["status"])
+    place = reservation.place
+    name = place.name or "your stay"
+    stay = f"{reservation.check_in} to {reservation.check_out}"
+    if refunded:
+        notify_important(
+            recipient=reservation.guest, notification_type="HOTEL_RESERVATION", title="Reservation refunded",
+            message=f"Your payment for {name} arrived after the room was released and it is no longer free for {stay}, so it was returned in full to your Oaziland wallet.",
+            related_reference=str(reservation.pk),
+        )
+        return reservation
+    # The guest already got "Booking Confirmed" from the payment step itself; the owner hears about the stay here.
+    notify_important(
+        recipient=place.owner, notification_type="HOTEL_RESERVATION", title="New reservation",
+        message=f"{reservation.guest.full_name or reservation.guest.username} booked {name} ({stay}) and paid into escrow.",
+        related_reference=str(reservation.pk),
+    )
+    return reservation
 
 
 class ReservationNotPaidError(Exception):
@@ -208,10 +299,10 @@ def check_in_guest(*, reservation, assigned_by):
 
     if reservation.status == ReservationStatus.PENDING_PAYMENT:
         raise ReservationNotPaidError("This reservation has not been paid for yet.")
+    if reservation.status != ReservationStatus.CONFIRMED:
+        raise ReservationNotPaidError(f"This reservation is {reservation.get_status_display().lower()}, so the guest can't be checked in.")
 
-    available_room = Room.objects.filter(
-        hotel=reservation.hotel, room_type=reservation.room_type, status=RoomStatus.INSPECTED,
-    ).first()
+    available_room = Room.objects.filter(room_type=reservation.room_type, status=RoomStatus.INSPECTED).first()
     if available_room is None:
         raise NoAvailableRoomError("No inspected, available room of this type right now.")
 
@@ -264,10 +355,17 @@ def checkout_guest(reservation):
     actually gets paid — the real gap this closes: checkout previously
     never touched Booking/PaymentEscrow at all, so a stay could complete
     with the guest's payment held in escrow forever."""
+    from django.core.exceptions import ObjectDoesNotExist
     from django.utils import timezone
     from .models import ReservationStatus, RoomStatus, FolioStatus
+    from .stays import StayError, release_stay_payment
 
-    folio = reservation.folio
+    try:
+        folio = reservation.folio
+    except ObjectDoesNotExist:
+        raise StayError("Check the guest in before checking them out.")
+    if reservation.status != ReservationStatus.CHECKED_IN:
+        raise StayError("Only a guest who is checked in can be checked out.")
     folio.status = FolioStatus.CLOSED
     folio.closed_at = timezone.now()
     folio.save(update_fields=["status", "closed_at"])
@@ -279,9 +377,8 @@ def checkout_guest(reservation):
     room.status = RoomStatus.DIRTY
     room.save(update_fields=["status"])
 
-    if reservation.booking_id and hasattr(reservation.booking, "escrow"):
-        from transactions.services import complete_booking
-        complete_booking(booking=reservation.booking)
+    # Pays the owner once. A payment frozen by a dispute, or already paid out, is left alone.
+    release_stay_payment(reservation)
 
     return folio.balance_xaf
 

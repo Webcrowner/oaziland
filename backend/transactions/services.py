@@ -135,6 +135,63 @@ def initiate_booking_payment(*, booking: Booking, payment_gateway, phone_number:
     )
 
 
+def check_payment_webhook(*, booking: Booking, payment_gateway, raw_payload: bytes, signature_header: str):
+    """Verifies a payment webhook with the gateway and checks it is about this booking and its exact amount.
+    Raises WebhookSignatureError if it isn't genuine; otherwise returns the gateway's verification, whose
+    payment_succeeded says whether the money actually arrived."""
+    verification = payment_gateway.verify_webhook(raw_payload=raw_payload, signature_header=signature_header)
+    if not verification.is_valid_signature:
+        raise WebhookSignatureError("Payment webhook signature could not be verified — possible fraud attempt.")
+    if verification.external_id and verification.external_id != booking.idempotency_key:
+        raise WebhookSignatureError("Payment webhook does not match this booking.")
+    if verification.amount_xaf is not None and verification.amount_xaf != booking.amount_xaf:
+        raise WebhookSignatureError("Payment webhook amount does not match this booking.")
+    return verification
+
+
+def refund_unconfirmable_payment(
+    *, booking: Booking, payment_gateway, raw_payload: bytes, signature_header: str, provider: str, provider_reference: str = "",
+):
+    """The provider reports a payment that really arrived for a booking that can no longer be confirmed: its hold ran
+    out (a payer approving more than HOLD_TTL_SECONDS after starting), or it was cancelled, expired or failed meanwhile.
+    The money can't be left stranded and the booking can't be honoured, so the payment is recorded as an escrow and
+    returned in full to the payer's Oaziland wallet, where they can use or withdraw it.
+
+    Returns the settled escrow (the existing one if the same webhook is delivered twice, so nobody is refunded twice),
+    or None when the provider says the payment did not succeed. Raises WebhookSignatureError for a forged webhook."""
+    from notifications.services import notify
+
+    verification = check_payment_webhook(
+        booking=booking, payment_gateway=payment_gateway, raw_payload=raw_payload, signature_header=signature_header,
+    )
+    if not verification.payment_succeeded:
+        return None
+    reference = verification.provider_reference or provider_reference
+    if not reference:
+        raise WebhookSignatureError("Payment webhook has no provider reference.")
+    with db_transaction.atomic():
+        locked = Booking.objects.select_for_update().get(pk=booking.pk)
+        existing = PaymentEscrow.objects.filter(booking=locked).first()
+        if existing is not None:
+            return existing
+        escrow = PaymentEscrow.objects.create(
+            booking=locked, gross_amount_xaf=locked.amount_xaf, platform_fee_xaf=0, payee_amount_xaf=locked.amount_xaf,
+            status=EscrowStatus.HELD, provider=provider, provider_reference=reference,
+        )
+        settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"late payment, booking #{locked.id}")
+    escrow.refresh_from_db()
+    booking.refresh_from_db()
+    notify(
+        recipient=booking.requester, notification_type="PAYMENT_REFUNDED", title="Payment returned to your wallet",
+        message=(
+            f"Your payment of {booking.amount_xaf} XAF arrived after the booking could no longer be confirmed, so it was "
+            "returned in full to your Oaziland wallet. You can book again or withdraw it."
+        ),
+        related_reference=str(booking.id),
+    )
+    return escrow
+
+
 def confirm_payment(
     *,
     lock_client,
@@ -168,17 +225,10 @@ def confirm_payment(
     already trust their input don't break, but any real production
     webhook handler MUST pass these."""
     if payment_gateway is not None and raw_webhook_payload is not None:
-        verification = payment_gateway.verify_webhook(
-            raw_payload=raw_webhook_payload, signature_header=webhook_signature_header,
+        verification = check_payment_webhook(
+            booking=booking, payment_gateway=payment_gateway, raw_payload=raw_webhook_payload,
+            signature_header=webhook_signature_header,
         )
-        if not verification.is_valid_signature:
-            raise WebhookSignatureError(
-                "Payment webhook signature could not be verified — possible fraud attempt."
-            )
-        if verification.external_id and verification.external_id != booking.idempotency_key:
-            raise WebhookSignatureError("Payment webhook does not match this booking.")
-        if verification.amount_xaf is not None and verification.amount_xaf != booking.amount_xaf:
-            raise WebhookSignatureError("Payment webhook amount does not match this booking.")
         if not verification.payment_succeeded:
             fail_payment(lock_client=lock_client, booking=booking)
             raise ValueError("Payment did not succeed according to the gateway.")
@@ -247,6 +297,19 @@ def fail_payment(*, lock_client, booking: Booking):
     _release_booking_lock(lock_client, booking)
 
 
+def confirm_sandbox_payment(*, lock_client, booking: Booking, payment_gateway) -> PaymentEscrow:
+    """Development only: confirms a payment started with the sandbox gateway straight away, as its webhook would.
+    Refuses any real gateway, whose payments are confirmed only by its verified webhook (payment_webhook_view)."""
+    from payments.gateways import confirms_instantly
+
+    if not confirms_instantly(payment_gateway):
+        raise ValueError("Only the sandbox gateway confirms payments instantly; real payments wait for the webhook.")
+    return confirm_payment(
+        lock_client=lock_client, booking=booking, provider="MTN_MOMO", provider_reference=booking.idempotency_key,
+        payment_gateway=payment_gateway, raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
+    )
+
+
 def expire_hold(*, lock_client, booking: Booking):
     """Step 3a: TTL elapsed with no payment — same release, different
     origin. Intended to be called by a periodic sweep job querying
@@ -297,13 +360,16 @@ def resolve_target_owner(booking: Booking):
     target = resolve_target(booking)
     if target is None:
         return None
+    if hasattr(target, "venue_space"):
+        # A venue booking (EventBooking): the venue's owner is paid, not the organiser who made it.
+        return target.venue_space.venue.owner
     if hasattr(target, "lister_user"):
         return target.lister_user
     if hasattr(target, "technician"):
         return target.technician
     if hasattr(target, "driver"):
         return getattr(target.driver, "user", target.driver)
-    if hasattr(target, "hotel"):
+    if getattr(target, "hotel", None) is not None:
         return getattr(target.hotel, "owner", None)
     if hasattr(target, "venue"):
         return getattr(target.venue, "owner", None)

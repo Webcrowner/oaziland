@@ -16,6 +16,8 @@ interface OaziGoState {
   vehicles: VehicleItem[];
   myUserId: string | null;
   canDrive: boolean;
+  /** True when the trips list could not be fetched, so pages can tell "failed" apart from "no trips". */
+  loadFailed: boolean;
   reload: () => void;
 }
 
@@ -28,6 +30,7 @@ export function OaziGoProvider({ children }: { children: React.ReactNode }) {
   const [driverProfile, setDriverProfile] = useState<DriverProfileItem | null>(null);
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(() => {
     const token = localStorage.getItem("access_token");
@@ -46,8 +49,9 @@ export function OaziGoProvider({ children }: { children: React.ReactNode }) {
         setDriverProfile(driverData);
         setVehicles(vehiclesData.results);
         if (profileData) setMyUserId(profileData.id);
+        setLoadFailed(false);
       })
-      .catch(() => {})
+      .catch(() => setLoadFailed(true))
       .finally(() => setStatus("ready"));
   }, []);
 
@@ -60,9 +64,10 @@ export function OaziGoProvider({ children }: { children: React.ReactNode }) {
       status, rides, driverProfile, vehicles, myUserId,
       myRides: myUserId ? rides.filter((r) => r.rider === myUserId || r.driver === myUserId) : rides,
       canDrive: Boolean(driverProfile?.is_verified && vehicles.length > 0),
+      loadFailed,
       reload: load,
     }),
-    [status, rides, driverProfile, vehicles, myUserId, load],
+    [status, rides, driverProfile, vehicles, myUserId, loadFailed, load],
   );
 
   return <OaziGoContext.Provider value={value}>{children}</OaziGoContext.Provider>;

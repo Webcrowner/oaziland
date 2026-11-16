@@ -62,6 +62,14 @@ export function VolumeIcon({ size = 26, muted = false, ...props }: P & { muted?:
   );
 }
 
+export function MoreIcon({ size = 26, ...props }: P) {
+  return (
+    <svg {...base(size)} fill="currentColor" {...props}>
+      <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+    </svg>
+  );
+}
+
 export function PlayIcon({ size = 64, ...props }: P) {
   return (
     <svg {...base(size)} fill="currentColor" {...props}>

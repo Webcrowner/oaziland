@@ -1,19 +1,17 @@
 import { useState, useCallback } from "react";
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { CommonActions, useFocusEffect } from "@react-navigation/native";
 import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { listMyNotifications, markNotificationRead, markAllNotificationsRead, AppNotification } from "../lib/api";
+import { notificationRoute } from "../lib/notificationLinks";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Notifications">;
 
 /**
- * A real gap this closes: every notification (booking confirmed,
- * listing expiring, MFA code, etc.) gets sent via WhatsApp/SMS/email,
- * but there was no in-app way to see notification history at all —
- * on web OR mobile. Mirrors the real web page exactly: tap any
- * notification to mark it read, mark-all-read, real unread styling.
+ * Notification history: tap one to mark it read and, when it points at an order, offer, listing or ride, open it.
+ * Also has mark-all-read and real unread styling.
  */
 export default function NotificationsScreen({ navigation }: Props) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -41,13 +39,21 @@ export default function NotificationsScreen({ navigation }: Props) {
     }, [load])
   );
 
-  async function handleMarkRead(id: string) {
-    await markNotificationRead(id);
+  async function handleMarkAllRead() {
+    await markAllNotificationsRead();
     load();
   }
 
-  async function handleMarkAllRead() {
-    await markAllNotificationsRead();
+  // A tap marks the notification read and, when it points at something, opens it.
+  async function handlePress(item: AppNotification) {
+    const route = notificationRoute(item.target);
+    const marking = item.read_at ? Promise.resolve() : markNotificationRead(item.id).catch(() => {});
+    if (route) {
+      setNotifications((prev) => prev.map((n) => (n.id === item.id && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n)));
+      navigation.dispatch(CommonActions.navigate(route.name, route.params));
+      return;
+    }
+    await marking;
     load();
   }
 
@@ -82,16 +88,24 @@ export default function NotificationsScreen({ navigation }: Props) {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={<Text style={styles.empty}>You have no notifications yet.</Text>}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.card, !item.read_at && styles.cardUnread]}
-            onPress={() => handleMarkRead(item.id)}
-          >
-            <Text style={styles.title}>{item.title}</Text>
-            <Text style={styles.message}>{item.message}</Text>
-            <Text style={styles.date}>{new Date(item.created_at).toLocaleString()}</Text>
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const tappable = notificationRoute(item.target) !== null;
+          return (
+            <TouchableOpacity
+              style={[styles.card, !item.read_at && styles.cardUnread]}
+              onPress={() => handlePress(item)}
+              accessibilityRole="button"
+              accessibilityHint={tappable ? "Opens the related page" : undefined}
+            >
+              <View style={styles.cardText}>
+                <Text style={styles.title}>{item.title}</Text>
+                <Text style={styles.message}>{item.message}</Text>
+                <Text style={styles.date}>{new Date(item.created_at).toLocaleString()}</Text>
+              </View>
+              {tappable && <Text style={styles.chevron}>›</Text>}
+            </TouchableOpacity>
+          );
+        }}
       />
     </View>
   );
@@ -107,7 +121,9 @@ const styles = StyleSheet.create({
   markAllText: { color: "#1B2A4A", fontSize: 13, textDecorationLine: "underline" },
   list: { padding: 16 },
   empty: { textAlign: "center", color: "#6B7280", marginTop: 40 },
-  card: { backgroundColor: "#fff", borderRadius: 8, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: "#E5E7EB" },
+  card: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, backgroundColor: "#fff", borderRadius: 8, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: "#E5E7EB" },
+  cardText: { flex: 1 },
+  chevron: { fontSize: 26, color: "#9CA3AF", lineHeight: 28 },
   cardUnread: { backgroundColor: "#FBF3DC", borderColor: "#C9A227" },
   title: { fontSize: 14, fontWeight: "700", color: "#1B2A4A", marginBottom: 4 },
   message: { fontSize: 13, color: "#374151", marginBottom: 6 },

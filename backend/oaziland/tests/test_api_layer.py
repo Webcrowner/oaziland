@@ -47,7 +47,7 @@ def test_swagger_schema_is_actually_reachable():
 def test_registration_and_login_flow():
     client = APIClient()
     register_response = client.post("/api/auth/register/", {
-        "username": "api_new_user", "phone": "+237699998001", "password": "a-strong-password-123",
+        "username": "api_new_user", "phone": "+237699998001", "password": "a-strong-password-123", "accept_terms": True,
     })
     assert register_response.status_code == 201
     assert "password" not in register_response.data  # never echoed back
@@ -169,3 +169,23 @@ def test_anonymous_search_requests_are_rate_limited(settings, monkeypatch):
     assert first.status_code == 200
     assert second.status_code == 200
     assert third.status_code == 429  # correctly throttled on the 3rd request
+
+
+@pytest.mark.django_db
+def test_signed_out_browsing_has_its_own_budget_and_writes_stay_strict(settings, monkeypatch):
+    """Browsing (GET) must not run out after a few page views; anonymous writes keep the tight budget."""
+    from django.core.cache import cache
+    cache.clear()
+    monkeypatch.setitem(settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"], "anon", "2/hour")
+    monkeypatch.setitem(settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"], "anon_read", "5/hour")
+    client = APIClient()
+
+    assert [client.get("/api/quarters/").status_code for _ in range(5)] == [200] * 5
+    assert client.get("/api/quarters/").status_code == 429
+    # Writes draw on the strict "anon" budget, not on the browsing one.
+    from rest_framework.request import Request
+    from rest_framework.test import APIRequestFactory
+    from oaziland.throttling import AnonReadAwareRateThrottle
+    post = Request(APIRequestFactory().post("/api/anything/"))
+    allowed = [AnonReadAwareRateThrottle().allow_request(post, None) for _ in range(3)]
+    assert allowed == [True, True, False]

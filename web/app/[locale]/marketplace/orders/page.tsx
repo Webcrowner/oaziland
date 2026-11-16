@@ -1,11 +1,19 @@
 "use client";
 import ListingChatButton from "@/components/ListingChatButton";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { listMyMarketplaceOrders, marketplaceOrderAction, type MarketplaceOrderActionName, type MarketplaceOrderItem } from "@/lib/api";
+import { roleFromParam } from "@/lib/notificationLinks";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
 import RateAndReport from "@/components/RateAndReport";
+import OrderReviewForm from "@/components/OrderReviewForm";
+import OrderShipmentPanel from "@/components/OrderShipmentPanel";
+import OrderReceiptButton from "@/components/OrderReceiptButton";
+import OrderReturnPanel from "@/components/OrderReturnPanel";
+import ShipmentForm from "@/components/ShipmentForm";
+import { isReturnOpen } from "@/lib/marketplaceOrderFlow";
 import EmptyState from "@/components/ui/EmptyState";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -16,9 +24,21 @@ type ReasonAction = "dispute" | "claim-deposit";
 
 /** Marketplace purchases and sales held in escrow: hand over, confirm receipt, cancel, decline or report a problem. */
 export default function MarketplaceOrdersPage() {
+  return (
+    <Suspense fallback={null}>
+      <MarketplaceOrdersContent />
+    </Suspense>
+  );
+}
+
+function MarketplaceOrdersContent() {
   const t = useTranslations("MarketplaceOrdersPage");
   const format = useFormatter();
-  const [role, setRole] = useState<Role>("buying");
+  const params = useSearchParams();
+  // A notification links here with ?role=selling&order=<id>: open that tab and bring the order into view.
+  const focusId = params.get("order");
+  const [role, setRole] = useState<Role>(roleFromParam(params.get("role")) ?? "buying");
+  const scrolledTo = useRef<string | null>(null);
   const [orders, setOrders] = useState<MarketplaceOrderItem[]>([]);
   const [state, setState] = useState<"loading" | "signedOut" | "ready">("loading");
   const [error, setError] = useState("");
@@ -44,6 +64,14 @@ export default function MarketplaceOrdersPage() {
   const load = useCallback(async (which: Role) => apply(await fetchOrders(which)), [apply, fetchOrders]);
 
   useEffect(() => { fetchOrders(role).then(apply); }, [fetchOrders, apply, role]);
+
+  useEffect(() => {
+    if (state !== "ready" || !focusId || scrolledTo.current === focusId) return;
+    const el = document.getElementById(`order-${focusId}`);
+    if (!el) return;
+    scrolledTo.current = focusId;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [state, orders, focusId]);
 
   async function run(orderId: string, action: OrderAction, why?: string) {
     const token = localStorage.getItem("access_token");
@@ -71,7 +99,10 @@ export default function MarketplaceOrdersPage() {
     <AccountSidebarLayout activeHref="/marketplace/orders">
       <div className="flex items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-black tracking-tight text-slate-900">{t("title")}</h1>
-        <Link href="/marketplace" className="text-sm font-semibold text-[var(--navy)] underline">{t("browse")}</Link>
+        <div className="flex items-center gap-4">
+          <Link href="/marketplace/dashboard" className="text-sm font-semibold text-[var(--navy)] underline">{t("sellerDashboard")}</Link>
+          <Link href="/marketplace" className="text-sm font-semibold text-[var(--navy)] underline">{t("browse")}</Link>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-5">
@@ -97,7 +128,11 @@ export default function MarketplaceOrdersPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {orders.map((order) => (
-            <div key={order.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div
+              key={order.id}
+              id={`order-${order.id}`}
+              className={`rounded-2xl border bg-white p-4 scroll-mt-24 ${order.id === focusId ? "border-amber-400 ring-2 ring-amber-300" : "border-slate-200"}`}
+            >
               <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
                 <div className="min-w-0">
                   {order.category ? (
@@ -105,9 +140,13 @@ export default function MarketplaceOrdersPage() {
                   ) : (
                     <span className="font-semibold text-[var(--navy)]">{order.listing_title}</span>
                   )}
+                  {order.variant_label && <p className="text-sm text-slate-600">{order.variant_label}</p>}
                   <p className="text-sm text-slate-600">
-                    {Number(order.amount_xaf).toLocaleString()} XAF · {role === "buying" ? t("seller", { name: order.seller_name }) : t("buyer", { name: order.buyer_name })}
                   </p>
+                  {Number(order.discount_xaf ?? 0) > 0 && (
+                    <p className="text-sm text-green-700">{t("discountLine", { amount: Number(order.discount_xaf).toLocaleString(), code: order.coupon_code || "—" })}</p>
+                  )}
+                  {order.checkout && <p className="text-sm text-slate-500">{t("fromCart")}</p>}
                   {order.deposit_status !== "NONE" || Number(order.deposit_xaf) > 0 ? (
                     <p className="text-sm text-slate-600">{t("depositLine", { amount: Number(order.deposit_xaf).toLocaleString(), status: t(`deposit_${order.deposit_status}`) })}</p>
                   ) : null}
@@ -159,6 +198,8 @@ export default function MarketplaceOrdersPage() {
                 {order.deposit_status === "CLAIMED" && ` ${t("hintDepositClaimed")}`}
               </p>
 
+              <OrderShipmentPanel order={order} />
+
               {disputing?.id === order.id ? (
                 <div className="flex flex-col gap-2">
                   <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t(disputing.action === "dispute" ? "disputePlaceholder" : "claimPlaceholder")} className="border rounded-lg px-3 py-2 text-sm" />
@@ -168,14 +209,15 @@ export default function MarketplaceOrdersPage() {
                   </div>
                 </div>
               ) : (
+                <>
                 <div className="flex flex-wrap items-center gap-3">
                   {role === "selling" && order.status === "PAID" && (
                     <>
                       {order.approval_deadline ? (
                         <Button onClick={() => confirmThen(t("confirmApprove"), order.id, "approve")}>{t("approveRequest")}</Button>
-                      ) : (
+                      ) : !order.is_tracked ? (
                         <Button onClick={() => run(order.id, "hand-over")}>{t("handOver")}</Button>
-                      )}
+                      ) : null}
                       <button onClick={() => confirmThen(t("confirmDecline"), order.id, "decline")} className="text-sm font-semibold text-red-700 underline cursor-pointer">{t("decline")}</button>
                     </>
                   )}
@@ -186,7 +228,7 @@ export default function MarketplaceOrdersPage() {
                     </>
                   )}
                   {role === "buying" && order.status === "HANDED_OVER" && (
-                    <Button onClick={() => confirmThen(t("confirmReceipt"), order.id, "confirm")}>{t("confirmReceiptButton")}</Button>
+                    <Button onClick={() => confirmThen(isReturnOpen(order.return_request) ? t("confirmReceiptWithReturn") : t("confirmReceipt"), order.id, "confirm")}>{t("confirmReceiptButton")}</Button>
                   )}
                   {role === "buying" && order.status === "PAID" && (
                     <button onClick={() => confirmThen(
@@ -197,11 +239,19 @@ export default function MarketplaceOrdersPage() {
                   {(order.status === "PAID" || order.status === "HANDED_OVER") && (
                     <button onClick={() => { setDisputing({ id: order.id, action: "dispute" }); setReason(""); }} className="text-sm font-semibold text-[var(--navy)] underline cursor-pointer">{t("reportProblem")}</button>
                   )}
+                  <OrderReceiptButton order={order} role={role} />
                 </div>
+                {role === "selling" && order.is_tracked && !order.approval_deadline && (order.status === "PAID" || order.status === "HANDED_OVER") && order.shipment_status !== "DELIVERED" && (
+                  <div className="mt-3"><ShipmentForm key={`${order.id}-${order.shipment_status ?? ""}`} order={order} onSaved={() => load(role)} /></div>
+                )}
+                </>
               )}
 
+              <OrderReturnPanel order={order} role={role} onChanged={() => load(role)} />
+
               {order.status === "COMPLETED" && (
-                <div className="mt-3 pt-3 border-t border-slate-100">
+                <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-3">
+                  {role === "buying" && <OrderReviewForm order={order} onSaved={() => load(role)} />}
                   <RateAndReport subjectUserId={role === "buying" ? order.seller : order.buyer} />
                 </div>
               )}

@@ -121,3 +121,52 @@ def test_courses_without_lessons_are_not_reminded(db):
     enrollment = enroll_in_training(program=program, student=learner)
     TrainingEnrollment.objects.filter(pk=enrollment.pk).update(enrolled_at=timezone.now() - timedelta(days=10))
     assert send_course_reminders() == 0
+
+
+@pytest.mark.django_db
+def test_unreviewed_assignments_remind_the_course_team_then_alert_admins(course):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    from careers.course_reminders import send_review_reminders
+    from careers.course_services import review_submission, submit_assignment
+    from careers.models import AssignmentSubmission, LessonKind
+    from identity.models import AdminProfile
+
+    program, first, _, lecturer = course
+    task = Lesson.objects.create(module=first.module, title="Inventory", kind=LessonKind.ASSIGNMENT, position=3)
+    supervisor, admin, learner = _user("d_supervisor"), _user("d_admin"), _user("d_learner3")
+    CourseStaff.objects.create(program=program, user=supervisor, role=CourseStaffRole.SUPERVISOR)
+    AdminProfile.objects.create(user=admin)
+    enrollment = enroll_in_training(program=program, student=learner)
+    pdf = lambda: SimpleUploadedFile("work.pdf", b"%PDF-1.4 work", content_type="application/pdf")
+
+    # Handing in notifies the whole course team right away.
+    submission = submit_assignment(enrollment, task.id, pdf())
+    team = {program.provider, lecturer, supervisor}
+    assert set(User.objects.filter(notifications__notification_type="COURSE_SUBMISSION_TO_REVIEW")) == team
+
+    def age(hours):
+        AssignmentSubmission.objects.filter(pk=submission.pk).update(submitted_at=timezone.now() - timedelta(hours=hours))
+
+    reminders = lambda: Notification.objects.filter(notification_type="COURSE_SUBMISSION_REMINDER").count()
+    alerts = lambda: Notification.objects.filter(notification_type="COURSE_SUBMISSION_ESCALATED", recipient=admin).count()
+
+    age(47)
+    assert send_review_reminders() == {"reminded": 0, "escalated": 0}  # not yet
+    age(49)
+    assert send_review_reminders()["reminded"] == 1 and reminders() == 3  # one reminder to each of the team
+    assert send_review_reminders()["reminded"] == 0  # spaced out: not again within 48 hours
+
+    # After 5 days the admins are alerted, once.
+    age(5 * 24 + 1)
+    AssignmentSubmission.objects.filter(pk=submission.pk).update(review_reminded_at=timezone.now() - timedelta(hours=49))
+    assert send_review_reminders() == {"reminded": 1, "escalated": 1} and alerts() == 1
+    assert send_review_reminders()["escalated"] == 0 and alerts() == 1
+
+    # Once reviewed, nothing more is sent; a resubmission starts the clock again.
+    submission.refresh_from_db()
+    review_submission(submission, reviewer=lecturer, decision="CHANGES_REQUESTED", feedback="Add the meter readings.")
+    age(10 * 24)
+    assert send_review_reminders() == {"reminded": 0, "escalated": 0}
+    resubmitted = submit_assignment(enrollment, task.id, pdf())
+    assert resubmitted.review_reminded_at is None and resubmitted.escalated_at is None

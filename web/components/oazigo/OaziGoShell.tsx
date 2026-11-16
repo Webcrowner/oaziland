@@ -5,6 +5,7 @@ import Button from "@/components/ui/Button";
 import { IconCar } from "@/components/Icons";
 import { OaziGoProvider, useOaziGo } from "./OaziGoProvider";
 import DriverLocationSharer from "./DriverLocationSharer";
+import RideOfferBanner from "./RideOfferBanner";
 import { cardCls } from "./styles";
 
 const TABS = [
@@ -12,9 +13,11 @@ const TABS = [
   { href: "/oazigo/request", key: "navRequest" },
   { href: "/oazigo/trips", key: "navTrips" },
   { href: "/oazigo/requests", key: "navRequests", driversOnly: true },
+  { href: "/oazigo/earnings", key: "navEarnings", driversOnly: true },
   { href: "/oazigo/drive", key: "navDrive" },
-  { href: "/oazigo/cars", key: "navCars" },
   { href: "/oazigo/safety", key: "navSafety" },
+  // Not part of ride-hailing: the Marketplace's car listings, kept last so the ride tabs read first.
+  { href: "/oazigo/cars", key: "navCars" },
 ] as const;
 
 // Pages anyone can browse without signing in.
@@ -42,9 +45,9 @@ function Frame({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="bg-slate-200 min-h-[70vh]">
-    <main className={`${pathname === "/oazigo/cars" ? "max-w-6xl" : "max-w-3xl"} mx-auto px-4 sm:px-6 py-8`}>
-      <nav aria-label="OaziGo" className="mb-6 -mx-4 sm:mx-0 overflow-x-auto px-4 sm:px-0">
-        <ul className="flex gap-1.5 w-max sm:w-auto rounded-2xl border border-slate-300/80 bg-white p-1.5 shadow-sm">
+    <main className={`${pathname === "/oazigo/cars" ? "max-w-6xl" : "max-w-4xl"} mx-auto px-4 sm:px-6 py-8`}>
+      <nav aria-label="OaziGo" className="mb-6 -mx-4 sm:mx-0 overflow-x-auto px-4 sm:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <ul className="flex w-max gap-1.5 rounded-2xl border border-slate-300/80 bg-white p-1.5 shadow-sm md:w-auto md:flex-wrap">
           {TABS.filter((tab) => !("driversOnly" in tab) || isVerifiedDriver).map((tab) => {
             const active = pathname === tab.href;
             return (
@@ -63,6 +66,7 @@ function Frame({ children }: { children: React.ReactNode }) {
       </nav>
       {children}
       <DriverLocationSharer />
+      <RideOfferBanner />
     </main>
     </div>
   );

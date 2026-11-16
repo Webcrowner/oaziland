@@ -7,7 +7,7 @@ are wired directly here.
 """
 from django.contrib import admin
 from oaziland.admin_site import DataAdminTicketView
-from identity.staff_views import StaffAccessActionView, StaffAccessListView, StaffSessionView
+from identity.staff_views import PlatformSessionView, StaffAccessActionView, StaffAccessListView, StaffSessionView
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
@@ -49,10 +49,10 @@ from student_hostels.views import (
     StudentHostelViewSet, MyRoomAllocationViewSet, AdminWelfareAlertViewSet, MyHostelWaitlistView, AdminRoomAllocationViewSet,
     MyParentAccessGrantsView, ParentPortalView, MyGuardianAccessesView, HostelRoomsViewSet,
 )
-from guest_houses.views import GuestHouseLodgeViewSet
+from guest_houses.views import GuestHouseLodgeViewSet, channel_calendar_feed
 from discovery.views import WantedListingViewSet, SavedSearchViewSet, MyComparisonView, ListingWaitlistView
 from discovery.home_stats import HomeStatsView
-from notifications.views import MyNotificationViewSet, AdminGreetingSettingsView, ListingShareMessageView
+from notifications.views import MyNotificationViewSet, AdminGreetingSettingsView, ListingShareMessageView, PushConfigView, PushDeviceView, PushDeviceRemoveView
 from monetization.views import (
     MyCreatorPremiumView, MyWalletView, WithdrawWalletView, RechargeWalletView, SendGiftView, MyGiftsView,
     ConvertGiftsView, BoostPriceQuoteView, PurchaseCampaignBoostView, MyAdCampaignsView, AdminWithdrawalViewSet,
@@ -69,7 +69,14 @@ from property_management.views import (
 from marketplace.views import (
     WarehouseListingViewSet, StoreListingViewSet, BusinessListingViewSet, CarListingViewSet, GoodsListingViewSet, RideViewSet, ListingConditionView, MarketplaceOrderViewSet, MarketplaceOfferViewSet, MarketplaceBoostOptionsView,
     MyDriverProfileView, MyDriverLocationView, MyVehicleViewSet, AdminDriverViewSet, MyEmergencyContactView, AdminSosRideViewSet, MarketplaceFeedView, MarketplaceSellerView,
+    AdminRideViewSet, AdminRideIssueViewSet,
 )
+from marketplace.seller_views import SellerDashboardView, SellerPayoutsView, SellerSalesCsvView
+from marketplace.admin_views import AdminReturnRequestViewSet
+from marketplace.shop_views import (
+    CartView, CartItemsView, CartItemView, CartQuoteView, CartCheckoutView, CouponViewSet, CouponCheckView, ShopPublicView, MyShopView,
+)
+from marketplace.search_views import MarketplaceSearchAssistView, MarketplaceTrendingSearchesView, MarketplaceImageSearchView
 from services.views import (
     ServiceRequestViewSet, FindTechniciansView, TechnicianDirectoryView, MyTechnicianDocumentsView, MyTechnicianDashboardView, MyTechnicianProfileView, AdminTechnicianViewSet,
     MyTechnicianLocationPingView, MyTechnicianAvailabilityView, FacilityManagementContractViewSet, ProjectManagementCaseViewSet,
@@ -103,10 +110,13 @@ router.register(r"cars", CarListingViewSet, basename="car")
 router.register(r"goods", GoodsListingViewSet, basename="goods")
 router.register(r"marketplace-orders", MarketplaceOrderViewSet, basename="marketplace-order")
 router.register(r"marketplace-offers", MarketplaceOfferViewSet, basename="marketplace-offer")
+router.register(r"marketplace-coupons", CouponViewSet, basename="marketplace-coupon")
 router.register(r"rides", RideViewSet, basename="ride")
 router.register(r"my-vehicles", MyVehicleViewSet, basename="my-vehicle")
 router.register(r"admin/drivers", AdminDriverViewSet, basename="admin-driver")
 router.register(r"admin/sos-rides", AdminSosRideViewSet, basename="admin-sos-ride")
+router.register(r"admin/rides", AdminRideViewSet, basename="admin-ride")
+router.register(r"admin/ride-issues", AdminRideIssueViewSet, basename="admin-ride-issue")
 router.register(r"admin/technicians", AdminTechnicianViewSet, basename="admin-technician")
 router.register(r"admin/service-disputes", AdminServiceDisputeViewSet, basename="admin-service-dispute")
 router.register(r"service-requests", ServiceRequestViewSet, basename="service-request")
@@ -127,6 +137,7 @@ router.register(r"admin/audit-log", AdminAuditLogViewSet, basename="admin-audit-
 router.register(r"admin/content", AdminContentViewSet, basename="admin-content")
 router.register(r"admin/ai-flags", AdminAiFlagViewSet, basename="admin-ai-flag")
 router.register(r"admin/payments", AdminPaymentViewSet, basename="admin-payment")
+router.register(r"admin/marketplace-returns", AdminReturnRequestViewSet, basename="admin-marketplace-return")
 router.register(r"admin/caterers", AdminCatererViewSet, basename="admin-caterer")
 router.register(r"admin/account-deletions", AdminAccountDeletionViewSet, basename="admin-account-deletion")
 router.register(r"admin/data-exports", AdminDataExportViewSet, basename="admin-data-export")
@@ -191,6 +202,20 @@ urlpatterns = [
     path('api/marketplace-feed/', MarketplaceFeedView.as_view(), name='marketplace-feed'),
     path('api/marketplace-sellers/<uuid:user_id>/', MarketplaceSellerView.as_view(), name='marketplace-seller'),
     path('api/marketplace-boost-options/', MarketplaceBoostOptionsView.as_view(), name='marketplace-boost-options'),
+    path('api/marketplace-search/assist/', MarketplaceSearchAssistView.as_view(), name='marketplace-search-assist'),
+    path('api/marketplace-search/trending/', MarketplaceTrendingSearchesView.as_view(), name='marketplace-search-trending'),
+    path('api/marketplace-search/image/', MarketplaceImageSearchView.as_view(), name='marketplace-search-image'),
+    path('api/marketplace-seller/dashboard/', SellerDashboardView.as_view(), name='marketplace-seller-dashboard'),
+    path('api/marketplace-seller/payouts/', SellerPayoutsView.as_view(), name='marketplace-seller-payouts'),
+    path('api/marketplace-seller/sales.csv', SellerSalesCsvView.as_view(), name='marketplace-seller-sales-csv'),
+    path('api/marketplace-cart/', CartView.as_view(), name='marketplace-cart'),
+    path('api/marketplace-cart/items/', CartItemsView.as_view(), name='marketplace-cart-items'),
+    path('api/marketplace-cart/items/<uuid:listing_id>/', CartItemView.as_view(), name='marketplace-cart-item'),
+    path('api/marketplace-cart/quote/', CartQuoteView.as_view(), name='marketplace-cart-quote'),
+    path('api/marketplace-cart/checkout/', CartCheckoutView.as_view(), name='marketplace-cart-checkout'),
+    path('api/marketplace-coupon-check/', CouponCheckView.as_view(), name='marketplace-coupon-check'),
+    path('api/marketplace-shops/<uuid:user_id>/', ShopPublicView.as_view(), name='marketplace-shop'),
+    path('api/marketplace-shop/me/', MyShopView.as_view(), name='marketplace-shop-me'),
     path('admin/', admin.site.urls),
     path('api/admin/data-admin-ticket/', DataAdminTicketView.as_view(), name='data-admin-ticket'),
     path('health/', health_check, name='health-check'),
@@ -277,10 +302,14 @@ urlpatterns = [
     path('api/content-reports/', FileContentReportView.as_view(), name='file-content-report'),
     path('api/admin/greeting-settings/', AdminGreetingSettingsView.as_view(), name='admin-greeting-settings'),
     path('api/listing-share-message/', ListingShareMessageView.as_view(), name='listing-share-message'),
+    path('api/push/config/', PushConfigView.as_view(), name='push-config'),
+    path('api/push/devices/', PushDeviceView.as_view(), name='push-devices'),
+    path('api/push/devices/remove/', PushDeviceRemoveView.as_view(), name='push-devices-remove'),
 
     # Payment provider webhook — a real, publicly-reachable endpoint,
     # not just service-layer logic with nowhere to actually be called from.
     path('api/webhooks/payment/', payment_webhook_view, name='payment-webhook'),
+    path('api/calendar/guest-houses/<uuid:listing_id>/<str:token>.ics', channel_calendar_feed, name='guest-house-channel-calendar'),
 
     # Model-backed API (Listing, Quarter, Booking — Prompt 16's core pass)
     path('api/', include(router.urls)),
@@ -294,6 +323,7 @@ urlpatterns = [
     path('api/my-agent-profile/', MyAgentProfileView.as_view(), name='my-agent-profile'),
     path('api/staff-access/', StaffAccessListView.as_view(), name='staff-access'),
     path('api/staff-access/session/', StaffSessionView.as_view(), name='staff-session'),
+    path('api/platform-session/', PlatformSessionView.as_view(), name='platform-session'),
     path('api/staff-access/<uuid:grant_id>/<slug:action>/', StaffAccessActionView.as_view(), name='staff-access-action'),
     path('api/agencies/<int:agency_id>/profile/', AgencyPublicProfileView.as_view(), name='agency-public-profile'),
     path('api/agents/', AgentDirectoryView.as_view(), name='agent-directory'),

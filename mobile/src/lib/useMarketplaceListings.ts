@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listMarketplaceListings, type MarketplaceCategory } from "./api";
+import { listMarketplaceListings, type BrowsableCategory } from "./api";
 
 /**
  * Loads one marketplace category with the given filters, 20 at a time. Changing the filters restarts from
  * page 1; reload() does the same after a new listing is posted, and loadMore appends the next page.
  */
-export function useMarketplaceListings<T>(category: MarketplaceCategory, query: Record<string, string>) {
+export function useMarketplaceListings<T>(category: BrowsableCategory, query: Record<string, string>) {
   const [items, setItems] = useState<T[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);

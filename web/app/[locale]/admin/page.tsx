@@ -40,11 +40,13 @@ import {
   listAdminWelfareAlerts,
   resolveAdminWelfareAlert,
   listAdminSosRides,
+  listAdminRideIssues,
   resolveAdminSosRide,
   listAdminUsers,
   toggleAdminUserSuspend,
   issueAdminUserStrike,
   assignAdminUserRole,
+  setAdminUserAccess,
   removeAdminUserRole,
   getAdminGreetingSettings,
   updateAdminGreetingSettings,
@@ -79,6 +81,8 @@ import AdminContentBrowser from "@/components/admin/AdminContentBrowser";
 import AdminAiFlagsQueue from "@/components/admin/AdminAiFlagsQueue";
 import AdminAreaRequests from "@/components/admin/AdminAreaRequests";
 import AdminPayments from "@/components/admin/AdminPayments";
+import AdminRides from "@/components/admin/AdminRides";
+import AdminReturns from "@/components/admin/AdminReturns";
 import AdminVerificationQueue from "@/components/admin/AdminVerificationQueue";
 import AdminPrivacyRequests from "@/components/admin/AdminPrivacyRequests";
 import AdminAnalyticsPanel from "@/components/admin/AdminAnalyticsPanel";
@@ -88,6 +92,7 @@ import HostelRoomsManager from "@/components/HostelRoomsManager";
 import AdminUserOverviewPanel from "@/components/admin/AdminUserOverviewPanel";
 import MobileTabBar, { type MobileTabItem } from "@/components/MobileTabBar";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import PlatformAccountPanel from "@/components/PlatformAccountPanel";
 import {
   IconShield,
   IconShieldCheck,
@@ -108,6 +113,7 @@ import {
   IconClock,
   IconEye,
   IconX,
+  IconCar,
 } from "@/components/Icons";
 
 function playSosAlertTone() {
@@ -144,12 +150,14 @@ const TABS = [
   "aiflags",
   "areas",
   "disputes",
+  "returns",
   "withdrawals",
   "payments",
   "pricing",
   "support",
   "welfare",
   "sos",
+  "rides",
   "users",
   "greetings",
   "faqs",
@@ -274,6 +282,9 @@ export default function AdminConsolePage() {
   const [splitDisputeId, setSplitDisputeId] = useState<string | null>(null);
   const [welfareAlerts, setWelfareAlerts] = useState<AdminWelfareAlert[]>([]);
   const [sosRides, setSosRides] = useState<AdminSosRide[]>([]);
+  const [openRideIssues, setOpenRideIssues] = useState(0);
+  // Set when an admin jumps from an SOS card to the full trip view.
+  const [focusRideId, setFocusRideId] = useState<string | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [userStatusFilter, setUserStatusFilter] = useState<string>("ALL");
   const [userRoleFilter, setUserRoleFilter] = useState<string>("ALL");
@@ -474,14 +485,15 @@ export default function AdminConsolePage() {
         serviceDisputesData,
         verifiedTechniciansData,
         sosRidesData,
+        rideIssuesData,
       ] = await Promise.all([
         getAdminConsoleSummary(token),
         soft(listAdminPendingPropertyListings(token)),
         soft(listAdminKycReviews(token)),
         soft(listAdminContentReports(token)),
         soft(listAdminDisputeCases(token)),
-        soft(listHotelsForAdmin(token)),
-        soft(listVenuesForAdmin(token)),
+        soft(listHotelsForAdmin(token, true)),
+        soft(listVenuesForAdmin(token, true)),
         soft(listDriversForAdmin(token)),
         soft(listTechniciansForAdmin(token)),
         soft(listAdminWelfareAlerts(token)),
@@ -489,6 +501,7 @@ export default function AdminConsolePage() {
         soft(listAdminServiceDisputes(token)),
         soft(listTechniciansForAdmin(token, "verified")),
         soft(listAdminSosRides(token)),
+        soft(listAdminRideIssues(token)),
       ]);
       setSummary(summaryData);
       if (propertiesData) setPendingProperties(propertiesData.results || []);
@@ -508,6 +521,7 @@ export default function AdminConsolePage() {
         setSosRides(openSos);
         notifyNewSosRides(openSos);
       }
+      if (rideIssuesData) setOpenRideIssues(rideIssuesData.count);
       setLoadProblem(partial ? { rateLimited: false, retryAfter: null, partial: true } : null);
       setStatus("ready");
     } catch (err) {
@@ -899,6 +913,19 @@ export default function AdminConsolePage() {
     }
   }
 
+  async function handleAdminAccess(id: string, choice: string) {
+    if (!token || roleActionBusy) return;
+    setRoleActionBusy(true);
+    try {
+      await setAdminUserAccess(id, choice === "full" ? "full" : "limited", choice === "platform", token);
+      loadUsers(usersPage);
+    } catch (err) {
+      await dialogs.notify(err instanceof Error ? err.message : t("actionFailed"));
+    } finally {
+      setRoleActionBusy(false);
+    }
+  }
+
   async function handleRemoveRole(id: string, role: AssignableRole) {
     if (!token || roleActionBusy) return;
     if (!(await dialogs.confirm(t("removeRoleConfirm", { role }), { destructive: true, confirmLabel: t("removeRoleLabel") }))) return;
@@ -1006,12 +1033,14 @@ export default function AdminConsolePage() {
     aiflags: IconAlertCircle,
     areas: IconMapPin,
     disputes: IconLock,
+    returns: IconRefresh,
     withdrawals: IconCreditCard,
     payments: IconCreditCard,
     pricing: IconBuilding,
     support: IconMessageCircle,
     welfare: IconGraduationCap,
     sos: IconAlertCircle,
+    rides: IconCar,
     users: IconUsers,
     greetings: IconSparkles,
     faqs: IconMapPin,
@@ -1038,6 +1067,7 @@ export default function AdminConsolePage() {
     { key: "content", label: t("tabContent") },
     { key: "aiflags", label: t("tabAiFlags"), count: summary.ai_flags_pending ?? 0, isUrgent: (summary.ai_flags_pending ?? 0) > 0 },
     { key: "disputes", label: t("tabDisputes"), count: disputes.length + serviceDisputes.length, isUrgent: disputes.length + serviceDisputes.length > 0 },
+    { key: "returns", label: t("tabReturns") },
     { key: "withdrawals", label: t("tabWithdrawals"), count: summary.pending_withdrawals ?? 0, isUrgent: (summary.pending_withdrawals ?? 0) > 0 },
     { key: "payments", label: t("tabPayments"), count: summary.stuck_payments ?? 0, isUrgent: (summary.stuck_payments ?? 0) > 0 },
     ...(isSuperAdmin ? [{ key: "pricing" as Tab, label: t("tabPricing") }] : []),
@@ -1045,6 +1075,7 @@ export default function AdminConsolePage() {
 
     { key: "rooms", label: t("tabRooms") },
     { key: "sos", label: t("tabSos"), count: sosRides.length, isUrgent: sosRides.length > 0 },
+    { key: "rides", label: t("tabRides"), count: openRideIssues },
     { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
     { key: "support", label: t("tabSupport"), count: supportCount, isUrgent: (summary.support_tickets_awaiting ?? 0) > 0 },
     { key: "greetings", label: t("tabGreetings") || "Celebratory Messages" },
@@ -1108,10 +1139,12 @@ export default function AdminConsolePage() {
         { key: "content", label: t("tabContent") },
         { key: "aiflags", label: t("tabAiFlags"), count: summary.ai_flags_pending ?? 0, isUrgent: (summary.ai_flags_pending ?? 0) > 0 },
         { key: "disputes", label: t("tabDisputes"), count: disputes.length + serviceDisputes.length, isUrgent: disputes.length + serviceDisputes.length > 0 },
+        { key: "returns", label: t("tabReturns") },
         { key: "welfare", label: t("tabWelfareAlerts"), count: welfareAlerts.filter((w) => !w.resolved_at).length, isUrgent: welfareAlerts.filter((w) => !w.resolved_at).length > 0 },
 
         { key: "rooms", label: t("tabRooms") },
         { key: "sos", label: t("tabSos"), count: sosRides.length, isUrgent: sosRides.length > 0 },
+        { key: "rides", label: t("tabRides"), count: openRideIssues },
         { key: "users", label: t("tabUsers"), count: summary.flagged_users_count ?? 0, isUrgent: (summary.flagged_users_count ?? 0) > 0 },
         { key: "support", label: t("tabSupport"), count: supportCount, isUrgent: (summary.support_tickets_awaiting ?? 0) > 0 },
       ],
@@ -1128,6 +1161,7 @@ export default function AdminConsolePage() {
     serviceDisputes.length +
     welfareAlerts.filter((w) => !w.resolved_at).length +
     sosRides.length +
+    openRideIssues +
     (summary.pending_withdrawals ?? 0) +
     (summary.stuck_payments ?? 0) +
     supportCount +
@@ -1473,6 +1507,7 @@ export default function AdminConsolePage() {
       {/* ================= TAB: SUMMARY & PLATFORM-WIDE ANALYTICS ================= */}
       {tab === "summary" && (
         <div className="space-y-8 animate-rise-in">
+          <PlatformAccountPanel />
           {/* Financial Escrow & Platform Volume Cards */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600 mb-3 flex items-center gap-1.5">
@@ -2290,16 +2325,31 @@ export default function AdminConsolePage() {
                     <p className="text-[11px] text-slate-400">{t("sosNoLocation")}</p>
                   )}
                 </div>
-                <button
-                  onClick={() => handleResolveSos(ride.id)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors whitespace-nowrap shadow-sm"
-                >
-                  {t("markResolved")}
-                </button>
+                <div className="flex shrink-0 flex-col gap-2">
+                  <button
+                    onClick={() => handleResolveSos(ride.id)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors whitespace-nowrap shadow-sm"
+                  >
+                    {t("markResolved")}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFocusRideId(ride.id);
+                      setTab("rides");
+                    }}
+                    className="border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold px-4 py-2 rounded-xl transition-colors whitespace-nowrap"
+                  >
+                    {t("ridesViewTrip")}
+                  </button>
+                </div>
               </div>
             ))
           )}
         </div>
+      )}
+
+      {tab === "rides" && token && (
+        <AdminRides key={focusRideId ?? "rides"} token={token} initialRideId={focusRideId} onOpenIssueCount={setOpenRideIssues} />
       )}
 
       {/* ================= TAB: USER MANAGEMENT & TRUST AUDIT (§2.7 & §8.4) ================= */}
@@ -2462,6 +2512,21 @@ export default function AdminConsolePage() {
                     {t("joinedOn", { date: new Date(u.date_joined).toLocaleDateString() })}
                     {u.suspended_until ? ` • ${t("suspendedUntil", { date: new Date(u.suspended_until).toLocaleDateString() })}` : ""}
                   </p>
+                  {isSuperAdmin && u.admin_access && !u.is_self && (
+                    <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-600">
+                      {t("adminAccessLabel")}
+                      <select
+                        value={u.admin_access === "full" ? "full" : u.platform_access ? "platform" : "limited"}
+                        disabled={roleActionBusy}
+                        onChange={(e) => handleAdminAccess(u.id, e.target.value)}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                      >
+                        <option value="full">{t("adminAccessFull")}</option>
+                        <option value="limited">{t("adminAccessLimited")}</option>
+                        <option value="platform">{t("adminAccessPlatform")}</option>
+                      </select>
+                    </label>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
@@ -2567,6 +2632,7 @@ export default function AdminConsolePage() {
 
       {/* ================= TAB: PRICING ================= */}
       {tab === "payments" && token && <AdminPayments token={token} onOpenDisputes={() => setTab("disputes")} />}
+      {tab === "returns" && token && <AdminReturns token={token} onOpenDisputes={() => setTab("disputes")} />}
       {tab === "pricing" && isSuperAdmin && token && <AdminPricingEditor token={token} dialogs={dialogs} />}
 
       {/* ================= TAB: PUBLISHED CONTENT ================= */}

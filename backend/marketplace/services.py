@@ -6,9 +6,12 @@ every other transaction on the platform.
 """
 import logging
 import math
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
+from django.db import transaction as db_transaction
 from django.db.models import Q
+
+from geo.routing import driving_route
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,8 @@ LISTING_ORDERINGS = {
     "price_desc": ("-price_xaf", "-created_at"),
     # Only valid together with a near_lat/near_lng point, which is what adds the distance_km column.
     "distance": ("distance_km", "-created_at"),
+    # Flash sales, the ones ending first. Only valid together with on_sale=1 (every row then has an end date).
+    "ending_soon": ("sale_ends_at", "-created_at"),
 }
 
 
@@ -95,6 +100,13 @@ def marketplace_listing_queryset(*, listing_class, filters: dict = None):
     from django.utils import timezone
     from .engagement import expiry_cutoff
     queryset = listing_class.objects.filter(availability_status=AvailabilityStatus.AVAILABLE, renewed_at__gte=expiry_cutoff())
+    from .shops import vacationing_seller_ids
+    on_vacation = vacationing_seller_ids()
+    if on_vacation:
+        queryset = queryset.exclude(lister_user_id__in=on_vacation)
+    if filters.get("on_sale"):
+        now = timezone.now()
+        queryset = queryset.filter(sale_price_xaf__isnull=False, sale_ends_at__gt=now).filter(Q(sale_starts_at__isnull=True) | Q(sale_starts_at__lte=now))
     queryset = queryset.annotate(
         boost_rank=Case(When(boosted_until__gt=timezone.now(), then=Value(0)), default=Value(1), output_field=IntegerField()),
     )
@@ -131,10 +143,8 @@ def marketplace_listing_queryset(*, listing_class, filters: dict = None):
             queryset = queryset.filter(vehicle_spec__mileage_km__lte=filters["max_mileage_km"])
         queryset = _apply_car_filters(queryset, filters)
     if filters.get("q"):
-        text_match = Q(title__icontains=filters["q"]) | Q(description__icontains=filters["q"])
-        if is_car:
-            text_match |= Q(vehicle_spec__make__icontains=filters["q"]) | Q(vehicle_spec__model__icontains=filters["q"])
-        queryset = queryset.filter(text_match)
+        from .search_assist import listing_text_q
+        queryset = queryset.filter(listing_text_q(filters["q"], is_car=is_car))
     if "near_lat" in filters:
         queryset = _within_radius(queryset, filters["near_lat"], filters["near_lng"], filters.get("radius_km", DEFAULT_NEAR_RADIUS_KM))
     ordering = filters.get("ordering", "newest")
@@ -207,9 +217,11 @@ def _within_radius(queryset, latitude: float, longitude: float, radius_km: float
 
 def with_listing_related(queryset):
     """Loads what the listing serializers read (lister, area, photos and a car's spec) without a query per row."""
-    queryset = queryset.select_related("quarter", "lister_user").prefetch_related("media")
+    queryset = queryset.select_related("quarter", "lister_user", "lister_user__shop_profile").prefetch_related("media")
     if hasattr(queryset.model, "vehicle_spec"):
         queryset = queryset.select_related("vehicle_spec")
+    if hasattr(queryset.model, "variants"):
+        queryset = queryset.prefetch_related("variants")
     return queryset
 
 
@@ -312,7 +324,8 @@ def estimate_ride_fare(*, distance_km: Decimal, ride_category: str = "STANDARD")
     ride_category (see RIDE_CATEGORY_RATES) rather than one fare for
     every vehicle type."""
     base_fare_xaf, per_km_xaf = RIDE_CATEGORY_RATES.get(ride_category, RIDE_CATEGORY_RATES["STANDARD"])
-    return base_fare_xaf + (distance_km * per_km_xaf)
+    # The CFA franc has no smaller unit in use, so fares are whole francs.
+    return (base_fare_xaf + (Decimal(distance_km) * per_km_xaf)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
 
 def infer_ride_distance_km(*, fare_estimate_xaf, ride_category: str = "STANDARD", pickup_coords=None, dropoff_coords=None) -> Decimal:
@@ -337,7 +350,7 @@ def request_ride(*, rider, pickup_description, dropoff_description, fare_estimat
             fare_estimate_xaf=fare_estimate_xaf, ride_category=ride_category,
             pickup_coords=pickup_coords, dropoff_coords=dropoff_coords,
         )
-    return RideBooking.objects.create(
+    ride = RideBooking.objects.create(
         rider=rider, pickup_description=pickup_description, dropoff_description=dropoff_description,
         fare_estimate_xaf=fare_estimate_xaf, distance_km=distance_km,
         pickup_latitude=pickup_lat, pickup_longitude=pickup_lon,
@@ -346,6 +359,9 @@ def request_ride(*, rider, pickup_description, dropoff_description, fare_estimat
         luggage_count=luggage_count if has_luggage else None, luggage_size=luggage_size if has_luggage else "",
         luggage_photo_urls=list(luggage_photo_urls or [])[:3] if has_luggage else [],
     )
+    dispatch_ride(ride)
+    ride.refresh_from_db()
+    return ride
 
 
 class NotARegisteredDriverError(Exception):
@@ -360,49 +376,62 @@ class RideStateError(Exception):
 STALE_RIDE_HOURS = 1
 
 
-def trusted_ride_distance_km(*, client_distance_km, pickup_coords=None, dropoff_coords=None):
-    """The distance a fare is based on. The rider's own figure can never be lower than the
-    straight-line distance between the two points they marked, so the fare can't be dodged by
-    typing a tiny distance."""
-    if pickup_coords and dropoff_coords:
-        from geo.services import haversine_distance_km
-        floor = haversine_distance_km(pickup_coords[0], pickup_coords[1], dropoff_coords[0], dropoff_coords[1])
-        return max(Decimal(client_distance_km), Decimal(floor).quantize(Decimal("0.01")))
-    return Decimal(client_distance_km)
+def quote_ride(*, pickup_coords, dropoff_coords):
+    """The road route between the rider's two map points and the fare for every vehicle category. A booking
+    uses the same (cached) route, so the fare a rider is quoted is the fare they're charged."""
+    route = driving_route(pickup_coords, dropoff_coords)
+    fares = {category: estimate_ride_fare(distance_km=route.distance_km, ride_category=category) for category in RIDE_CATEGORY_RATES}
+    return route, fares
 
 
-def _notify_ride(recipient, title: str, message: str, ride):
+def _notify_ride(recipient, title: str, message: str, ride, notification_type: str = "RIDE_UPDATE"):
     from notifications.services import notify
-    notify(recipient=recipient, notification_type="RIDE_UPDATE", title=title, message=message, related_reference=str(ride.id))
+    notify(recipient=recipient, notification_type=notification_type, title=title, message=message, related_reference=str(ride.id))
 
 
-def cancel_ride(*, ride, rider):
-    """The rider backs out before the trip starts."""
-    from .models import RideBooking, RideStatus
+def cancel_ride(*, ride, rider, reason="", note=""):
+    """The rider backs out before the trip starts, optionally saying why; the driver is told the reason."""
+    from django.utils import timezone
+    from .models import RideBooking, RideStatus, RideCancelReason
     if ride.rider_id != rider.id:
         raise NotPartyToRideError("Only the rider can cancel this ride.")
-    updated = RideBooking.objects.filter(pk=ride.pk, status__in=[RideStatus.REQUESTED, RideStatus.ACCEPTED]).update(status=RideStatus.CANCELLED)
+    updated = RideBooking.objects.filter(pk=ride.pk, status__in=[RideStatus.REQUESTED, RideStatus.ACCEPTED]).update(
+        status=RideStatus.CANCELLED, cancelled_at=timezone.now(), cancellation_reason=reason, cancellation_note=note,
+    )
     if not updated:
         raise RideStateError("This ride can no longer be cancelled.")
+    _close_offers(ride)
     driver = ride.driver
     ride.refresh_from_db()
     if driver is not None:
-        _notify_ride(driver, "The rider cancelled", "The rider cancelled this ride before it started.", ride)
+        message = "The rider cancelled this ride before it started."
+        if reason:
+            message += f" Reason: {RideCancelReason(reason).label}."
+        if note:
+            message += f" \"{note}\""
+        _notify_ride(driver, "The rider cancelled", message, ride)
     return ride
 
 
-def release_ride(*, ride, driver):
-    """The driver pulls out before the trip starts; the request goes back to open drivers."""
-    from .models import RideBooking, RideStatus
+def release_ride(*, ride, driver, reason="", note=""):
+    """The driver pulls out before the trip starts, optionally saying why; the request goes back to open drivers
+    and the rider is told the reason."""
+    from .models import RideBooking, RideStatus, RideReleaseReason
     if ride.driver_id != driver.id:
         raise NotPartyToRideError("Only the assigned driver can release this ride.")
     updated = RideBooking.objects.filter(pk=ride.pk, driver=driver, status=RideStatus.ACCEPTED).update(
-        driver=None, vehicle=None, status=RideStatus.REQUESTED,
+        driver=None, vehicle=None, status=RideStatus.REQUESTED, release_reason=reason, release_note=note,
     )
     if not updated:
         raise RideStateError("This ride has already started or is no longer assigned to you.")
+    restart_matching(ride, excluding_driver=driver)
     ride.refresh_from_db()
-    _notify_ride(ride.rider, "Your driver pulled out", "Your request is open to other drivers again.", ride)
+    message = "Your request is open to other drivers again."
+    if reason:
+        message = f"Reason: {RideReleaseReason(reason).label}. " + message
+    if note:
+        message = f"\"{note}\" " + message
+    _notify_ride(ride.rider, "Your driver pulled out", message, ride)
     return ride
 
 
@@ -493,11 +522,14 @@ def expire_stale_rides(*, max_age_hours: int = STALE_RIDE_HOURS, now=None) -> li
     """Cancels ride requests nobody accepted in time and tells the rider. Meant to run on a schedule."""
     from datetime import timedelta
     from django.utils import timezone
-    from .models import RideBooking, RideStatus
+    from .models import RideBooking, RideStatus, RideCancelReason
     now = now or timezone.now()
     expired = []
     for ride in RideBooking.objects.filter(status=RideStatus.REQUESTED, requested_at__lt=now - timedelta(hours=max_age_hours)).select_related("rider"):
-        if RideBooking.objects.filter(pk=ride.pk, status=RideStatus.REQUESTED).update(status=RideStatus.CANCELLED):
+        if RideBooking.objects.filter(pk=ride.pk, status=RideStatus.REQUESTED).update(
+            status=RideStatus.CANCELLED, cancelled_at=now, cancellation_reason=RideCancelReason.NO_DRIVER_FOUND,
+        ):
+            _close_offers(ride)
             _notify_ride(ride.rider, "No driver found", "Your ride request expired because no driver accepted it. You can request again.", ride)
             expired.append(ride)
     return expired
@@ -553,7 +585,16 @@ def accept_ride(*, ride, driver, vehicle):
     ride.driver = driver
     ride.vehicle = vehicle
     ride.status = RideStatus.ACCEPTED
-    ride.save(update_fields=["driver", "vehicle", "status"])
+    ride.release_reason = ""
+    ride.release_note = ""
+    # Conditional update so two drivers accepting at the same moment can't both win.
+    from .models import RideBooking
+    taken = RideBooking.objects.filter(pk=ride.pk, status=RideStatus.REQUESTED).update(
+        driver=driver, vehicle=vehicle, status=RideStatus.ACCEPTED, release_reason="", release_note="",
+    )
+    if not taken:
+        raise RideStateError("This ride is no longer available to accept.")
+    _close_offers(ride, accepted_by=driver)
     return ride
 
 
@@ -600,9 +641,9 @@ def _vehicle_can_serve(category: str, ride) -> bool:
 
 
 def open_rides_for_driver(*, driver_profile, radius_km=DEFAULT_NEARBY_RADIUS_KM):
-    """Open requests this driver can actually take: at least one of their vehicles fits the ride and,
-    when their position is known and recent, the pickup is within radius_km. Nearest first; requests
-    with no pickup point cannot be placed, so they are listed last without a distance.
+    """Requests no nearby driver took during matching, that this driver can actually take: at least one of
+    their vehicles fits the ride and, when their position is known and recent, the pickup is within radius_km.
+    Nearest first; requests with no pickup point cannot be placed, so they are listed last without a distance.
     Returns (list of (ride, pickup_distance_km or None), whether the driver's position was used)."""
     from geo.services import haversine_distance_km
     from .models import RideBooking, RideStatus
@@ -610,7 +651,8 @@ def open_rides_for_driver(*, driver_profile, radius_km=DEFAULT_NEARBY_RADIUS_KM)
     categories = set(driver_profile.vehicles.values_list("vehicle_category", flat=True))
     position = _driver_position(driver_profile)
     located, unlocated = [], []
-    for ride in RideBooking.objects.filter(status=RideStatus.REQUESTED).select_related("rider").order_by("-requested_at"):
+    still_open = RideBooking.objects.filter(status=RideStatus.REQUESTED, matching_ended_at__isnull=False).exclude(rider=driver_profile.user)
+    for ride in still_open.select_related("rider").order_by("-requested_at"):
         if not any(_vehicle_can_serve(c, ride) for c in categories):
             continue
         if position is None or ride.pickup_latitude is None or ride.pickup_longitude is None:
@@ -621,6 +663,160 @@ def open_rides_for_driver(*, driver_profile, radius_km=DEFAULT_NEARBY_RADIUS_KM)
             located.append((ride, distance.quantize(Decimal("0.1"))))
     located.sort(key=lambda pair: pair[1])
     return located + unlocated, position is not None
+
+
+# ---------------------------------------------------------------------------
+# Automatic matching: a new request is offered to the nearest suitable online driver, who has
+# RIDE_OFFER_SECONDS to accept or decline before it moves on to the next-nearest. Yango doesn't
+# publish its own timer; 15-45 s is usual for dispatch apps, and drivers' apps check every few seconds.
+# Offers are moved along whenever a driver or rider app checks in (advance_ride_matching), so no
+# background worker is needed.
+# ---------------------------------------------------------------------------
+RIDE_OFFER_SECONDS = 20
+MATCHING_RADIUS_KM = 10
+
+
+def _next_driver_for(ride, now):
+    """(driver profile, pickup distance) of the nearest driver who could take this ride right now, or (None, None)."""
+    from datetime import timedelta
+    from geo.services import haversine_distance_km
+    from .models import DriverProfile, RideBooking, RideOffer, RideOfferStatus, RideStatus
+
+    if ride.pickup_latitude is None or ride.pickup_longitude is None:
+        return None, None
+    already_asked = RideOffer.objects.filter(ride=ride).values("driver_id")
+    on_a_trip = RideBooking.objects.filter(status__in=[RideStatus.ACCEPTED, RideStatus.IN_PROGRESS], driver__isnull=False).values("driver_id")
+    holding_an_offer = RideOffer.objects.filter(status=RideOfferStatus.OFFERED, expires_at__gt=now).values("driver_id")
+    candidates = (
+        DriverProfile.objects.filter(
+            is_verified=True, is_online=True, last_seen_at__gte=now - timedelta(seconds=LOCATION_FRESH_SECONDS),
+            last_latitude__isnull=False, last_longitude__isnull=False,
+        )
+        .exclude(user_id=ride.rider_id)
+        .exclude(user_id__in=already_asked)
+        .exclude(user_id__in=on_a_trip)
+        .exclude(user_id__in=holding_an_offer)
+        .prefetch_related("vehicles")
+    )
+    best, best_distance = None, None
+    for profile in candidates:
+        if not any(_vehicle_can_serve(v.vehicle_category, ride) for v in profile.vehicles.all()):
+            continue
+        distance = Decimal(haversine_distance_km(profile.last_latitude, profile.last_longitude, ride.pickup_latitude, ride.pickup_longitude))
+        if distance <= MATCHING_RADIUS_KM and (best_distance is None or distance < best_distance):
+            best, best_distance = profile, distance
+    return best, (best_distance.quantize(Decimal("0.1")) if best_distance is not None else None)
+
+
+def dispatch_ride(ride, *, now=None):
+    """Moves one request's matching along: times out an unanswered offer and, when nobody holds the ride,
+    offers it to the next-nearest suitable driver. With nobody left to ask, ends matching so the request
+    is listed for every driver. Returns the live offer, or None."""
+    from datetime import timedelta
+    from django.db import transaction
+    from django.utils import timezone
+    from .models import RideBooking, RideOffer, RideOfferStatus, RideStatus
+
+    now = now or timezone.now()
+    with transaction.atomic():
+        locked = RideBooking.objects.select_for_update().filter(pk=ride.pk).first()
+        if locked is None or locked.status != RideStatus.REQUESTED or locked.matching_ended_at is not None:
+            return None
+        RideOffer.objects.filter(ride=locked, status=RideOfferStatus.OFFERED, expires_at__lte=now).update(
+            status=RideOfferStatus.EXPIRED, responded_at=now,
+        )
+        live = RideOffer.objects.filter(ride=locked, status=RideOfferStatus.OFFERED).first()
+        if live is not None:
+            return live
+        profile, distance = _next_driver_for(locked, now)
+        if profile is None:
+            locked.matching_ended_at = now
+            locked.save(update_fields=["matching_ended_at"])
+            return None
+        offer = RideOffer.objects.create(
+            ride=locked, driver=profile.user, pickup_distance_km=distance, expires_at=now + timedelta(seconds=RIDE_OFFER_SECONDS),
+        )
+    _notify_ride(
+        profile.user, "New ride offer",
+        f"{locked.pickup_description} → {locked.dropoff_description}, {distance} km from you. Accept within {RIDE_OFFER_SECONDS} seconds.",
+        locked, notification_type="RIDE_OFFER",
+    )
+    return offer
+
+
+def advance_ride_matching(*, now=None):
+    """Moves every request that is still being matched along. Cheap enough to call on each app check-in."""
+    from django.utils import timezone
+    from .models import RideBooking, RideStatus
+    now = now or timezone.now()
+    for ride in RideBooking.objects.filter(status=RideStatus.REQUESTED, matching_ended_at__isnull=True):
+        dispatch_ride(ride, now=now)
+
+
+def current_offer_for(driver, *, now=None):
+    """The offer this driver has to answer right now, if any."""
+    from django.utils import timezone
+    from .models import RideOffer, RideOfferStatus, RideStatus
+    now = now or timezone.now()
+    return (
+        RideOffer.objects.filter(driver=driver, status=RideOfferStatus.OFFERED, expires_at__gt=now, ride__status=RideStatus.REQUESTED)
+        .select_related("ride", "ride__rider")
+        .first()
+    )
+
+
+def ensure_driver_may_take(ride, driver, *, now=None):
+    """While a request is still being matched, only the driver it's offered to can accept it."""
+    from django.utils import timezone
+    from .models import RideOffer, RideOfferStatus
+    now = now or timezone.now()
+    dispatch_ride(ride, now=now)
+    ride.refresh_from_db()
+    if ride.matching_ended_at is not None:
+        return
+    if not RideOffer.objects.filter(ride=ride, driver=driver, status=RideOfferStatus.OFFERED, expires_at__gt=now).exists():
+        raise RideOfferError("This request is being offered to another driver right now.")
+
+
+class RideOfferError(Exception):
+    pass
+
+
+def decline_ride_offer(*, ride, driver, now=None):
+    """The driver passes on the request; it moves straight on to the next-nearest driver."""
+    from django.utils import timezone
+    from .models import RideOffer, RideOfferStatus
+    now = now or timezone.now()
+    updated = RideOffer.objects.filter(ride=ride, driver=driver, status=RideOfferStatus.OFFERED).update(
+        status=RideOfferStatus.DECLINED, responded_at=now,
+    )
+    if not updated:
+        raise RideOfferError("You don't have an offer for this ride.")
+    dispatch_ride(ride, now=now)
+
+
+def _close_offers(ride, *, accepted_by=None):
+    """Marks the accepting driver's offer accepted and withdraws any other open offer on the ride."""
+    from django.utils import timezone
+    from .models import RideOffer, RideOfferStatus
+    now = timezone.now()
+    open_offers = RideOffer.objects.filter(ride=ride, status=RideOfferStatus.OFFERED)
+    if accepted_by is not None:
+        open_offers.filter(driver=accepted_by).update(status=RideOfferStatus.ACCEPTED, responded_at=now)
+    open_offers.update(status=RideOfferStatus.WITHDRAWN, responded_at=now)
+
+
+def restart_matching(ride, *, excluding_driver):
+    """After a driver pulls out of an accepted ride, matching starts again without them."""
+    from django.utils import timezone
+    from .models import RideBooking, RideOffer, RideOfferStatus
+    now = timezone.now()
+    RideOffer.objects.update_or_create(
+        ride=ride, driver=excluding_driver,
+        defaults={"status": RideOfferStatus.DECLINED, "responded_at": now, "expires_at": now},
+    )
+    RideBooking.objects.filter(pk=ride.pk).update(matching_ended_at=None)
+    dispatch_ride(ride, now=now)
 
 
 def ride_driver_tracking(*, ride, user):
@@ -658,38 +854,68 @@ def start_ride(ride):
 def complete_ride_with_payment(*, ride, lock_client, payment_gateway, phone_number: str):
     """Settles the fare through the EXACT SAME reservation/escrow flow
     as a property booking or a technician service request — proving a
-    ride fare is never a parallel payment path."""
-    from django.utils import timezone
-    from transactions.services import reserve_booking, initiate_booking_payment, confirm_payment
+    ride fare is never a parallel payment path. The sandbox gateway confirms at once and completes the ride; a real
+    payment returns (booking, None) and the ride is completed later, when the provider's verified webhook confirms
+    the money arrived (see confirm_ride_after_payment)."""
+    from transactions.services import (
+        reserve_booking, initiate_booking_payment, fail_payment, confirm_sandbox_payment, InventoryConflictError,
+    )
     from transactions.models import BookingType
+    from payments.gateways import confirms_instantly
 
-    booking = reserve_booking(
-        lock_client=lock_client, requester=ride.rider, booking_type=BookingType.RIDE,
-        target_content_type="marketplace.RideBooking", target_id=ride.id,
-        amount_xaf=ride.fare_estimate_xaf,
-    )
-    initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
-    escrow = confirm_payment(
-        lock_client=lock_client, booking=booking, provider="MTN_MOMO",
-        provider_reference=booking.idempotency_key, payment_gateway=payment_gateway,
-        raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
-    )
+    try:
+        booking = reserve_booking(
+            lock_client=lock_client, requester=ride.rider, booking_type=BookingType.RIDE,
+            target_content_type="marketplace.RideBooking", target_id=ride.id,
+            amount_xaf=ride.fare_estimate_xaf,
+        )
+    except InventoryConflictError:
+        raise RideStateError("A payment for this ride is already in progress. Approve it on your phone.")
+    debit = initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
+    if not debit.success:
+        fail_payment(lock_client=lock_client, booking=booking)
+        raise RideStateError("The payment could not be started. Check the phone number and try again.")
+    if not confirms_instantly(payment_gateway):
+        return booking, None
+    escrow = confirm_sandbox_payment(lock_client=lock_client, booking=booking, payment_gateway=payment_gateway)
+    confirm_ride_after_payment(booking)
+    ride.refresh_from_db()
+    escrow.refresh_from_db()
+    return booking, escrow
 
-    from .models import RideStatus
-    ride.booking = booking
-    ride.status = RideStatus.COMPLETED
-    ride.completed_at = timezone.now()
-    ride.save(update_fields=["booking", "status", "completed_at"])
 
+def confirm_ride_after_payment(booking):
+    """Runs once a ride's fare is confirmed (by the provider's webhook, or at once for the sandbox): the ride is
+    completed and the fare released to the driver. A fare that arrives for a ride that is no longer in progress goes
+    straight back to the rider's wallet. Safe to run twice."""
+    from django.db import transaction
+    from django.utils import timezone
+    from transactions.models import EscrowStatus
+    from transactions.services import complete_booking, settle_escrow
+    from .models import RideBooking, RideStatus
+
+    if booking.target_content_type != "marketplace.RideBooking":
+        return None
+    with transaction.atomic():
+        ride = RideBooking.objects.select_for_update().filter(pk=booking.target_id).first()
+        if ride is None or ride.booking_id == booking.id:
+            return ride
+        if ride.status != RideStatus.IN_PROGRESS or ride.booking_id is not None:
+            escrow = getattr(booking, "escrow", None)
+            if escrow is not None and escrow.status == EscrowStatus.HELD:
+                settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"ride #{ride.pk}")
+            return ride
+        ride.booking = booking
+        ride.status = RideStatus.COMPLETED
+        ride.completed_at = timezone.now()
+        ride.save(update_fields=["booking", "status", "completed_at"])
     # WHY complete_booking(), not booking.complete(): the earlier version
     # only flipped the Booking's own status flag — the escrow stayed HELD
     # forever, meaning the driver was never actually paid. complete_booking()
     # is the one real function that both completes the booking AND
     # releases the escrow it's holding.
-    from transactions.services import complete_booking
-    escrow = complete_booking(booking=booking)
-
-    return booking, escrow
+    complete_booking(booking=booking)
+    return ride
 
 
 class NotPartyToRideError(Exception):
@@ -714,6 +940,66 @@ def post_ride_message(*, ride, sender, text: str):
             related_reference=str(ride.id),
         )
     return message
+
+
+# A trip can be reported for this long after it was requested.
+RIDE_ISSUE_WINDOW_DAYS = 14
+
+
+class RideIssueNotAllowedError(Exception):
+    pass
+
+
+def report_ride_issue(*, ride, user, category: str, description: str):
+    """The rider or the assigned driver reports a problem with a trip; every admin is alerted.
+    One open report per person per trip, and only for trips that actually got going or ended."""
+    from datetime import timedelta
+    from django.db import IntegrityError, transaction
+    from django.utils import timezone
+    from identity.models import User
+    from notifications.services import notify
+    from .models import RideIssueReport, RideIssueStatus, RideIssueCategory, RideStatus
+
+    if user.id not in (ride.rider_id, ride.driver_id):
+        raise NotPartyToRideError("Only the rider or the assigned driver can report a problem with this ride.")
+    if ride.status == RideStatus.REQUESTED:
+        raise RideIssueNotAllowedError("This ride hasn't been accepted yet. You can cancel it instead.")
+    if timezone.now() - ride.requested_at > timedelta(days=RIDE_ISSUE_WINDOW_DAYS):
+        raise RideIssueNotAllowedError(f"Problems can only be reported within {RIDE_ISSUE_WINDOW_DAYS} days of the ride.")
+    if RideIssueReport.objects.filter(ride=ride, reported_by=user, status=RideIssueStatus.OPEN).exists():
+        raise RideIssueNotAllowedError("You already reported a problem with this ride. Our team is looking into it.")
+    try:
+        with transaction.atomic():
+            report = RideIssueReport.objects.create(ride=ride, reported_by=user, category=category, description=description)
+    except IntegrityError:
+        raise RideIssueNotAllowedError("You already reported a problem with this ride. Our team is looking into it.")
+
+    who = "rider" if user.id == ride.rider_id else "driver"
+    message = (
+        f"The {who} {user.full_name or user.username} ({user.phone}) reported: {RideIssueCategory(category).label}. "
+        f"Route: {ride.pickup_description} → {ride.dropoff_description}. \"{description[:200]}\""
+    )
+    for admin in User.objects.filter(admin_profile__isnull=False):
+        notify(recipient=admin, notification_type="RIDE_ISSUE", title="A ride problem was reported", message=message, related_reference=str(ride.id))
+    return report
+
+
+def resolve_ride_issue(*, report, admin, notes: str):
+    """An admin closes a ride problem report and the reporter is told the outcome."""
+    from django.utils import timezone
+    from .models import RideIssueStatus
+    if report.status == RideIssueStatus.RESOLVED:
+        raise RideIssueNotAllowedError("This report has already been resolved.")
+    report.status = RideIssueStatus.RESOLVED
+    report.resolved_at = timezone.now()
+    report.resolved_by = admin
+    report.resolution_notes = notes
+    report.save(update_fields=["status", "resolved_at", "resolved_by", "resolution_notes"])
+    _notify_ride(
+        report.reported_by, "Your ride report was reviewed",
+        notes or "The Oaziland team has reviewed the problem you reported with this ride.", report.ride,
+    )
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -806,8 +1092,50 @@ def _set_listing_status(listing_id, status: str):
 
 def _set_order_listing_status(order, status: str):
     # A car booked for dates never took the listing off the market, so its order never changes the listing status.
-    if not order.booked_dates:
-        _set_listing_status(order.listing_id, status)
+    if order.booked_dates:
+        return
+    if _is_goods_stock_order(order):
+        # Goods sell from stock: an order ending without a sale puts its units back; a completed sale only ends the
+        # listing once nothing is left.
+        if status == "AVAILABLE":
+            _return_stock(order)
+        else:
+            from .models import GoodsListing
+            GoodsListing.objects.filter(pk=order.listing_id, quantity=0, removed_by_moderation=False).update(availability_status=status)
+        return
+    _set_listing_status(order.listing_id, status)
+
+
+def _is_goods_stock_order(order) -> bool:
+    return order.price_breakdown.get("stock") is True if isinstance(order.price_breakdown, dict) else False
+
+
+def _return_stock(order):
+    """Puts an order's units back in stock, once. A listing that sold out on this order is offered again; one the
+    seller paused or an admin took down stays as it is."""
+    from django.db.models import F
+    from .models import AvailabilityStatus, GoodsListing, MarketplaceOrder
+    with db_transaction.atomic():
+        units = MarketplaceOrder.objects.select_for_update().filter(pk=order.pk).values_list("stock_taken", flat=True).first() or 0
+        if not units:
+            return
+        MarketplaceOrder.objects.filter(pk=order.pk).update(stock_taken=0)
+        listing = GoodsListing.objects.select_for_update().filter(pk=order.listing_id).first()
+        if listing is None:
+            return
+        sold_out = listing.quantity == 0
+        variant = order.variant if order.variant_id else None
+        if variant is not None:
+            from .models import GoodsVariant
+            GoodsVariant.objects.filter(pk=variant.pk).update(quantity=F("quantity") + units)
+        # A variant the seller has since switched off no longer counts toward the listing's stock.
+        if variant is None or variant.is_active:
+            GoodsListing.objects.filter(pk=listing.pk).update(quantity=F("quantity") + units)
+        else:
+            units = 0
+        if units and sold_out and not listing.removed_by_moderation and listing.availability_status != AvailabilityStatus.AVAILABLE:
+            GoodsListing.objects.filter(pk=listing.pk).update(availability_status=AvailabilityStatus.AVAILABLE)
+    order.stock_taken = 0
 
 
 def _goods_delivery(listing, delivery: dict):
@@ -833,18 +1161,23 @@ def _goods_delivery(listing, delivery: dict):
 
 
 def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: str, rental: dict = None,
-                offer_id=None, delivery: dict = None):
+                offer_id=None, delivery: dict = None, quantity: int = 1, coupon_code: str = "", variant_id=None):
     """Starts payment and reserves the listing until the provider confirms it by webhook. A car rented by the day
     needs `rental` (start_date, end_date, with_driver, delivery): only those days are reserved. offer_id pays the
-    price agreed in an accepted offer; goods take a `delivery` choice (method, address) whose fee is added."""
+    price agreed in an accepted offer; goods take a `delivery` choice (method, address) whose fee is added, may use
+    a seller's coupon_code and, when the item has options, need a variant_id."""
     from .car_rentals import is_dated_car_rental
     from .offers import offer_for_checkout, reserving_offer, OfferError
+    from .shops import ensure_not_on_vacation
+    ensure_not_on_vacation(listing.lister_user_id)
     offer = None
     if offer_id:
         try:
             offer = offer_for_checkout(offer_id=offer_id, listing=listing, buyer=buyer)
         except OfferError as e:
             raise OrderError(str(e))
+    if coupon_code and offer is not None:
+        raise OrderError("A coupon can't be combined with an accepted offer.")
     if is_dated_car_rental(listing):
         return _place_dated_car_rental(
             car=listing, buyer=buyer, lock_client=lock_client, payment_gateway=payment_gateway,
@@ -858,12 +1191,28 @@ def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: s
     if listing.lister_user_id == buyer.id:
         raise OrderError("You cannot buy your own listing.")
     holder = reserving_offer(listing)
-    if holder is not None and holder.buyer_id != buyer.id:
+    # Goods sell from stock, so an accepted offer keeps one unit for its buyer (see _place_goods_order), not the whole item.
+    if holder is not None and holder.buyer_id != buyer.id and not isinstance(listing, GoodsListing):
         raise ListingNotAvailableError(f"This item is reserved for another buyer until {holder.pay_by:%d %b %H:%M}.")
-    price = offer.agreed_amount_xaf if offer is not None else listing.price_xaf
+    price = offer.agreed_amount_xaf if offer is not None else listing.current_price_xaf()
     method, delivery_fee, address = "", Decimal("0"), ""
+    if coupon_code and not isinstance(listing, GoodsListing):
+        raise OrderError("Coupons can only be used on goods.")
     if isinstance(listing, GoodsListing):
+        from .variants import resolve_variant
+        variant = resolve_variant(listing, variant_id)
+        if variant is not None:
+            if offer is not None:
+                raise OrderError("Offers aren't available on items with options.")
+            price = price + variant.price_delta_xaf
+        elif variant_id:
+            raise OrderError("That option isn't available any more.")
         method, delivery_fee, address = _goods_delivery(listing, delivery)
+        return _place_goods_order(
+            listing=listing, buyer=buyer, payment_gateway=payment_gateway, phone_number=phone_number, offer=offer,
+            holder=holder, unit_price=price, quantity=quantity, method=method, delivery_fee=delivery_fee, address=address,
+            coupon_code=coupon_code, variant=variant,
+        )
     amount = price + delivery_fee
     # A rental deposit is paid in the same charge as the rent and held separately once the payment is confirmed.
     deposit_xaf = listing.security_deposit_xaf if is_rental(listing) else Decimal("0")
@@ -901,6 +1250,95 @@ def place_order(*, listing, buyer, lock_client, payment_gateway, phone_number: s
     except Exception:
         _set_listing_status(listing.pk, AvailabilityStatus.AVAILABLE)
         raise
+    return order
+
+
+def _place_goods_order(*, listing, buyer, payment_gateway, phone_number, offer, holder, unit_price, quantity,
+                       method, delivery_fee, address, coupon_code: str = "", variant=None):
+    """Buys `quantity` units of a goods listing. The units come out of stock under a row lock while the buyer pays,
+    so several buyers can buy from the same stock at once but never more than is there; at 0 the listing is sold
+    out. A failed or abandoned payment, a cancellation or a refund puts them back (see _return_stock)."""
+    import uuid as uuid_module
+    from django.utils import timezone
+    from transactions.models import Booking, BookingStatus, BookingType
+    from transactions.services import HOLD_TTL_SECONDS, initiate_booking_payment, fail_payment
+    from transactions.locks import get_booking_lock_client
+    from .engagement import expiry_cutoff
+    from .models import AvailabilityStatus, GoodsListing, MarketplaceOrder, MarketplaceOrderStatus
+
+    try:
+        quantity = int(quantity or 1)
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity < 1:
+        raise OrderError("Choose how many you want to buy.")
+    if offer is not None and quantity != 1:
+        raise OrderError("An accepted offer is for one item. Buy more at the listed price in a separate order.")
+    # An offer accepted for another buyer keeps one unit for them until they place their order, which takes its own
+    # unit out of stock (counting the held unit as well then would reserve it twice).
+    from .offers import _has_live_order
+    held_for_other = 1 if holder is not None and holder.buyer_id != buyer.id and not _has_live_order(holder) else 0
+    price = unit_price * quantity
+    amount = price + delivery_fee
+    with db_transaction.atomic():
+        stock = GoodsListing.objects.select_for_update().filter(
+            pk=listing.pk, availability_status=AvailabilityStatus.AVAILABLE, removed_by_moderation=False,
+            renewed_at__gte=expiry_cutoff(),
+        ).first()
+        if stock is None or stock.quantity - held_for_other < 1:
+            if stock is not None and held_for_other:
+                raise ListingNotAvailableError(f"The last one is reserved for another buyer until {holder.pay_by:%d %b %H:%M}.")
+            raise ListingNotAvailableError("This listing is no longer available.")
+        if stock.quantity - held_for_other < quantity:
+            left = stock.quantity - held_for_other
+            raise ListingNotAvailableError(f"Only {left} left in stock. Lower the quantity.")
+        stock.quantity -= quantity
+        fields = ["quantity"]
+        if stock.quantity == 0:
+            stock.availability_status = AvailabilityStatus.UNDER_OFFER
+            fields.append("availability_status")
+        stock.save(update_fields=fields)
+        if variant is not None:
+            from .models import GoodsVariant
+            chosen = GoodsVariant.objects.select_for_update().filter(pk=variant.pk, listing_id=listing.pk, is_active=True).first()
+            if chosen is None:
+                raise ListingNotAvailableError("That option isn't available any more.")
+            if chosen.quantity < quantity:
+                raise ListingNotAvailableError(f"Only {chosen.quantity} left in \"{chosen.label}\". Lower the quantity.")
+            chosen.quantity -= quantity
+            chosen.save(update_fields=["quantity"])
+        coupon, discount = None, Decimal("0")
+        if coupon_code:
+            from .promotions import checked_coupon, redeem
+            coupon, discount = checked_coupon(seller_id=listing.lister_user_id, code=coupon_code, buyer=buyer, subtotal=price)
+            redeem(coupon)
+            amount = price - discount + delivery_fee
+        booking = Booking.objects.create(
+            booking_type=BookingType.MARKETPLACE_ITEM, target_content_type="marketplace.GoodsListing", target_id=listing.pk,
+            requester=buyer, status=BookingStatus.PENDING, amount_xaf=amount, idempotency_key=str(uuid_module.uuid4()),
+            hold_expires_at=timezone.now() + timezone.timedelta(seconds=HOLD_TTL_SECONDS),
+        )
+        breakdown = {"stock": True, "unit_price_xaf": str(unit_price), "quantity": quantity, "price_xaf": str(price), "delivery_fee_xaf": str(delivery_fee)}
+        if variant is not None:
+            breakdown.update(variant_label=variant.label, sku=variant.sku)
+        if coupon is not None:
+            breakdown.update(discount_xaf=str(discount), coupon_code=coupon.code)
+        order = MarketplaceOrder.objects.create(
+            listing=listing, buyer=buyer, booking=booking, amount_xaf=amount, status=MarketplaceOrderStatus.PAYMENT_PENDING,
+            offer=offer, delivery_method=method, delivery_fee_xaf=delivery_fee, delivery_address=address,
+            quantity=quantity, stock_taken=quantity, price_breakdown=breakdown, coupon=coupon, discount_xaf=discount,
+            variant=variant, variant_label=variant.label if variant is not None else "",
+        )
+    try:
+        debit = initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
+    except Exception:
+        fail_payment(lock_client=get_booking_lock_client(), booking=booking)
+        fail_marketplace_order_payment(booking=booking)
+        raise
+    if not debit.success:
+        fail_payment(lock_client=get_booking_lock_client(), booking=booking)
+        fail_marketplace_order_payment(booking=booking)
+        raise OrderPaymentFailedError("The payment could not be completed. Please try again.")
     return order
 
 
@@ -998,6 +1436,7 @@ def confirm_marketplace_order_payment(*, booking):
     if order is None or order.status != MarketplaceOrderStatus.PAYMENT_PENDING:
         return order
     with db_transaction.atomic():
+        siblings = []
         updated = MarketplaceOrder.objects.filter(
             pk=order.pk, status=MarketplaceOrderStatus.PAYMENT_PENDING,
         ).update(status=MarketplaceOrderStatus.PAID)
@@ -1006,8 +1445,18 @@ def confirm_marketplace_order_payment(*, booking):
         if updated and order.offer_id:
             from .models import MarketplaceOffer, OfferStatus
             MarketplaceOffer.objects.filter(pk=order.offer_id).update(status=OfferStatus.PAID)
+        if updated and order.checkout_lead:
+            from .cart import split_checkout
+            siblings = split_checkout(order)
     if updated:
         order.status = MarketplaceOrderStatus.PAID
+        for sibling in siblings:
+            _notify_order(
+                order.listing.lister_user, "New order on your listing",
+                f"{order.buyer.full_name or order.buyer.username} paid {sibling.amount_xaf} XAF for \"{sibling.listing.title}\" "
+                "in a cart order. Hand it over, then the payment is released once they confirm.",
+                sibling,
+            )
         if order.needs_approval:
             from .car_rentals import approval_deadline
             deadline = timezone_local_text(approval_deadline(order))
@@ -1023,10 +1472,36 @@ def confirm_marketplace_order_payment(*, booking):
             order.listing.lister_user,
             "New order on your listing",
             f"{order.buyer.full_name or order.buyer.username} paid {order.amount_xaf} XAF for "
-            f"\"{order.listing.title}\". Hand it over, then the payment is released once they confirm.",
+            f"\"{order.listing.title}\"{f' ({order.variant_label})' if order.variant_label else ''}. Hand it over, then the payment is released once they confirm.",
             order,
         )
+        _warn_low_stock(order)
     return order
+
+
+LOW_STOCK_THRESHOLD = 3
+
+
+def _warn_low_stock(order) -> None:
+    """Tells the seller once when a paid sale takes a goods item (or one of its versions) down to the last few units."""
+    if not _is_goods_stock_order(order):
+        return
+    from .models import GoodsListing, GoodsVariant
+    listing = GoodsListing.objects.filter(pk=order.listing_id).first()
+    if listing is None:
+        return
+    left, label = listing.quantity, ""
+    if order.variant_id:
+        variant = GoodsVariant.objects.filter(pk=order.variant_id).first()
+        if variant is not None and variant.is_active:
+            left, label = variant.quantity, f" ({variant.label})"
+    # Only the sale that crosses the threshold warns, not every later one.
+    if left > LOW_STOCK_THRESHOLD or left + order.quantity <= LOW_STOCK_THRESHOLD:
+        return
+    title = "An item sold out" if left == 0 else "Running low on stock"
+    body = f"\"{listing.title}\"{label} has no units left." if left == 0 else f"Only {left} left of \"{listing.title}\"{label}. Restock it to keep selling."
+    from notifications.services import notify
+    notify(recipient=listing.lister_user, notification_type="LOW_STOCK", title=title, message=body, related_reference=str(listing.pk))
 
 
 def fail_marketplace_order_payment(*, booking):
@@ -1035,9 +1510,19 @@ def fail_marketplace_order_payment(*, booking):
     order = MarketplaceOrder.objects.filter(booking=booking).first()
     if order is None or order.status != MarketplaceOrderStatus.PAYMENT_PENDING:
         return order
-    MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
+    # Only the request that actually cancels the order puts the listing (or its stock) back.
+    if not MarketplaceOrder.objects.filter(pk=order.pk, status=MarketplaceOrderStatus.PAYMENT_PENDING).update(status=MarketplaceOrderStatus.CANCELLED):
+        order.refresh_from_db()
+        return order
     _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
     order.status = MarketplaceOrderStatus.CANCELLED
+    # A coupon is counted once per payment, and a failed cart payment cancels every item bought with it.
+    if order.coupon_id and (order.checkout_id is None or order.checkout_lead):
+        from .promotions import release
+        release(order)
+    if order.checkout_lead:
+        from .cart import cancel_checkout_siblings
+        cancel_checkout_siblings(order)
     return order
 
 
@@ -1113,13 +1598,23 @@ def mark_handed_over(*, order, seller):
     return order
 
 
-def _release_to_seller(order):
+def _claim_order(order, *, to_status, from_statuses, **changes):
+    """Moves the order to to_status only if it is still in one of from_statuses, else raises OrderError. Run it in
+    the same transaction as the money movement it guards: two concurrent settlements (a buyer confirming while the
+    sweep auto-releases, a cancel racing a handover) can then never both pay out."""
+    from .models import MarketplaceOrder
+    if not MarketplaceOrder.objects.filter(pk=order.pk, status__in=from_statuses).update(status=to_status, **changes):
+        raise OrderError("This order has changed in the meantime. Refresh and try again.")
+
+
+def _release_to_seller(order, *, from_statuses=("PAID", "HANDED_OVER")):
     from django.utils import timezone
     from transactions.services import complete_booking
-    from .models import MarketplaceOrder, MarketplaceOrderStatus, AvailabilityStatus
-    complete_booking(booking=order.booking)
-    MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.COMPLETED, completed_at=timezone.now())
-    _set_order_listing_status(order, AvailabilityStatus.UNAVAILABLE)
+    from .models import MarketplaceOrderStatus, AvailabilityStatus
+    with db_transaction.atomic():
+        _claim_order(order, to_status=MarketplaceOrderStatus.COMPLETED, from_statuses=from_statuses, completed_at=timezone.now())
+        complete_booking(booking=order.booking)
+        _set_order_listing_status(order, AvailabilityStatus.UNAVAILABLE)
     order.refresh_from_db()
 
 
@@ -1127,35 +1622,39 @@ def _deposit_escrow(order):
     return getattr(order.deposit_booking, "escrow", None) if order.deposit_booking_id else None
 
 
-def _return_deposit(order, *, to_wallet: bool = False) -> bool:
-    """Gives the held deposit back to the renter (into their wallet when to_wallet). Returns False when there is
-    no unsettled deposit to return."""
+def _return_deposit(order) -> bool:
+    """Gives the held deposit back to the renter's Oaziland wallet. Returns False when there is no unsettled deposit
+    to return."""
     from django.utils import timezone
     from transactions.models import EscrowStatus
     from .models import MarketplaceOrder, DepositStatus
     escrow = _deposit_escrow(order)
     if escrow is None or escrow.status not in (EscrowStatus.HELD, EscrowStatus.DISPUTED):
         return False
-    if to_wallet:
+    with db_transaction.atomic():
+        # Claiming the deposit first means a second, concurrent return finds nothing left to return.
+        if not MarketplaceOrder.objects.filter(
+            pk=order.pk, deposit_status__in=(DepositStatus.HELD, DepositStatus.CLAIMED),
+        ).update(deposit_status=DepositStatus.RETURNED, deposit_settled_at=timezone.now()):
+            return False
         from transactions.services import settle_escrow
         settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"deposit, order #{order.pk}")
-    else:
-        escrow.refund()
-        order.deposit_booking.cancel()
-    MarketplaceOrder.objects.filter(pk=order.pk).update(deposit_status=DepositStatus.RETURNED, deposit_settled_at=timezone.now())
     order.deposit_status = DepositStatus.RETURNED
     return True
 
 
 def _refund_to_buyer(order):
-    from .models import MarketplaceOrder, MarketplaceOrderStatus, AvailabilityStatus
-    escrow = order.booking.escrow
-    escrow.refund()
-    order.booking.cancel()
-    # A refunded rental also gives back the deposit that was paid with it.
-    _return_deposit(order)
-    MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
-    _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
+    """Refunds an order the seller hasn't handed over yet to the buyer's wallet (only a PAID order can be refunded this way)."""
+    from transactions.services import settle_escrow
+    from .models import MarketplaceOrderStatus, AvailabilityStatus
+    with db_transaction.atomic():
+        _claim_order(order, to_status=MarketplaceOrderStatus.CANCELLED, from_statuses=(MarketplaceOrderStatus.PAID,))
+        escrow = order.booking.escrow
+        # Back to the buyer's Oaziland wallet (settle_escrow also cancels the booking).
+        settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"order #{order.pk}")
+        # A refunded rental also gives back the deposit that was paid with it.
+        _return_deposit(order)
+        _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
     order.refresh_from_db()
 
 
@@ -1205,7 +1704,8 @@ def return_deposit(*, order, seller):
     """The seller confirms the rental came back in good order; the deposit goes back to the renter."""
     _require_seller(order, seller)
     _require_held_deposit(order)
-    _return_deposit(order)
+    if not _return_deposit(order):
+        raise OrderError("There is no held deposit on this order.")
     _relist_after_rental(order)
     _notify_order(order.buyer, "Your deposit was returned", f"The seller confirmed the return of \"{order.listing.title}\". Your {order.deposit_xaf} XAF deposit was returned.", order)
     return order
@@ -1217,8 +1717,10 @@ def claim_deposit(*, order, seller, reason: str):
     from .models import MarketplaceOrder, DepositStatus
     _require_seller(order, seller)
     escrow = _require_held_deposit(order)
-    open_dispute(escrow=escrow, raised_by=seller, reason=reason)
-    MarketplaceOrder.objects.filter(pk=order.pk).update(deposit_status=DepositStatus.CLAIMED)
+    with db_transaction.atomic():
+        if not MarketplaceOrder.objects.filter(pk=order.pk, deposit_status=DepositStatus.HELD).update(deposit_status=DepositStatus.CLAIMED):
+            raise OrderError("There is no held deposit on this order.")
+        open_dispute(escrow=escrow, raised_by=seller, reason=reason)
     order.deposit_status = DepositStatus.CLAIMED
     _notify_order(order.buyer, "The seller claimed your deposit", "Support will review the claim and decide whether the deposit is returned to you or paid to the seller.", order)
     return order
@@ -1233,16 +1735,22 @@ def _resolve_deposit_dispute(order, payer_amount):
     if order.deposit_status != DepositStatus.CLAIMED:
         return order
     escrow = _deposit_escrow(order)
-    if payer_amount == 0:
-        complete_booking(booking=order.deposit_booking)
-        status = DepositStatus.FORFEITED
-    elif payer_amount >= escrow.gross_amount_xaf:
-        _return_deposit(order, to_wallet=True)
-        status = DepositStatus.RETURNED
-    else:
-        settle_escrow(escrow=escrow, payer_amount_xaf=payer_amount, reference=f"deposit, order #{order.pk}")
-        status = DepositStatus.SPLIT
-    MarketplaceOrder.objects.filter(pk=order.pk).update(deposit_status=status, deposit_settled_at=timezone.now())
+    with db_transaction.atomic():
+        if payer_amount != 0 and payer_amount >= escrow.gross_amount_xaf:
+            if not _return_deposit(order):
+                return order
+            status = DepositStatus.RETURNED
+        else:
+            status = DepositStatus.FORFEITED if payer_amount == 0 else DepositStatus.SPLIT
+            # Claim the decision first so a repeated or concurrent resolution can't pay the deposit out twice.
+            if not MarketplaceOrder.objects.filter(pk=order.pk, deposit_status=DepositStatus.CLAIMED).update(
+                deposit_status=status, deposit_settled_at=timezone.now(),
+            ):
+                return order
+            if payer_amount == 0:
+                complete_booking(booking=order.deposit_booking)
+            else:
+                settle_escrow(escrow=escrow, payer_amount_xaf=payer_amount, reference=f"deposit, order #{order.pk}")
     _relist_after_rental(order)
     order.refresh_from_db()
     escrow.refresh_from_db()
@@ -1285,9 +1793,10 @@ def cancel_order(*, order, buyer):
     fee = late_cancellation_fee(order)
     if fee > 0:
         payment = order.booking.escrow
-        settle_escrow(escrow=payment, payer_amount_xaf=payment.gross_amount_xaf - fee, reference=f"late cancellation, order #{order.pk}")
-        _return_deposit(order, to_wallet=True)
-        MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
+        with db_transaction.atomic():
+            _claim_order(order, to_status=MarketplaceOrderStatus.CANCELLED, from_statuses=(MarketplaceOrderStatus.PAID,))
+            settle_escrow(escrow=payment, payer_amount_xaf=payment.gross_amount_xaf - fee, reference=f"late cancellation, order #{order.pk}")
+            _return_deposit(order)
         order.refresh_from_db()
         _notify_order(order.buyer, "Rental cancelled", f"Your rental of \"{order.listing.title}\" was cancelled less than a day before it started, so one day's rent ({fee:.0f} XAF) went to the owner. The rest was returned to your Oaziland wallet.", order)
         _notify_order(order.listing.lister_user, "Rental cancelled", f"The renter cancelled \"{order.listing.title}\" late. One day's rent ({fee:.0f} XAF, minus the platform fee) was paid to your wallet.", order)
@@ -1304,7 +1813,7 @@ def decline_order(*, order, seller):
     if order.status != MarketplaceOrderStatus.PAID or not _escrow_is_held(order):
         raise OrderError("This order can no longer be declined.")
     _refund_to_buyer(order)
-    _notify_order(order.buyer, "Your order was declined", f"The seller declined your order for \"{order.listing.title}\" and you were refunded in full.", order)
+    _notify_order(order.buyer, "Your order was declined", f"The seller declined your order for \"{order.listing.title}\" and you were refunded in full to your Oaziland wallet.", order)
     return order
 
 
@@ -1316,21 +1825,51 @@ def dispute_order(*, order, user, reason: str):
         raise NotPartyToOrderError("Only the buyer or the seller can report a problem.")
     if order.status not in (MarketplaceOrderStatus.PAID, MarketplaceOrderStatus.HANDED_OVER) or not _escrow_is_held(order):
         raise OrderError("A problem can only be reported while the payment is held in escrow.")
-    open_dispute(escrow=order.booking.escrow, raised_by=user, reason=reason)
-    MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.DISPUTED)
+    with db_transaction.atomic():
+        _claim_order(
+            order, to_status=MarketplaceOrderStatus.DISPUTED,
+            from_statuses=(MarketplaceOrderStatus.PAID, MarketplaceOrderStatus.HANDED_OVER),
+        )
+        open_dispute(escrow=order.booking.escrow, raised_by=user, reason=reason)
     order.refresh_from_db()
     other = order.listing.lister_user if user.id == order.buyer_id else order.buyer
     _notify_order(other, "A problem was reported", "Support will review this order and decide what happens to the payment.", order)
     return order
 
 
+def _settle_held_order(order, payer_amount_xaf, *, from_statuses, reference: str = "") -> str:
+    """Pays out an order's held payment: payer_amount_xaf back to the buyer (0 pays the seller in full, the full
+    amount refunds and cancels the order). Returns "released", "refunded" or "split"; raises OrderError when the order
+    is no longer in one of from_statuses."""
+    from django.utils import timezone
+    from transactions.services import settle_escrow
+    from .models import MarketplaceOrderStatus, AvailabilityStatus
+    payment = order.booking.escrow
+    reference = reference or f"order #{order.pk}"
+    if payer_amount_xaf == 0:
+        _release_to_seller(order, from_statuses=from_statuses)
+        return "released"
+    if payer_amount_xaf >= payment.gross_amount_xaf:
+        with db_transaction.atomic():
+            _claim_order(order, to_status=MarketplaceOrderStatus.CANCELLED, from_statuses=from_statuses)
+            settle_escrow(escrow=payment, payer_amount_xaf=payment.gross_amount_xaf, reference=reference)
+            # A refunded rental also gives back the deposit that was paid with it.
+            _return_deposit(order)
+            _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
+        return "refunded"
+    with db_transaction.atomic():
+        _claim_order(order, to_status=MarketplaceOrderStatus.COMPLETED, from_statuses=from_statuses, completed_at=timezone.now())
+        settle_escrow(escrow=payment, payer_amount_xaf=payer_amount_xaf, reference=reference)
+        _set_order_listing_status(order, AvailabilityStatus.UNAVAILABLE)
+    payment.refresh_from_db()
+    return "split"
+
+
 def resolve_order_dispute(*, order, outcome: str = "", escrow=None, payer_amount_xaf=None):
     """Applies an admin's decision on a disputed order. payer_amount_xaf is what goes back to the buyer's wallet
     (0 pays the seller in full, the full amount refunds the order); when it is not given, outcome RELEASE or
     REFUND decides. When the disputed escrow is the order's rental deposit, only the deposit is decided."""
-    from django.utils import timezone
-    from transactions.services import settle_escrow
-    from .models import MarketplaceOrder, MarketplaceOrderStatus, AvailabilityStatus
+    from .models import MarketplaceOrderStatus
     if payer_amount_xaf is None:
         if outcome not in ("RELEASE", "REFUND"):
             raise ValueError("outcome must be 'RELEASE' or 'REFUND'")
@@ -1341,21 +1880,18 @@ def resolve_order_dispute(*, order, outcome: str = "", escrow=None, payer_amount
     if order.status in (MarketplaceOrderStatus.COMPLETED, MarketplaceOrderStatus.CANCELLED):
         return order
     payment = order.booking.escrow
-    if payer_amount_xaf == 0:
-        _release_to_seller(order)
+    open_statuses = (MarketplaceOrderStatus.PAID, MarketplaceOrderStatus.HANDED_OVER, MarketplaceOrderStatus.DISPUTED)
+    try:
+        result = _settle_held_order(order, payer_amount_xaf, from_statuses=open_statuses)
+    except OrderError:
+        # Already settled by a concurrent request: nothing more to do.
+        order.refresh_from_db()
+        return order
+    if result == "released":
         message = "Support released the payment to the seller."
-    elif payer_amount_xaf >= payment.gross_amount_xaf:
-        settle_escrow(escrow=payment, payer_amount_xaf=payment.gross_amount_xaf, reference=f"order #{order.pk}")
-        # A refunded rental also gives back the deposit that was paid with it.
-        _return_deposit(order, to_wallet=True)
-        MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.CANCELLED)
-        _set_order_listing_status(order, AvailabilityStatus.AVAILABLE)
+    elif result == "refunded":
         message = "Support refunded the buyer in full to their Oaziland wallet."
     else:
-        settle_escrow(escrow=payment, payer_amount_xaf=payer_amount_xaf, reference=f"order #{order.pk}")
-        MarketplaceOrder.objects.filter(pk=order.pk).update(status=MarketplaceOrderStatus.COMPLETED, completed_at=timezone.now())
-        _set_order_listing_status(order, AvailabilityStatus.UNAVAILABLE)
-        payment.refresh_from_db()
         message = (
             f"Support split the payment: {payment.refunded_amount_xaf:.0f} XAF back to the buyer's wallet, "
             f"{payment.payee_amount_xaf:.0f} XAF to the seller's wallet (after the platform fee)."
@@ -1374,6 +1910,19 @@ def order_for_escrow(escrow):
     ).select_related("listing__lister_user", "buyer").first()
 
 
+def _sweep_step(order, action) -> bool:
+    """Runs one order's step of the scheduled sweep. A step that fails (or that a concurrent request already did) is
+    skipped and logged instead of aborting the sweep, so one bad order can't hold up every other refund or payout.
+    False from the action also counts as "nothing done"."""
+    try:
+        return action() is not False
+    except OrderError:
+        return False
+    except Exception:
+        logger.exception("Marketplace sweep failed on order %s", order.pk)
+        return False
+
+
 def process_marketplace_orders(*, now=None) -> dict:
     """Scheduled sweep: refunds orders a seller never handed over within ORDER_SELLER_RESPONSE_DAYS, releases
     payment on orders handed over but never confirmed within ORDER_AUTO_RELEASE_HOURS, relists rented-out listings
@@ -1388,14 +1937,16 @@ def process_marketplace_orders(*, now=None) -> dict:
     pending = MarketplaceOrder.objects.filter(
         status=MarketplaceOrderStatus.PAYMENT_PENDING,
         booking__hold_expires_at__lt=now,
-    ).select_related("booking")
+    ).exclude(checkout__isnull=False, checkout_lead=False).select_related("booking")  # a cart's other items follow their lead order
     for order in pending:
         from transactions.services import fail_payment
         from transactions.locks import get_booking_lock_client
 
-        fail_payment(lock_client=get_booking_lock_client(), booking=order.booking)
-        fail_marketplace_order_payment(booking=order.booking)
-        expired.append(order)
+        def expire_payment(order=order):
+            fail_payment(lock_client=get_booking_lock_client(), booking=order.booking)
+            fail_marketplace_order_payment(booking=order.booking)
+        if _sweep_step(order, expire_payment):
+            expired.append(order)
     stale = MarketplaceOrder.objects.filter(
         status=MarketplaceOrderStatus.PAID, booked_dates=False, created_at__lt=now - timedelta(days=ORDER_SELLER_RESPONSE_DAYS),
     ).select_related("listing__lister_user", "buyer", "booking")
@@ -1405,8 +1956,9 @@ def process_marketplace_orders(*, now=None) -> dict:
     ).select_related("listing__lister_user", "buyer", "booking"))
     for order in stale:
         if _escrow_is_held(order):
-            _refund_to_buyer(order)
-            _notify_order(order.buyer, "Order refunded", f"The seller did not hand over \"{order.listing.title}\" in time, so you were refunded in full.", order)
+            if not _sweep_step(order, lambda: _refund_to_buyer(order)):
+                continue
+            _notify_order(order.buyer, "Order refunded", f"The seller did not hand over \"{order.listing.title}\" in time, so you were refunded in full to your Oaziland wallet.", order)
             _notify_order(order.listing.lister_user, "Order cancelled", f"You did not hand over \"{order.listing.title}\" in time, so the order was cancelled and refunded.", order)
             refunded.append(order)
     from .car_rentals import approval_deadline
@@ -1415,16 +1967,22 @@ def process_marketplace_orders(*, now=None) -> dict:
     ).select_related("listing__lister_user", "buyer", "booking")
     for order in unanswered:
         if approval_deadline(order) <= now and _escrow_is_held(order):
-            _refund_to_buyer(order)
-            _notify_order(order.buyer, "Booking request expired", f"The owner of \"{order.listing.title}\" did not answer your request in time, so you were refunded in full.", order)
+            if not _sweep_step(order, lambda: _refund_to_buyer(order)):
+                continue
+            _notify_order(order.buyer, "Booking request expired", f"The owner of \"{order.listing.title}\" did not answer your request in time, so you were refunded in full to your Oaziland wallet.", order)
             _notify_order(order.listing.lister_user, "Booking request expired", f"You did not answer the booking request for \"{order.listing.title}\" in time, so it expired and the renter was refunded.", order)
             refunded.append(order)
     overdue = MarketplaceOrder.objects.filter(
         status=MarketplaceOrderStatus.HANDED_OVER, handed_over_at__lt=now - timedelta(hours=ORDER_AUTO_RELEASE_HOURS),
     ).select_related("listing__lister_user", "buyer", "booking")
+    from .fulfilment import auto_release_at, has_open_return
     for order in overdue:
+        # A parcel still on its way, or a return request still open, keeps the payment held.
+        if (auto_release_at(order) or now) > now or has_open_return(order):
+            continue
         if _escrow_is_held(order):
-            _release_to_seller(order)
+            if not _sweep_step(order, lambda: _release_to_seller(order, from_statuses=(MarketplaceOrderStatus.HANDED_OVER,))):
+                continue
             _notify_order(order.buyer, "Payment released", f"You did not respond within {ORDER_AUTO_RELEASE_HOURS} hours of the handover, so the payment was released to the seller.", order)
             _notify_order(order.listing.lister_user, "Payment released", f"The payment for \"{order.listing.title}\" was released to you automatically.", order)
             released.append(order)
@@ -1432,15 +1990,15 @@ def process_marketplace_orders(*, now=None) -> dict:
         status=MarketplaceOrderStatus.COMPLETED, rental_ends_on__lt=today, relisted_at__isnull=True,
     ).select_related("listing__lister_user", "buyer")
     for order in ended:
-        if _relist_after_rental(order):
+        if _sweep_step(order, lambda: _relist_after_rental(order)):
             relisted.append(order)
     unclaimed = MarketplaceOrder.objects.filter(
         status=MarketplaceOrderStatus.COMPLETED, deposit_status=DepositStatus.HELD,
         rental_ends_on__lt=today - timedelta(days=DEPOSIT_RETURN_GRACE_DAYS),
     ).select_related("listing__lister_user", "buyer", "deposit_booking")
     for order in unclaimed:
-        if _return_deposit(order):
-            _notify_order(order.buyer, "Your deposit was returned", f"The seller did not claim your {order.deposit_xaf} XAF deposit for \"{order.listing.title}\", so it was returned to you.", order)
+        if _sweep_step(order, lambda: _return_deposit(order)):
+            _notify_order(order.buyer, "Your deposit was returned", f"The seller did not claim your {order.deposit_xaf} XAF deposit for \"{order.listing.title}\", so it was returned to your Oaziland wallet.", order)
             _notify_order(order.listing.lister_user, "Deposit returned to the renter", f"You did not claim the deposit for \"{order.listing.title}\" within {DEPOSIT_RETURN_GRACE_DAYS} days of the rental ending, so it was returned to the renter.", order)
             deposits_returned.append(order)
     return {"refunded": refunded, "released": released, "expired": expired, "relisted": relisted, "deposits_returned": deposits_returned}

@@ -67,6 +67,11 @@ class ModerationCategory(models.TextChoices):
     SEXUAL_CONTENT = "SEXUAL_CONTENT", "Sexual Content"
     HATE_SPEECH = "HATE_SPEECH", "Hate Speech"
     SPAM = "SPAM", "Spam"
+    VIOLENCE = "VIOLENCE", "Violence"
+    HARASSMENT = "HARASSMENT", "Harassment"
+    SELF_HARM = "SELF_HARM", "Self-harm"
+    # Nothing looked at the content (a video, or the checking service was down): a person should.
+    NOT_SCANNED = "NOT_SCANNED", "Not automatically checked"
 
 
 class ModerationAction(models.TextChoices):

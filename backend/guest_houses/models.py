@@ -10,10 +10,15 @@ was never uploaded to this project, unlike the Event Centers/Hotels/
 Student Hostels spec. Flagged honestly; refine once the full document
 is available, the same as any other spec gap in this codebase.
 """
+import secrets
 import uuid
 from decimal import Decimal
 from django.conf import settings
 from django.db import models
+
+
+def new_export_token() -> str:
+    return secrets.token_urlsafe(32)
 
 
 class OTAChannel(models.TextChoices):
@@ -28,13 +33,22 @@ class ChannelListing(models.Model):
     this matters beyond bookkeeping: it's what lets sync_availability_
     to_channels() and receive_external_booking() know EVERY place this
     property is listed, so a booking on one channel can correctly block
-    all the others — the actual problem a channel manager exists to solve."""
+    all the others — the actual problem a channel manager exists to solve.
+
+    Calendars are synced with iCal, which Airbnb, Booking.com and Vrbo all offer without partner access:
+    `calendar_url` is the channel's export link (imported hourly, so their bookings block nights here) and
+    `export_token` protects the Oaziland feed the channel subscribes to (so ours block nights there)."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     guest_house = models.ForeignKey("property.GuestHouseLodge", on_delete=models.CASCADE, related_name="channel_listings")
     channel = models.CharField(max_length=15, choices=OTAChannel.choices)
     external_listing_id = models.CharField(max_length=255, blank=True)  # blank for DIRECT
     is_active = models.BooleanField(default=True)
     last_synced_at = models.DateTimeField(null=True, blank=True)
+    calendar_url = models.URLField(max_length=600, blank=True)
+    export_token = models.CharField(max_length=64, default=new_export_token)
+    last_error = models.CharField(max_length=255, blank=True)
+    # Nights another channel booked that Oaziland had already sold, so the owner is told once per change.
+    conflict_nights = models.TextField(blank=True)
 
     class Meta:
         db_table = "guest_house_channel_listings"

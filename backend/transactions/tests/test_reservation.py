@@ -19,7 +19,7 @@ from property.models import House, Listing, ListingType, ListingStatus
 from transactions.services import (
     reserve_booking, confirm_payment, complete_booking, InventoryConflictError,
 )
-from transactions.models import BookingType, BookingStatus, EscrowStatus
+from transactions.models import Booking, BookingType, BookingStatus, EscrowStatus
 
 
 class FakeLock:
@@ -199,3 +199,55 @@ def test_a_booking_with_real_payment_reports_has_escrow_true():
     response = client.get(f"/api/bookings/{booking.id}/")
 
     assert response.data["has_escrow"] is True
+
+
+# ---------------------------------------------------------------------
+# POST /api/bookings/ prices the booking on the server, never from the request.
+# ---------------------------------------------------------------------
+def _booking_client(user):
+    from rest_framework.test import APIClient
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from marketplace.tests.test_marketplace_api import _verify
+    _verify(user)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(user).access_token}")
+    return client
+
+
+@pytest.mark.django_db
+def test_booking_api_charges_the_listing_price_whatever_amount_is_sent(sample_listing):
+    guest = User.objects.create(username="price_tamper_guest", phone="+237699555501")
+
+    response = _booking_client(guest).post("/api/bookings/", {
+        "booking_type": "LAND_RESERVATION", "target_content_type": "property.Listing",
+        "target_id": str(sample_listing.id), "amount_xaf": "1",
+    }, format="json")
+
+    assert response.status_code == 201, response.data
+    assert Decimal(response.data["amount_xaf"]) == Decimal("150000")
+    assert response.data["booking_type"] == BookingType.GENERAL_RENTAL
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("target", ["student_hostels.StudentHostel", "hotels.Hotel", "property.Listing"])
+def test_booking_api_refuses_targets_without_a_server_price(sample_listing, target):
+    guest = User.objects.create(username="unpriced_guest", phone="+237699555502")
+    # A real listing id under another type, or an unpublished listing: neither has a price the server can trust.
+    Listing.objects.filter(pk=sample_listing.pk).update(status=ListingStatus.DRAFT)
+
+    response = _booking_client(guest).post("/api/bookings/", {
+        "booking_type": "HOSTEL_SEMESTER", "target_content_type": target,
+        "target_id": str(sample_listing.id), "amount_xaf": "45000",
+    }, format="json")
+
+    assert response.status_code == 400
+    assert not Booking.objects.filter(requester=guest).exists()
+
+
+@pytest.mark.django_db
+def test_booking_api_refuses_booking_your_own_listing(sample_listing):
+    response = _booking_client(sample_listing.listed_by).post("/api/bookings/", {
+        "target_content_type": "property.Listing", "target_id": str(sample_listing.id),
+    }, format="json")
+
+    assert response.status_code == 400

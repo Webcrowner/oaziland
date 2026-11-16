@@ -66,6 +66,9 @@ class User(AbstractUser):
         max_length=10, choices=AccountStatus.choices, default=AccountStatus.ACTIVE,
     )
     suspended_until = models.DateTimeField(null=True, blank=True)  # only meaningful when account_status=SUSPENDED
+    # The one account that owns what Oaziland itself offers (its own hotels, listings, store...). Nobody signs in
+    # as it; admins work on it through a platform session (identity.platform_account).
+    is_platform_account = models.BooleanField(default=False)
 
     REQUIRED_FIELDS = ["phone"]
 
@@ -315,7 +318,10 @@ class MfaChallenge(models.Model):
     code = models.CharField(max_length=10)
     expires_at = models.DateTimeField()
     consumed = models.BooleanField(default=False)  # prevents replaying an old code
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    MAX_FAILED_ATTEMPTS = 5
 
     class Meta:
         db_table = "mfa_challenges"
@@ -323,14 +329,19 @@ class MfaChallenge(models.Model):
     def verify(self, submitted_code: str) -> bool:
         """Checks a code the user typed in against this challenge.
         Returns False (never True) once the code is expired or already used,
-        even if the digits happen to match — a used code is a dead code."""
+        even if the digits happen to match — a used code is a dead code.
+        After 5 wrong guesses the code is dead too, so a 6-digit code can't be brute-forced."""
+        import hmac
         from django.utils import timezone
-        if self.consumed or timezone.now() > self.expires_at:
+        if self.consumed or timezone.now() > self.expires_at or self.failed_attempts >= self.MAX_FAILED_ATTEMPTS:
             return False
-        is_match = submitted_code == self.code
+        is_match = hmac.compare_digest(str(submitted_code or ""), self.code)
         if is_match:
             self.consumed = True
             self.save(update_fields=["consumed"])
+        else:
+            self.failed_attempts += 1
+            self.save(update_fields=["failed_attempts"])
         return is_match
 
 

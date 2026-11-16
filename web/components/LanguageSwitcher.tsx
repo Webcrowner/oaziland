@@ -26,7 +26,7 @@ export default function LanguageSwitcher({ variant = "dark" }: { variant?: "dark
         <button
           key={loc}
           onClick={() => switchTo(loc)}
-          className={`px-2 py-1 rounded transition-colors ${
+          className={`min-h-9 min-w-9 px-3 py-2 md:min-h-0 md:min-w-0 md:px-2 md:py-1 rounded transition-colors ${
             locale === loc ? "bg-[var(--gold)] text-[var(--navy)] font-semibold" : inactive
           }`}
           aria-current={locale === loc}

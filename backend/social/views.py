@@ -77,8 +77,17 @@ class VideoThrottle(UserRateThrottle):
     scope = "videos"
 
 
+class PostCreateThrottle(UserRateThrottle):
+    scope = "post_create"
+
+
+class CommentCreateThrottle(UserRateThrottle):
+    scope = "comment_create"
+
+
 # Actions that serve the full-screen video experience (ReelSerializer, own throttle bucket).
 VIDEO_ACTIONS = {"reels", "reel_detail", "trending_tags", "record_view"}
+VIEW_DEDUPE_SECONDS = 60 * 60
 
 
 # Deliberately identical whichever side blocked, so a block never reveals itself.
@@ -336,6 +345,8 @@ class PostViewSet(viewsets.ModelViewSet):
     def get_throttles(self):
         if self.action in VIDEO_ACTIONS:
             return [VideoThrottle()]
+        if self.action == "create":
+            return [*super().get_throttles(), PostCreateThrottle()]
         return super().get_throttles()
 
     def get_serializer_class(self):
@@ -583,10 +594,15 @@ class PostViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="view")
     def record_view(self, request, pk=None):
-        """Counts one view; an author watching their own clip doesn't inflate it."""
+        """Counts a view; an author watching their own clip doesn't inflate it, and the same viewer
+        (the signed-in user, or the visitor's address) is counted once per clip per hour."""
+        from django.core.cache import cache
         from django.db.models import F
+        from rest_framework.throttling import BaseThrottle
         post = self.get_object()
-        if not (request.user.is_authenticated and request.user.id == post.author_id):
+        is_author = request.user.is_authenticated and request.user.id == post.author_id
+        viewer = f"u{request.user.id}" if request.user.is_authenticated else f"ip{BaseThrottle().get_ident(request)}"
+        if not is_author and cache.add(f"reel-view:{post.pk}:{viewer}", 1, VIEW_DEDUPE_SECONDS):
             Post.objects.filter(pk=post.pk).update(view_count=F("view_count") + 1)
             post.refresh_from_db(fields=["view_count"])
         return Response({"view_count": post.view_count})
@@ -629,11 +645,17 @@ class CommentViewSet(viewsets.ModelViewSet):
             return Comment.objects.none()
         return Comment.objects.filter(author=self.request.user).select_related("author")
 
+    def get_throttles(self):
+        if self.action == "create":
+            return [*super().get_throttles(), CommentCreateThrottle()]
+        return super().get_throttles()
+
     def perform_create(self, serializer):
         from django.db.models import Q
         from django.utils import timezone
         from rest_framework.exceptions import ValidationError
         from engagement.services import exclude_blocked_users
+        from trust_safety.services import ContentBlockedError
         from .services import add_comment
         post = serializer.validated_data["post"]
         # Comments are only accepted on posts the commenter could actually see in a feed.
@@ -645,7 +667,10 @@ class CommentViewSet(viewsets.ModelViewSet):
         ).exists()
         if not visible and post.author_id != self.request.user.id:
             raise ValidationError({"post": "This post isn't available for comments."})
-        comment = add_comment(post=post, author=self.request.user, text=serializer.validated_data["text"])
+        try:
+            comment = add_comment(post=post, author=self.request.user, text=serializer.validated_data["text"])
+        except ContentBlockedError as e:
+            raise ValidationError({"text": str(e)})
         serializer.instance = comment
 
     def destroy(self, request, *args, **kwargs):

@@ -147,6 +147,10 @@ class CourseModule(models.Model):
     program = models.ForeignKey(TrainingProgram, on_delete=models.CASCADE, related_name="modules")
     title = models.CharField(max_length=200)
     position = models.PositiveIntegerField(default=0)
+    # A suggested pace, not a lock: finish this module within this many days of enrolling (null = no suggestion).
+    due_after_days = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(730)],
+    )
 
     class Meta:
         db_table = "course_modules"
@@ -173,10 +177,20 @@ class Lesson(models.Model):
     video_file = models.FileField(upload_to="course_videos/", blank=True, storage=private_storage)  # or a video uploaded by staff
     pdf_file = models.FileField(upload_to="course_pdfs/", blank=True, storage=private_storage)
     pass_mark_percent = models.PositiveSmallIntegerField(default=70)  # quizzes only
+    # Readings, videos and PDFs only: anyone can open a preview lesson without enrolling or paying.
+    is_preview = models.BooleanField(default=False)
+    # Assignments only: classmates review each other's work (see careers.peer_review), staff can still decide any time.
+    peer_review = models.BooleanField(default=False)
 
     class Meta:
         db_table = "course_lessons"
         ordering = ["position", "title"]
+
+
+class QuizQuestionKind(models.TextChoices):
+    CHOICE = "CHOICE", "Multiple choice"  # one or several ticked choices (several when more than one is correct)
+    SHORT_TEXT = "SHORT_TEXT", "Short answer"  # the learner types a word or phrase; any accepted answer is right
+    NUMBER = "NUMBER", "Number"  # the learner types a number; right within the tolerance of the accepted number
 
 
 class QuizQuestion(models.Model):
@@ -185,6 +199,11 @@ class QuizQuestion(models.Model):
     text = models.TextField()
     explanation = models.TextField(blank=True)  # shown after submitting
     position = models.PositiveIntegerField(default=0)
+    kind = models.CharField(max_length=12, choices=QuizQuestionKind.choices, default=QuizQuestionKind.CHOICE)
+    # SHORT_TEXT: every answer that counts as right. NUMBER: one number (as text). CHOICE questions use QuizChoice.
+    accepted_answers = models.JSONField(default=list, blank=True)
+    # NUMBER only: how far the learner's number may be from the accepted one and still be right.
+    tolerance = models.DecimalField(max_digits=12, decimal_places=4, default=0, validators=[MinValueValidator(0)])
 
     class Meta:
         db_table = "course_quiz_questions"
@@ -287,11 +306,31 @@ class AssignmentSubmission(models.Model):
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     reviewed_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now=True)
+    # Waiting for a review: when the course's reviewers were last reminded, and when admins were alerted (once per
+    # hand-in) — see careers.course_reminders.send_review_reminders. Both are cleared when the learner resubmits.
+    review_reminded_at = models.DateTimeField(null=True, blank=True)
+    escalated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "course_assignment_submissions"
         unique_together = [("enrollment", "lesson")]
         ordering = ["-submitted_at"]
+
+
+class PeerReview(models.Model):
+    """A classmate's verdict on one assignment submission (see careers.peer_review). The reviewer is anonymous to the
+    learner being reviewed, and so is the author to the reviewer."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    submission = models.ForeignKey(AssignmentSubmission, on_delete=models.CASCADE, related_name="peer_reviews")
+    reviewer = models.ForeignKey("TrainingEnrollment", on_delete=models.CASCADE, related_name="peer_reviews_given")
+    decision = models.CharField(max_length=20, choices=SubmissionStatus.choices)  # APPROVED or CHANGES_REQUESTED
+    feedback = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "course_peer_reviews"
+        unique_together = [("submission", "reviewer")]
+        ordering = ["created_at"]
 
 
 class LessonProgress(models.Model):

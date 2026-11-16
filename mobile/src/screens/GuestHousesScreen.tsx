@@ -1,8 +1,12 @@
 import { useState, useEffect } from "react";
-import { View, Text, FlatList, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { searchGuestHouses, GuestHouse } from "../lib/api";
+import type { RootStackParamList } from "../navigation/AppNavigator";
 
 export default function GuestHousesScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [guestHouses, setGuestHouses] = useState<GuestHouse[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,6 +30,11 @@ export default function GuestHousesScreen() {
       data={guestHouses}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}
+      ListHeaderComponent={
+        <TouchableOpacity style={styles.staysButton} onPress={() => navigation.navigate("Stays")}>
+          <Text style={styles.staysButtonText}>My stays</Text>
+        </TouchableOpacity>
+      }
       ListEmptyComponent={<Text style={styles.empty}>No guest houses are listed yet.</Text>}
       renderItem={({ item }) => (
         <View style={styles.card}>
@@ -45,6 +54,8 @@ export default function GuestHousesScreen() {
 const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   list: { padding: 16 },
+  staysButton: { backgroundColor: "#1B2A4A", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginBottom: 16 },
+  staysButtonText: { color: "#fff", fontWeight: "700" },
   empty: { textAlign: "center", color: "#6B7280", marginTop: 40 },
   card: { backgroundColor: "#fff", borderRadius: 10, marginBottom: 16, overflow: "hidden", borderWidth: 1, borderColor: "#E5E7EB" },
   imagePlaceholder: { height: 140, backgroundColor: "#E5E7EB", justifyContent: "center", alignItems: "center" },

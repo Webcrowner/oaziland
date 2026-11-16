@@ -129,6 +129,28 @@ class TrainingProgramViewSet(viewsets.ReadOnlyModelViewSet):
         # Drafts stay hidden from the public catalogue (staff still reach them via /api/manage/).
         return queryset.filter(is_published=True)
 
+    @action(detail=True, methods=["get"], permission_classes=[permissions.AllowAny])
+    def preview(self, request, pk=None):
+        """GET /api/trainings/<id>/preview/ — the lessons the course offers for free: readings, videos and PDFs anyone
+        can open without enrolling or paying. Only published courses (get_object) are reachable."""
+        from .course_media import media_url
+        from .course_services import lessons_of
+        from .models import LessonKind
+        program = self.get_object()
+        lessons = (
+            lessons_of(program).filter(is_preview=True).exclude(kind__in=[LessonKind.QUIZ, LessonKind.ASSIGNMENT])
+            .select_related("module").order_by("module__position", "position", "title")
+        )
+        return Response([
+            {
+                "id": str(lesson.id), "title": lesson.title, "kind": lesson.kind, "module_title": lesson.module.title,
+                "content_text": lesson.content_text, "video_url": lesson.video_url,
+                "video_file_url": media_url(request, lesson, "video", request.user),
+                "pdf_url": media_url(request, lesson, "pdf", request.user),
+            }
+            for lesson in lessons
+        ])
+
     @action(detail=True, methods=["get", "post", "delete"], permission_classes=[permissions.AllowAny])
     def reviews(self, request, pk=None):
         """GET: the course's rating, reviews and whether the viewer may review it. POST {score, text}: add or update
@@ -316,6 +338,44 @@ class MyEnrollmentViewSet(viewsets.ReadOnlyModelViewSet):
         if submission is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         return pdf_response(submission)
+
+    @action(detail=True, methods=["get"], url_path=r"assignments/(?P<lesson_id>[0-9a-fA-F-]{32,36})/peer")
+    def peer_queue(self, request, pk=None, lesson_id=None):
+        """A few classmates' anonymous submissions waiting for a review, for a peer-reviewed assignment the learner
+        has handed in themselves."""
+        from .models import Lesson
+        from .peer_review import PEER_REVIEWS_REQUIRED, review_queue
+        enrollment = self.get_object()
+        lesson = Lesson.objects.filter(pk=lesson_id, module__program=enrollment.program).first()
+        if lesson is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            items = review_queue(enrollment, lesson)
+        except CourseError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response({"required": PEER_REVIEWS_REQUIRED, "items": items})
+
+    @action(detail=True, methods=["get"], url_path=r"peer/(?P<submission_id>[0-9a-fA-F-]{32,36})/file")
+    def peer_file(self, request, pk=None, submission_id=None):
+        from .peer_review import reviewable_submission
+        enrollment = self.get_object()
+        try:
+            submission = reviewable_submission(enrollment, submission_id)
+        except CourseError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        return pdf_response(submission)
+
+    @action(detail=True, methods=["post"], url_path=r"peer/(?P<submission_id>[0-9a-fA-F-]{32,36})/review")
+    def peer_review(self, request, pk=None, submission_id=None):
+        from .peer_review import submit_peer_review
+        enrollment = self.get_object()
+        try:
+            submit_peer_review(
+                enrollment, submission_id, decision=str(request.data.get("decision", "")), feedback=str(request.data.get("feedback", "")),
+            )
+        except CourseError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response({"reviewed": True}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path=r"quizzes/(?P<lesson_id>[0-9a-fA-F-]{32,36})/submit")
     def submit_quiz(self, request, pk=None, lesson_id=None):

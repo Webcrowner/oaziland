@@ -71,8 +71,11 @@ class TrainingProgramDetailSerializer(TrainingProgramSerializer):
     def get_syllabus(self, program) -> list:
         return [
             {
-                "id": str(module.id), "title": module.title,
-                "lessons": [{"id": str(lesson.id), "title": lesson.title, "kind": lesson.kind} for lesson in module.lessons.all()],
+                "id": str(module.id), "title": module.title, "due_after_days": module.due_after_days,
+                "lessons": [
+                    {"id": str(lesson.id), "title": lesson.title, "kind": lesson.kind, "is_preview": lesson.is_preview}
+                    for lesson in module.lessons.all()
+                ],
             }
             for module in program.modules.prefetch_related("lessons")
         ]
@@ -82,16 +85,37 @@ class TrainingEnrollmentSerializer(serializers.ModelSerializer):
     program_detail = TrainingProgramSerializer(source="program", read_only=True)
     progress = serializers.SerializerMethodField()
     payment = serializers.SerializerMethodField()
+    next_lesson = serializers.SerializerMethodField()
+    last_activity_at = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingEnrollment
-        fields = ["id", "program", "program_detail", "status", "progress", "payment", "enrolled_at", "completed_at", "certificate_issued_at", "certificate_code"]
+        fields = [
+            "id", "program", "program_detail", "status", "progress", "payment", "enrolled_at", "completed_at",
+            "certificate_issued_at", "certificate_code", "next_lesson", "last_activity_at",
+        ]
         read_only_fields = ["status", "enrolled_at", "completed_at", "certificate_issued_at", "certificate_code"]
 
     def get_progress(self, enrollment) -> dict:
         from .course_services import course_progress
 
         return course_progress(enrollment)
+
+    def get_next_lesson(self, enrollment) -> dict | None:
+        """Where "Continue" takes an active learner (shown on My Learning)."""
+        from .course_services import next_lesson
+        from .models import TrainingEnrollmentStatus
+
+        if enrollment.status not in (TrainingEnrollmentStatus.ENROLLED, TrainingEnrollmentStatus.IN_PROGRESS):
+            return None
+        lesson = next_lesson(enrollment)
+        return {"id": str(lesson.id), "title": lesson.title, "kind": lesson.kind} if lesson else None
+
+    def get_last_activity_at(self, enrollment):
+        from .course_services import last_activity_at
+
+        moment = last_activity_at(enrollment)
+        return serializers.DateTimeField().to_representation(moment) if moment else None
 
     def get_payment(self, enrollment) -> dict | None:
         """The course fee's payment, if any: its booking status (PAYMENT_PROCESSING while waiting for the learner to

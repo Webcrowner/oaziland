@@ -15,7 +15,7 @@ from rest_framework import generics, permissions, status, viewsets
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.exceptions import InvalidToken
@@ -129,6 +129,11 @@ class DevRoleSwitchView(APIView):
         return Response(UserProfileSerializer(user).data)
 
 
+class OtpThrottle(UserRateThrottle):
+    """Sending a code costs an SMS and guessing one is a brute-force attempt, so both are tightly limited."""
+    scope = "otp"
+
+
 class MfaSetupView(APIView):
     """Step 1: register a new MFA method (SMS or Email) for the
     logged-in user and immediately send the first real code — the
@@ -136,6 +141,7 @@ class MfaSetupView(APIView):
     MfaVerifyView, so it can never silently satisfy user_has_verified_mfa
     just by being created."""
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [OtpThrottle]
 
     @extend_schema(request=dict, responses={201: dict, 400: dict})
     def post(self, request):
@@ -159,6 +165,7 @@ class MfaVerifyView(APIView):
     user_has_verified_mfa(user) starts returning True, which is what
     IsVerifiedAndMfaEnabled checks everywhere else in the platform."""
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [OtpThrottle]
 
     @extend_schema(request=dict, responses={200: dict, 400: dict, 404: dict})
     def post(self, request):
@@ -274,13 +281,16 @@ class ChangePasswordView(APIView):
 
     @extend_schema(request=ChangePasswordSerializer, responses={200: dict, 400: dict})
     def post(self, request):
-        serializer = ChangePasswordSerializer(data=request.data)
+        serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = request.user
         if not user.check_password(serializer.validated_data["current_password"]):
             return Response({"detail": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
         user.set_password(serializer.validated_data["new_password"])
         user.save(update_fields=["password"])
+        # Other devices are signed out; this one keeps working until its short-lived access token ends.
+        from .services import revoke_sessions
+        revoke_sessions(user)
         return Response({"detail": "Password changed successfully."})
 
 

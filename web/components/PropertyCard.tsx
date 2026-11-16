@@ -4,7 +4,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import ListerRoleBadge from "@/components/ListerRoleBadge";
 import ListerRatingChip from "@/components/ListerRatingChip";
-import WhatsAppShareButton from "@/components/WhatsAppShareButton";
+import ShareButton from "@/components/ShareButton";
 import type { Listing } from "@/lib/api";
 import { IconBed, IconBath, IconArea, IconMapPin } from "./Icons";
 
@@ -57,7 +57,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
         )}
 
         <ListerRoleBadge role={listing.lister_role} isSale={listing.listing_type === "SALE"} variant="overlay" />
-        <WhatsAppShareButton
+        <ShareButton
           variant="overlay"
           title={listing.property_asset.type.toLowerCase()}
           location={listing.property_asset.quarter_name}
@@ -79,7 +79,7 @@ export default function PropertyCard({ listing }: { listing: Listing }) {
             {photos.map((_, i) => (
               <button
                 key={i} onClick={(e) => showPhoto(i, e)}
-                className={`w-1.5 h-1.5 rounded-full transition-all ${i === photoIndex ? "bg-white w-4" : "bg-white/60"}`}
+                className={`relative w-1.5 h-1.5 rounded-full transition-all before:absolute before:-inset-x-1 before:-inset-y-3 before:content-[''] ${i === photoIndex ? "bg-white w-4" : "bg-white/60"}`}
                 aria-label={`Photo ${i + 1}`}
               />
             ))}

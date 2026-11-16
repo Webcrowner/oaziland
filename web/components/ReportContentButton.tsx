@@ -14,14 +14,16 @@ interface Props {
   ownerId?: string;
   /** "inline" is a small link for use inside comments and reviews. */
   variant?: "default" | "inline";
+  /** Opens straight on the form (for a sheet that is already about reporting). */
+  startOpen?: boolean;
 }
 
 /** Lets a signed-in visitor flag a listing, place, comment, review or job posting for admin review. */
-export default function ReportContentButton({ kind, id, ownerId, variant = "default" }: Props) {
+export default function ReportContentButton({ kind, id, ownerId, variant = "default", startOpen = false }: Props) {
   const t = useTranslations("ReportContent");
   const router = useRouter();
-  const [mode, setMode] = useState<"idle" | "form" | "done">("idle");
-  const [reason, setReason] = useState<string>(kind === "comment" || kind.endsWith("review") ? "HARASSMENT" : "SCAM_SUSPECTED");
+  const [mode, setMode] = useState<"idle" | "form" | "done">(startOpen ? "form" : "idle");
+  const [reason, setReason] = useState<string>(kind === "comment" || kind.endsWith("review") ? "HARASSMENT" : kind === "post" ? "INAPPROPRIATE_CONTENT" : "SCAM_SUSPECTED");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

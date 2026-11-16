@@ -262,3 +262,33 @@ def test_audit_log_filters(boss, member):
     assert len(rows("?since=2000-01-01&until=2999-12-31")) == 2
     assert rows()[0]["actor_username"] == "boss_admin"
     assert rows()[0]["details"]["days"] == 3
+
+
+@pytest.mark.django_db
+def test_a_full_admin_grants_a_limited_admin_the_platform_permission(boss):
+    second = make_admin("second_admin")
+    client = client_for(boss)
+
+    res = client.post(f"/api/admin/users/{second.id}/admin-access/", {"level": "limited", "platform_listings": True}, format="json")
+    assert res.status_code == 200
+    assert res.data["admin_access"] == "limited" and res.data["platform_access"] is True
+    second = User.objects.get(pk=second.pk)
+    assert client_for(second).post("/api/platform-session/").status_code == 201
+    assert client_for(second).get("/api/admin/audit-log/").status_code == 403
+
+    res = client.post(f"/api/admin/users/{second.id}/admin-access/", {"level": "limited"}, format="json")
+    assert res.data["platform_access"] is False
+    assert client_for(User.objects.get(pk=second.pk)).post("/api/platform-session/").status_code == 403
+
+    res = client.post(f"/api/admin/users/{second.id}/admin-access/", {"level": "full"}, format="json")
+    assert res.data["admin_access"] == "full"
+    assert AuditLog.objects.filter(action="admin-user/admin_access").count() == 3
+
+
+@pytest.mark.django_db
+def test_admin_access_is_protected(boss, limited, member):
+    assert client_for(limited).post(f"/api/admin/users/{boss.id}/admin-access/", {"level": "limited"}, format="json").status_code == 403
+    client = client_for(boss)
+    assert client.post(f"/api/admin/users/{member.id}/admin-access/", {"level": "limited"}, format="json").status_code == 400
+    assert client.post(f"/api/admin/users/{boss.id}/admin-access/", {"level": "limited"}, format="json").status_code == 403
+    assert client.post(f"/api/admin/users/{limited.id}/admin-access/", {"level": "maybe"}, format="json").status_code == 400

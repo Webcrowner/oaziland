@@ -41,7 +41,7 @@ export default function MobileTabBar({ items, label }: { items: MobileTabItem[];
               <span className={`-mt-6 flex h-14 w-14 items-center justify-center rounded-full border-4 border-slate-900 bg-gradient-to-br from-amber-300 to-amber-500 text-slate-950 shadow-lg shadow-amber-500/30 transition-transform active:scale-90 ${item.active ? "ring-2 ring-amber-300/60" : ""}`}>
                 {item.icon}
               </span>
-              <span className={`mt-0.5 text-[10px] font-bold ${item.active ? "text-amber-300" : "text-slate-300"}`}>{item.label}</span>
+              <span className={`mt-0.5 text-[11px] font-bold ${item.active ? "text-amber-300" : "text-slate-300"}`}>{item.label}</span>
             </>
           ) : (
             <>
@@ -54,7 +54,7 @@ export default function MobileTabBar({ items, label }: { items: MobileTabItem[];
                   </span>
                 ) : null}
               </span>
-              <span className={`mt-1 text-[10px] font-bold ${item.active ? "text-amber-300" : "text-slate-400"}`}>{item.label}</span>
+              <span className={`mt-1 text-[11px] font-bold ${item.active ? "text-amber-300" : "text-slate-400"}`}>{item.label}</span>
             </>
           );
           const cls = "relative flex min-h-14 w-full flex-col items-center justify-center pb-1.5 pt-2 select-none [-webkit-tap-highlight-color:transparent] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded-lg";

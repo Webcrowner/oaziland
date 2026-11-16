@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import type { Metadata } from "next";
 import MarketplaceBrowser from "@/components/MarketplaceBrowser";
+import CartLink from "@/components/CartLink";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params;
@@ -28,14 +29,19 @@ export default async function MarketplacePage({ searchParams }: { searchParams: 
           <h1 className="mb-1 font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[var(--navy)] md:text-4xl">{t("title")}</h1>
           <p className="max-w-xl text-sm text-slate-500 md:text-base">{t("subtitle")}</p>
         </div>
-        <Link href="/marketplace/sell" className="inline-flex w-full items-center justify-center rounded-xl gold-gradient px-5 py-3 text-sm font-bold text-[var(--navy)] shadow-sm sm:w-auto">
-          + {t("sellAnItem")}
-        </Link>
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <CartLink />
+          <Link href="/marketplace/sell" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-xl gold-gradient px-5 py-3 text-sm font-bold text-[var(--navy)] shadow-sm sm:flex-none">
+            + {t("sellAnItem")}
+          </Link>
+        </div>
       </div>
 
-      <div className="mb-6 flex gap-4 text-sm font-semibold text-[var(--navy)]">
-        <Link href="/marketplace/my-listings" className="underline">{t("myListings")}</Link>
-        <Link href="/marketplace/orders" className="underline">{t("myOrders")}</Link>
+      <div className="mb-6 flex flex-wrap gap-x-4 gap-y-2 text-sm font-semibold text-[var(--navy)]">
+        <Link href="/marketplace/deals" className="inline-flex min-h-10 items-center rounded-full bg-red-600 px-3.5 text-white">⚡ {t("flashDeals")}</Link>
+        <Link href="/marketplace/my-listings" className="inline-flex min-h-10 items-center underline">{t("myListings")}</Link>
+        <Link href="/marketplace/orders" className="inline-flex min-h-10 items-center underline">{t("myOrders")}</Link>
+        <Link href="/marketplace/shop-settings" className="inline-flex min-h-10 items-center underline">{t("myShop")}</Link>
       </div>
 
       <MarketplaceBrowser initialCategory={category} />

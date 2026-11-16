@@ -34,6 +34,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
     is_driver = serializers.SerializerMethodField()
     kyc_status = serializers.SerializerMethodField()
     is_self = serializers.SerializerMethodField()
+    admin_access = serializers.SerializerMethodField()
+    platform_access = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -43,7 +45,20 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "strikes_count", "date_joined",
             "is_admin", "is_agent", "is_landlord", "is_agency",
             "is_student", "is_technician", "is_driver", "kyc_status", "is_self",
+            "admin_access", "platform_access",
         ]
+
+    def get_admin_access(self, obj) -> str | None:
+        from identity.services import is_super_admin
+
+        if not (hasattr(obj, "admin_profile") or obj.is_superuser):
+            return None
+        return "full" if is_super_admin(obj) else "limited"
+
+    def get_platform_access(self, obj) -> bool:
+        from identity.platform_account import can_act_as_platform
+
+        return can_act_as_platform(obj)
 
     def get_is_self(self, obj) -> bool:
         request = self.context.get("request")

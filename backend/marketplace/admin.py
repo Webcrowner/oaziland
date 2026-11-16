@@ -1,6 +1,9 @@
 from oaziland.admin_base import register
 
-from .models import DriverProfile, MarketplaceListingBase, MarketplaceOrder
+from .models import DriverProfile, MarketplaceListingBase, MarketplaceOrder, MarketplaceReturnRequest
+
+register(MarketplaceReturnRequest, read_only=True, list_display=("id", "order", "kind", "reason", "status", "created_at"),
+         list_filter=("status", "kind", "reason"), search_fields=("order__listing__title", "order__buyer__username", "description"))
 
 register(MarketplaceOrder, read_only=True, list_display=("id", "listing__title", "buyer", "amount_xaf", "status", "created_at"),
          list_filter=("status",), search_fields=("id", "buyer__username", "listing__title"))

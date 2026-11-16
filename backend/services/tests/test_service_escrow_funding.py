@@ -99,6 +99,8 @@ def test_technician_pulling_out_refunds_the_held_money(approved_job):
     booking.refresh_from_db()
     assert booking.status == BookingStatus.CANCELLED
     assert booking.escrow.status == EscrowStatus.REFUNDED
+    # The held money is back in the requester's wallet, not just marked refunded.
+    assert Wallet.objects.get(owner=requester).balance_xaf == booking.amount_xaf
 
 
 @pytest.mark.django_db

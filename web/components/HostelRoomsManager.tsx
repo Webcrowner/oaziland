@@ -8,6 +8,8 @@ import {
   type HostelBoard,
   type HostelSummary,
 } from "@/lib/api";
+import HostelRoomTypesEditor from "@/components/HostelRoomTypesEditor";
+import HostelManagers from "@/components/HostelManagers";
 
 const UNIT_TYPES = ["SHARED_ROOM", "SELF_CONTAIN", "STUDIO", "ONE_BED_APARTMENT", "MULTI_BED_APARTMENT", "POSTGRAD_UNIT", "INTERNATIONAL_UNIT"];
 const field =
@@ -20,6 +22,7 @@ type Pending = { kind: "end" | "move"; allocationId: string; name: string } | nu
  * Used by hostel owners/managers on their own page and by admins in the console (`adminMode` adds search). */
 export default function HostelRoomsManager({ token, adminMode = false }: { token: string; adminMode?: boolean }) {
   const t = useTranslations("HostelRooms");
+  const tTypes = useTranslations("HostelRoomTypes");
   const [hostels, setHostels] = useState<HostelSummary[] | null>(null);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -33,14 +36,17 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
 
   const [institutionName, setInstitutionName] = useState("");
   const [semesterForm, setSemesterForm] = useState({ institution: "", name: "", start_date: "", end_date: "", billing_due_date: "" });
-  const [roomForm, setRoomForm] = useState({ room_code: "", unit_type: "SHARED_ROOM", occupancy_model: "PER_BED", bed_capacity: "2" });
+  const [roomForm, setRoomForm] = useState({ room_code: "", room_type: "", unit_type: "SHARED_ROOM", occupancy_model: "PER_BED", bed_capacity: "2" });
   const [allocForm, setAllocForm] = useState({ student: "", unit: "" });
 
   const loadHostels = useCallback(async () => {
     try {
       const data = await listManagedHostels(query, token);
       setHostels(data.results || []);
-      if (data.results?.length === 1) setHostelId((current) => current ?? data.results[0].id);
+      // A hostel named in the link (?hostel=, e.g. right after listing it) opens first; else the only one.
+      const linked = new URLSearchParams(window.location.search).get("hostel");
+      const preselect = data.results?.find((h) => h.id === linked)?.id ?? (data.results?.length === 1 ? data.results[0].id : null);
+      if (preselect) setHostelId((current) => current ?? preselect);
     } catch {
       setHostels([]);
       setMessage({ ok: false, text: t("loadError") });
@@ -121,7 +127,7 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
               }}
               className={`rounded-xl border px-3.5 py-2 text-left text-xs transition-colors ${hostelId === h.id ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
             >
-              <span className="block font-bold">{h.label}</span>
+              <span className="block font-bold">{h.name || h.label}</span>
               <span className="opacity-75">{t("hostelStats", { housed: h.housed_now, places: h.places, waiting: h.waiting })}</span>
             </button>
           ))}
@@ -134,6 +140,9 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
 
       {board && (
         <>
+          <HostelRoomTypesEditor key={board.hostel.id} board={board} busy={busy} act={act} />
+          <HostelManagers board={board} busy={busy} act={act} />
+
           <section className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900">{t("setupTitle")}</h3>
 
@@ -201,7 +210,14 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                void act("rooms", { ...roomForm, bed_capacity: Number(roomForm.bed_capacity) }, t("roomAdded"), () => setRoomForm({ ...roomForm, room_code: "" }));
+                void act(
+                  "rooms",
+                  roomForm.room_type
+                    ? { room_code: roomForm.room_code, room_type: roomForm.room_type }
+                    : { ...roomForm, room_type: undefined, bed_capacity: Number(roomForm.bed_capacity) },
+                  t("roomAdded"),
+                  () => setRoomForm({ ...roomForm, room_code: "" }),
+                );
               }}
               className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4"
             >
@@ -209,6 +225,16 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
                 {t("roomCode")}
                 <input value={roomForm.room_code} maxLength={50} onChange={(e) => setRoomForm({ ...roomForm, room_code: e.target.value })} placeholder="A-101" className={`${field} w-28`} required />
               </label>
+              {board.room_types.length > 0 && (
+                <label className={label}>
+                  {tTypes("roomTypeForRoom")}
+                  <select value={roomForm.room_type} onChange={(e) => setRoomForm({ ...roomForm, room_type: e.target.value })} className={field}>
+                    <option value="">{tTypes("noRoomType")}</option>
+                    {board.room_types.map((rt) => <option key={rt.id} value={rt.id}>{rt.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {!roomForm.room_type && (
               <label className={label}>
                 {t("roomType")}
                 <select value={roomForm.unit_type} onChange={(e) => setRoomForm({ ...roomForm, unit_type: e.target.value })} className={field}>
@@ -217,6 +243,8 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
                   ))}
                 </select>
               </label>
+              )}
+              {!roomForm.room_type && (
               <label className={label}>
                 {t("letAs")}
                 <select value={roomForm.occupancy_model} onChange={(e) => setRoomForm({ ...roomForm, occupancy_model: e.target.value })} className={field}>
@@ -224,7 +252,8 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
                   <option value="PER_UNIT">{t("perUnit")}</option>
                 </select>
               </label>
-              {roomForm.occupancy_model === "PER_BED" && (
+              )}
+              {!roomForm.room_type && roomForm.occupancy_model === "PER_BED" && (
                 <label className={label}>
                   {t("beds")}
                   <input type="number" min={1} max={20} value={roomForm.bed_capacity} onChange={(e) => setRoomForm({ ...roomForm, bed_capacity: e.target.value })} className={`${field} w-20`} required />
@@ -287,7 +316,7 @@ export default function HostelRoomsManager({ token, adminMode = false }: { token
                     <li key={room.id} className="rounded-xl border border-slate-200 p-3.5">
                       <div className="mb-2 flex items-baseline justify-between gap-2">
                         <p className="text-sm font-black text-slate-900">
-                          {room.room_code} <span className="text-xs font-medium text-slate-500">· {typeLabel(room.unit_type)}</span>
+                          {room.room_code} <span className="text-xs font-medium text-slate-500">· {board.room_types.find((rt) => rt.id === room.room_type)?.name ?? typeLabel(room.unit_type)}</span>
                         </p>
                         {!room.has_history && (
                           <button type="button" onClick={() => act("delete-room", { unit: room.id }, t("roomDeleted"))} className="text-[11px] font-bold text-slate-400 hover:text-rose-600">

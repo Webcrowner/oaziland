@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { addPostComment, deletePostComment, getPostComments, type PostComment, type ReelPost } from "@/lib/api";
+import ReportContentButton from "@/components/ReportContentButton";
 import { IconX } from "@/components/Icons";
 
 /** Bottom sheet on phones, side panel on desktop — comments for one video. */
@@ -96,10 +97,12 @@ export default function CommentsSheet({
                 <p className="text-xs font-bold text-slate-500">{comment.author_name}</p>
                 <p className="whitespace-pre-wrap break-words text-sm text-slate-900">{comment.text}</p>
               </div>
-              {comment.is_mine && (
+              {comment.is_mine ? (
                 <button type="button" onClick={() => handleDelete(comment)} className="self-start text-xs font-semibold text-rose-600 hover:underline">
                   {t("deleteComment")}
                 </button>
+              ) : (
+                <ReportContentButton kind="comment" id={String(comment.id)} variant="inline" />
               )}
             </li>
           ))}

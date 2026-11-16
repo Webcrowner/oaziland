@@ -2,8 +2,10 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
 import PostCard from "@/components/PostCard";
+import Button from "@/components/ui/Button";
+import EmptyState from "@/components/ui/EmptyState";
+import { IconMessageCircle, IconSearch, IconUsers } from "@/components/Icons";
 import {
   listFeedPosts, listFollowingFeed, listMyPosts, listTopicFeed, searchPosts,
   type SocialPost, type SocialPostPage,
@@ -128,25 +130,25 @@ function FeedContent() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-[var(--navy)]">{t("title")}</h1>
-        <Link href="/feed/create" className="bg-[var(--gold)] text-[var(--navy)] font-semibold px-4 py-2 rounded text-sm hover:opacity-90">
-          {t("createPost")}
-        </Link>
+      <div className="flex items-center justify-between gap-4 mb-6">
+        <h1 className="font-[family-name:var(--font-display)] text-2xl md:text-3xl font-black tracking-tight text-slate-900">{t("title")}</h1>
+        <Button href="/feed/create">{t("createPost")}</Button>
       </div>
 
-      <form onSubmit={handleSearch} role="search" className="mb-4">
+      <form onSubmit={handleSearch} role="search" className="relative mb-4">
+        <IconSearch size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
           type="search" placeholder={t("searchPlaceholder")} aria-label={t("searchPlaceholder")} value={query}
-          onChange={(e) => setQuery(e.target.value)} className="w-full border rounded px-3 py-2 text-sm"
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 shadow-sm outline-none transition-shadow placeholder:text-slate-400 focus:border-amber-400 focus:ring-4 focus:ring-amber-400/15"
         />
       </form>
 
-      <div role="tablist" className="flex gap-2 mb-6 border-b pb-4 flex-wrap">
+      <div role="tablist" className="mb-6 flex gap-1.5 rounded-2xl bg-slate-100 p-1.5">
         {TABS.map((key) => (
           <button
             key={key} type="button" role="tab" aria-selected={!filtered && tab === key} onClick={() => changeTab(key)}
-            className={`px-4 py-2 rounded text-sm font-semibold ${!filtered && tab === key ? "bg-[var(--navy)] text-white" : "bg-gray-100 text-gray-700"}`}
+            className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-bold transition-all ${!filtered && tab === key ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}
           >
             {t(`tab.${key}`)}
           </button>
@@ -154,28 +156,43 @@ function FeedContent() {
       </div>
 
       {filtered && (
-        <p className="flex items-center justify-between gap-2 mb-4 rounded bg-gray-50 px-3 py-2 text-sm text-gray-700">
+        <p className="mb-4 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm font-semibold text-slate-700">
           <span>{tag ? t("showingTopic", { tag }) : t("showingSearch", { query: searchTerm })}</span>
-          <button type="button" onClick={clearFilter} className="font-semibold text-[var(--navy)] hover:underline">{t("clearFilter")}</button>
+          <button type="button" onClick={clearFilter} className="font-bold text-slate-900 hover:underline">{t("clearFilter")}</button>
         </p>
       )}
 
       {needsLogin ? (
-        <p className="text-gray-500">
-          {tab === "mine" ? t("signInForMine") : t("signInForFollowing")}{" "}
-          <Link href="/login" className="font-semibold text-[var(--navy)] hover:underline">{t("signIn")}</Link>
-        </p>
+        <EmptyState
+          icon={<IconUsers size={28} />}
+          title={tab === "mine" ? t("signInForMine") : t("signInForFollowing")}
+          action={<Button href="/login">{t("signIn")}</Button>}
+        />
       ) : phase === "loading" ? (
-        <p role="status" className="text-gray-500">{t("loading")}</p>
+        <div role="status" aria-busy="true" aria-label={t("loading")} className="flex flex-col gap-4">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="animate-pulse rounded-3xl border border-slate-200/90 bg-white p-5">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-slate-100" />
+                <div className="h-3 w-1/3 rounded bg-slate-100" />
+              </div>
+              <div className="mt-4 space-y-2">
+                <div className="h-3 w-full rounded bg-slate-100" />
+                <div className="h-3 w-2/3 rounded bg-slate-100" />
+              </div>
+              <div className="mt-4 h-40 rounded-2xl bg-slate-100" />
+            </div>
+          ))}
+        </div>
       ) : phase === "error" ? (
-        <div role="alert" className="rounded border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-3">
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
           <span>{t("loadFailed")}</span>
-          <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="font-semibold underline">{t("retry")}</button>
+          <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="font-bold underline">{t("retry")}</button>
         </div>
       ) : posts.length === 0 ? (
-        <p className="text-gray-500">{emptyMessage}</p>
+        <EmptyState icon={<IconMessageCircle size={28} />} title={emptyMessage} />
       ) : (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-5">
           {posts.map((post) => (
             <PostCard
               key={post.id} post={post} onTagClick={handleTagClick}
@@ -184,12 +201,9 @@ function FeedContent() {
           ))}
           {loadMoreFailed && <p role="alert" className="text-sm text-red-600">{t("loadFailed")}</p>}
           {hasMore && (
-            <button
-              type="button" onClick={handleLoadMore} disabled={loadingMore}
-              className="self-center border rounded px-6 py-2 text-sm font-semibold text-[var(--navy)] hover:bg-gray-50 disabled:opacity-50"
-            >
+            <Button type="button" variant="secondary" onClick={handleLoadMore} disabled={loadingMore} className="self-center px-8">
               {loadingMore ? t("loading") : t("loadMore")}
-            </button>
+            </Button>
           )}
         </div>
       )}

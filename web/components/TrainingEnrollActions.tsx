@@ -204,7 +204,13 @@ export default function TrainingEnrollActions({
           <div className="mb-1 text-[11px] font-medium text-slate-600">
             {t("progressLabel", { done: enrollment.progress.done, total: enrollment.progress.total, percent: enrollment.progress.percent })}
           </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={enrollment.progress.percent} aria-valuemin={0} aria-valuemax={100}>
+          <div
+            className="h-2 w-full overflow-hidden rounded-full bg-slate-100"
+            role="progressbar"
+            aria-label={t("progressBarLabel", { title: program.title })}
+            aria-valuetext={t("progressLabel", { done: enrollment.progress.done, total: enrollment.progress.total, percent: enrollment.progress.percent })}
+            aria-valuenow={enrollment.progress.percent} aria-valuemin={0} aria-valuemax={100}
+          >
             <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 transition-all" style={{ width: `${enrollment.progress.percent}%` }} />
           </div>
         </div>

@@ -9,6 +9,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import Panel from "@/components/ui/Panel";
 import StatCard from "@/components/ui/StatCard";
 import ShareAndQrModal from "@/components/ShareAndQrModal";
+import HotelRoomTypesEditor from "@/components/HotelRoomTypesEditor";
+import StaysPanel from "@/components/StaysPanel";
 import { IconQrCode, IconShare, IconArrowUpRight, IconFileText, IconCreditCard, IconSparkles } from "@/components/Icons";
 
 /**
@@ -58,7 +60,7 @@ export default function HotelDashboardPage() {
         const [profile, hotelsData] = await Promise.all([getMyProfile(token), listMyHotels(token)]);
         if (!active) return;
         setUserId(profile.id);
-        const owned = hotelsData.results.filter((h) => h.owner === profile.id);
+        const owned = hotelsData;
         setMyHotels(owned);
         if (owned.length > 0) {
           setSelectedHotelId(owned[0].id);
@@ -135,6 +137,7 @@ export default function HotelDashboardPage() {
     );
   }
 
+  const selectedHotel = myHotels.find((h) => h.id === selectedHotelId) ?? null;
   const shareUrl = typeof window !== "undefined" && userId ? `${window.location.origin}/user/${userId}` : "";
 
   return (
@@ -198,6 +201,21 @@ export default function HotelDashboardPage() {
           {nameMessage && <span className="text-xs font-semibold text-emerald-700">{nameMessage}</span>}
         </form>
       </div>
+
+      <StaysPanel mode="host" place="hotel" />
+
+      {selectedHotel && (
+        <div className="mb-6">
+          <HotelRoomTypesEditor
+            key={selectedHotel.id}
+            hotel={selectedHotel}
+            onChange={(updated) => setMyHotels((prev) => prev.map((h) => (h.id === updated.id ? updated : h)))}
+          />
+          <Link href={`/hotels/${selectedHotel.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-amber-700 hover:text-amber-800">
+            {t("viewGuestPage")} <IconArrowUpRight size={12} />
+          </Link>
+        </div>
+      )}
 
       {dashboardLoading || !dashboard ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

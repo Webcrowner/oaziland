@@ -242,6 +242,12 @@ def resolve_dispute(*, dispute, outcome: str, notes: str = "", payer_amount_xaf=
             if escrow.booking.booking_type == "TRAINING":
                 from careers.services import after_course_payment_settled
                 after_course_payment_settled(escrow.booking, refunded_in_full=result["payee_gross_xaf"] == 0)
+            elif escrow.booking.booking_type == "EVENT":
+                from events.lifecycle import after_event_dispute_settled
+                after_event_dispute_settled(escrow.booking)
+            elif escrow.booking.booking_type == "HOTEL":
+                from hotels.stays import after_stay_dispute_settled
+                after_stay_dispute_settled(escrow.booking, refunded_in_full=result["payee_gross_xaf"] == 0)
         dispute.status = DisputeStatus.RESOLVED
         dispute.resolved_at = timezone.now()
         dispute.save(update_fields=["status", "resolved_at", "resolution_notes"])

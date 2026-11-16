@@ -181,3 +181,24 @@ def test_an_admin_sees_pending_hotels_in_the_real_list_endpoint(quarter):
 
     assert admin_view.data["count"] == 1
     assert stranger_view.data["count"] == 0
+
+
+@pytest.mark.django_db
+def test_the_admin_review_queue_finds_pending_hotels_buried_past_the_first_page(quarter):
+    from hotels.models import Hotel
+    from identity.models import AdminProfile
+
+    admin_user = User.objects.create(username="hotel_queue_admin_2", phone="+237699666621")
+    AdminProfile.objects.create(user=admin_user, permissions=[])
+    owner = User.objects.create(username="hotel_queue_owner_2", phone="+237699666622")
+    waiting = Hotel.objects.create(owner=owner, quarter=quarter, type="HOTEL", name="Waiting Hotel", verified=False)
+    for i in range(25):  # newer, already-approved hotels fill the first page of the unfiltered list
+        Hotel.objects.create(owner=owner, quarter=quarter, type="HOTEL", name=f"Approved {i}", verified=True)
+
+    client = _auth_client(admin_user)
+    assert str(waiting.id) not in [h["id"] for h in client.get("/api/hotels/").data["results"]]
+    queue = client.get("/api/hotels/?verified=false").data
+    assert [h["id"] for h in queue["results"]] == [str(waiting.id)]
+    # Only admins can see unverified hotels; the filter doesn't expose them to anyone else.
+    public = APIClient().get("/api/hotels/?verified=false").data["results"]
+    assert str(waiting.id) not in [h["id"] for h in public]

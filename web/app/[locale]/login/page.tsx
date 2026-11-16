@@ -133,7 +133,7 @@ export default function LoginPage() {
                 <label htmlFor="login-password" className="block text-sm font-semibold text-slate-700">
                   {t("passwordPlaceholder")}
                 </label>
-                <Link href="/forgot-password" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
+                <Link href="/forgot-password" className="inline-block py-2 text-xs font-semibold text-amber-600 hover:text-amber-700">
                   {t("forgotPassword")}
                 </Link>
               </div>

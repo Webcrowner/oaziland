@@ -83,3 +83,25 @@ class GreetingSettings(models.Model):
     def get_settings(cls):
         obj, _ = cls.objects.get_or_create(id=1)
         return obj
+
+
+class PushPlatform(models.TextChoices):
+    WEB = "WEB", "Web browser (Web Push)"
+    EXPO = "EXPO", "Mobile app (Expo push)"
+
+
+class PushDevice(models.Model):
+    """A browser or phone that asked to receive push notifications for a user. Every in-app notification
+    is also pushed to each of the user's devices; devices the push service reports as gone are removed."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="push_devices")
+    platform = models.CharField(max_length=10, choices=PushPlatform.choices)
+    # The Expo push token, or the Web Push subscription endpoint URL.
+    token = models.CharField(max_length=1000, unique=True)
+    # Web Push only: the browser's encryption keys from its subscription.
+    web_p256dh = models.CharField(max_length=200, blank=True)
+    web_auth = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "push_devices"

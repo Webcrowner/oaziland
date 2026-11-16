@@ -6,6 +6,13 @@ from .models import AdminProfile, AgencyProfile, AgentProfile, KYCProfile, Landl
 
 USER_SEARCH = ("user__username", "user__phone", "user__first_name", "user__last_name")
 
+# Login (refresh) tokens are credentials: they are managed only by the code, never browsed in the data admin.
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken  # noqa: E402
+
+for _token_model in (BlacklistedToken, OutstandingToken):
+    if admin.site.is_registered(_token_model):
+        admin.site.unregister(_token_model)
+
 
 @admin.register(User)
 class UserAdmin(OaziAdmin):

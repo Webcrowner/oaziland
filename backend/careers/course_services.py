@@ -1,13 +1,15 @@
 """Business rules for full (Coursera-style) courses: who may edit or
 supervise, lesson progress, quiz grading, and finishing a course."""
+import unicodedata
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
 
 from .models import (
-    AssignmentSubmission, CourseStaff, CourseStaffRole, Lesson, LessonKind, LessonProgress, QuizAttempt,
-    SubmissionStatus, TrainingEnrollmentStatus, TrainingProgram, QuizQuestion,
+    AssignmentSubmission, CourseStaff, CourseStaffRole, Lesson, LessonKind, LessonProgress, PeerReview, QuizAttempt,
+    QuizQuestionKind, SubmissionStatus, TrainingEnrollmentStatus, TrainingProgram, QuizQuestion,
 )
 from .services import InvalidEnrollmentTransitionError, mark_training_completed
 from .course_media import media_url
@@ -15,6 +17,8 @@ from .course_media import media_url
 MAX_PDF_BYTES = 20 * 1024 * 1024
 MAX_VIDEO_BYTES = 500 * 1024 * 1024
 VIDEO_CONTENT_TYPES = {"video/mp4", "video/webm", "video/ogg", "video/quicktime"}
+MAX_ANSWER_CHARS = 200
+MAX_CHOICES_PER_QUESTION = 50
 
 
 class CourseError(Exception):
@@ -135,6 +139,49 @@ def course_progress(enrollment) -> dict:
     return {"total": total, "done": done, "percent": round(done * 100 / total) if total else 0}
 
 
+def next_lesson(enrollment):
+    """The first lesson, in course order, the learner hasn't finished (the course player opens on it), or None."""
+    done = LessonProgress.objects.filter(enrollment=enrollment).values("lesson_id")
+    return (
+        lessons_of(enrollment.program).exclude(pk__in=done)
+        .order_by("module__position", "module__title", "position", "title").first()
+    )
+
+
+def last_activity_at(enrollment):
+    """When the learner last did something in the course: finished a lesson, took a quiz or handed in work."""
+    from django.db.models import Max
+
+    moments = [
+        LessonProgress.objects.filter(enrollment=enrollment).aggregate(at=Max("completed_at"))["at"],
+        QuizAttempt.objects.filter(enrollment=enrollment).aggregate(at=Max("submitted_at"))["at"],
+        AssignmentSubmission.objects.filter(enrollment=enrollment).aggregate(at=Max("submitted_at"))["at"],
+    ]
+    return max((moment for moment in moments if moment), default=None)
+
+
+REVIEW_TIME_SAMPLE = 20
+REVIEW_TIME_MIN_SAMPLES = 3
+
+
+def typical_review_hours(program):
+    """The median time, in hours, this course's assignments waited for a review (its last REVIEW_TIME_SAMPLE reviews),
+    or None until there are REVIEW_TIME_MIN_SAMPLES of them. Shown to learners waiting for a review."""
+    from django.db.models import F
+
+    reviewed = (
+        AssignmentSubmission.objects
+        .filter(lesson__module__program=program, reviewed_at__isnull=False, reviewed_at__gt=F("submitted_at"))
+        .order_by("-reviewed_at").values_list("submitted_at", "reviewed_at")[:REVIEW_TIME_SAMPLE]
+    )
+    waits = sorted((reviewed_at - submitted_at).total_seconds() / 3600 for submitted_at, reviewed_at in reviewed)
+    if len(waits) < REVIEW_TIME_MIN_SAMPLES:
+        return None
+    middle = len(waits) // 2
+    median = waits[middle] if len(waits) % 2 else (waits[middle - 1] + waits[middle]) / 2
+    return max(round(median), 1)
+
+
 def course_is_finished(enrollment) -> bool:
     """A program without lessons is a simple self-reported course and is
     never blocked; otherwise every lesson (and quiz) must be done."""
@@ -211,15 +258,52 @@ def submit_assignment(enrollment, lesson_id, file) -> AssignmentSubmission:
     if submission and submission.status == SubmissionStatus.APPROVED:
         raise CourseError("This assignment has already been approved.")
     if submission is None:
-        return AssignmentSubmission.objects.create(enrollment=enrollment, lesson=lesson, file=file)
+        submission = AssignmentSubmission.objects.create(enrollment=enrollment, lesson=lesson, file=file)
+        if not lesson.peer_review:  # classmates review first; staff are reminded later if nobody has (course_reminders)
+            _notify_reviewers_of_submission(submission)
+        return submission
     submission.file.delete(save=False)  # the replaced PDF is no longer needed
     submission.file = file
     submission.status = SubmissionStatus.SUBMITTED
     submission.feedback = ""
     submission.reviewed_by = None
     submission.reviewed_at = None
+    submission.review_reminded_at = None
+    submission.escalated_at = None
     submission.save()
+    submission.peer_reviews.all().delete()  # they were about the replaced file
+    if not lesson.peer_review:
+        _notify_reviewers_of_submission(submission, resubmitted=True)
     return submission
+
+
+def course_reviewers(program):
+    """Who reviews a course's assignments: its creator and every lecturer and supervisor (active accounts)."""
+    from identity.models import User
+
+    staff = CourseStaff.objects.filter(program=program).values("user_id")
+    return User.objects.filter(Q(pk=program.provider_id) | Q(pk__in=staff), is_active=True).distinct()
+
+
+def _notify_reviewers_of_submission(submission, resubmitted=False):
+    from .services import _in_language, _send
+
+    program, student = submission.enrollment.program, submission.enrollment.student
+    learner = student.full_name or student.username
+    lesson = submission.lesson.title
+    for reviewer in course_reviewers(program).exclude(pk=student.pk):
+        _send(
+            recipient=reviewer, notification_type="COURSE_SUBMISSION_TO_REVIEW",
+            title=_in_language(reviewer, "Assignment to review", "Devoir à corriger"),
+            message=_in_language(
+                reviewer,
+                f"{learner} {'resubmitted' if resubmitted else 'handed in'} “{lesson}” ({program.title}). "
+                "Review it in Manage courses → Submissions.",
+                f"{learner} a {'renvoyé' if resubmitted else 'rendu'} « {lesson} » ({program.title}). "
+                "Corrigez-le dans Gérer les cours → Travaux remis.",
+            ),
+            related_reference=str(program.id),
+        )
 
 
 def _notify_review(submission):
@@ -263,7 +347,8 @@ def review_submission(submission, *, reviewer, decision: str, feedback: str = ""
     submission.feedback = feedback
     submission.reviewed_by = reviewer
     submission.reviewed_at = timezone.now()
-    submission.save()
+    # update_fields keeps submitted_at (auto_now) as the learner's submission time rather than the review time.
+    submission.save(update_fields=["status", "feedback", "reviewed_by", "reviewed_at"])
     enrollment = submission.enrollment
     if decision == SubmissionStatus.APPROVED and enrollment.status in (
         TrainingEnrollmentStatus.ENROLLED, TrainingEnrollmentStatus.IN_PROGRESS,
@@ -298,9 +383,59 @@ def quiz_attempt_status(enrollment, lesson, attempts=None) -> dict:
     return {"passed": passed, "attempts_left": left, "retry_at": retry_at, "attempts_per_window": QUIZ_ATTEMPTS_PER_WINDOW}
 
 
-def _graded(question, selected) -> dict:
+def _clean_answer(value) -> str:
+    return str(value if value is not None else "").strip()[:MAX_ANSWER_CHARS]
+
+
+def normalise_text(value) -> str:
+    """Lower-cased, accent-free, single-spaced: "  Yaoundé " and "yaounde" are the same short answer."""
+    text = unicodedata.normalize("NFKD", _clean_answer(value)).casefold()
+    return " ".join("".join(c for c in text if not unicodedata.combining(c)).split())
+
+
+def parse_number(value) -> Decimal | None:
+    """Reads "1500", "1 500", "1,5" or "1.500,5"; None when it isn't a finite number."""
+    text = _clean_answer(value).replace("\u00a0", "").replace("\u202f", "").replace(" ", "")
+    if "," in text and "." in text:
+        decimal_mark = "," if text.rfind(",") > text.rfind(".") else "."
+        text = text.replace("." if decimal_mark == "," else ",", "")
+        text = text.replace(decimal_mark, ".")
+    else:
+        text = text.replace(",", ".")
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        return None
+    return number if number.is_finite() else None
+
+
+def _graded(question, given) -> dict:
+    """Grades one question. `given` is what the learner answered: the ticked choice ids, or the typed text."""
+    given = list(given) if isinstance(given, (list, tuple, set)) else [given]
+    base = {"question": str(question.id)}
+    if question.kind == QuizQuestionKind.SHORT_TEXT:
+        accepted = {normalise_text(a) for a in question.accepted_answers}
+        answer = normalise_text(given[0]) if given else ""
+        return {**base, "correct": bool(answer) and answer in accepted, "correct_answers": list(question.accepted_answers)}
+    if question.kind == QuizQuestionKind.NUMBER:
+        target = parse_number(question.accepted_answers[0]) if question.accepted_answers else None
+        value = parse_number(given[0]) if given else None
+        right = target is not None and value is not None and abs(value - target) <= question.tolerance
+        return {
+            **base, "correct": right, "correct_answers": [str(a) for a in question.accepted_answers[:1]],
+            "tolerance": str(question.tolerance.normalize()) if question.tolerance else "0",
+        }
     correct = {str(c.id) for c in question.choices.all() if c.is_correct}
-    return {"question": str(question.id), "correct": bool(correct) and set(selected) == correct, "correct_choices": sorted(correct)}
+    return {**base, "correct": bool(correct) and {str(c) for c in given} == correct, "correct_choices": sorted(correct)}
+
+
+def _clean_answers(answers: dict) -> dict:
+    """What a learner sent, as {question id: [answers]} with every answer a bounded string."""
+    cleaned = {}
+    for question_id, value in answers.items():
+        values = value if isinstance(value, list) else [value]
+        cleaned[str(question_id)] = [_clean_answer(v) for v in values[:MAX_CHOICES_PER_QUESTION] if isinstance(v, (str, int, float))]
+    return cleaned
 
 
 def submit_quiz(enrollment, lesson_id, answers: dict) -> dict:
@@ -319,16 +454,12 @@ def submit_quiz(enrollment, lesson_id, answers: dict) -> dict:
     if not attempt_status["attempts_left"]:
         raise QuizLockedError("You've used all your attempts for now.", retry_at=attempt_status["retry_at"])
 
-    results = []
-    for question in questions:
-        results.append({**_graded(question, {str(c) for c in (answers.get(str(question.id)) or [])}), "explanation": question.explanation})
+    answers = _clean_answers(answers)
+    results = [{**_graded(question, answers.get(str(question.id)) or []), "explanation": question.explanation} for question in questions]
 
     score = round(sum(r["correct"] for r in results) * 100 / len(questions))
     passed = score >= lesson.pass_mark_percent
-    QuizAttempt.objects.create(
-        enrollment=enrollment, lesson=lesson, score_percent=score, passed=passed,
-        answers={str(k): [str(c) for c in v] for k, v in answers.items() if isinstance(v, list)},
-    )
+    QuizAttempt.objects.create(enrollment=enrollment, lesson=lesson, score_percent=score, passed=passed, answers=answers)
     if passed:
         _record_progress(enrollment, lesson)
     else:
@@ -348,17 +479,34 @@ def _quiz_review(attempt, questions) -> dict:
     }
 
 
+def module_deadline(enrollment, module):
+    """When the learner is suggested to have finished this module by, or None if the course sets no pace for it."""
+    if not module.due_after_days:
+        return None
+    return enrollment.enrolled_at + timedelta(days=module.due_after_days)
+
+
 def learner_outline(enrollment, request) -> dict:
     """Everything the course player needs. Correct answers are only included for quizzes the learner has passed
     (as a review of their passing attempt)."""
+    from .peer_review import PEER_REVIEWS_REQUIRED
+
     done_ids = set(
         LessonProgress.objects.filter(enrollment=enrollment).values_list("lesson_id", flat=True)
     )
     attempts_by_lesson = {}
     for attempt in QuizAttempt.objects.filter(enrollment=enrollment):
         attempts_by_lesson.setdefault(attempt.lesson_id, []).append(attempt)
+    reviews_received = dict(
+        PeerReview.objects.filter(submission__enrollment=enrollment).values_list("submission_id").annotate(n=Count("id"))
+    )
+    reviews_given = dict(
+        PeerReview.objects.filter(reviewer=enrollment).values_list("submission__lesson_id").annotate(n=Count("id"))
+    )
 
     modules = []
+    now = timezone.now()
+    overdue_modules = 0
     program = enrollment.program
     submissions = {s.lesson_id: s for s in AssignmentSubmission.objects.filter(enrollment=enrollment)}
     for module in program.modules.prefetch_related("lessons__questions__choices"):
@@ -375,7 +523,14 @@ def learner_outline(enrollment, request) -> dict:
                 sub = submissions.get(lesson.id)
                 item["submission"] = None if sub is None else {
                     "status": sub.status, "feedback": sub.feedback, "submitted_at": sub.submitted_at,
+                    "peer_reviews_received": reviews_received.get(sub.id, 0),
                 }
+                item["peer_review"] = lesson.peer_review
+                if lesson.peer_review:
+                    item["peer"] = {
+                        "required": PEER_REVIEWS_REQUIRED, "given": reviews_given.get(lesson.id, 0),
+                        "can_review": sub is not None,
+                    }
             if lesson.kind == LessonKind.QUIZ:
                 attempts = attempts_by_lesson.get(lesson.id, [])
                 questions = list(lesson.questions.all())
@@ -384,21 +539,29 @@ def learner_outline(enrollment, request) -> dict:
                 item.update({k: v for k, v in quiz_attempt_status(enrollment, lesson, attempts).items() if k != "passed"})
                 item["questions"] = [
                     {
-                        "id": str(q.id), "text": q.text,
-                        "multiple": sum(c.is_correct for c in q.choices.all()) > 1,
-                        "choices": [{"id": str(c.id), "text": c.text} for c in q.choices.all()],
+                        "id": str(q.id), "text": q.text, "kind": q.kind,
+                        "multiple": q.kind == QuizQuestionKind.CHOICE and sum(c.is_correct for c in q.choices.all()) > 1,
+                        "choices": [{"id": str(c.id), "text": c.text} for c in q.choices.all()] if q.kind == QuizQuestionKind.CHOICE else [],
                     }
                     for q in questions
                 ]
                 passing = max((a for a in attempts if a.passed), key=lambda a: a.score_percent, default=None)
                 item["review"] = _quiz_review(passing, questions) if passing else None
             lessons.append(item)
-        modules.append({"id": str(module.id), "title": module.title, "lessons": lessons})
+        due_at = module_deadline(enrollment, module)
+        overdue = bool(due_at and due_at < now and not all(l["completed"] for l in lessons))
+        overdue_modules += overdue
+        modules.append({
+            "id": str(module.id), "title": module.title, "lessons": lessons,
+            "due_after_days": module.due_after_days, "due_at": due_at, "overdue": overdue,
+        })
     return {
         "program": {"id": str(program.id), "title": program.title},
         "status": enrollment.status,
         "certificate_issued_at": enrollment.certificate_issued_at,
         "certificate_code": enrollment.certificate_code,
         "progress": course_progress(enrollment),
+        "typical_review_hours": typical_review_hours(program) if submissions else None,
+        "overdue_modules": overdue_modules,
         "modules": modules,
     }

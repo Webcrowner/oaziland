@@ -55,17 +55,57 @@ class Hotel(PropertyAsset):
 
 
 class RoomType(models.Model):
-    """Room category configuration — one hotel can offer several room
-    types, each with its own base rate and capacity."""
+    """What guests browse and book on a hotel's or guest house's page, like a room type on Booking.com: "Deluxe
+    double with balcony — 45,000 XAF/night", with its own photos. The physical rooms (101, 102...) are Rooms
+    pointing at it; how many of them are free for the guest's dates is what makes it bookable. It belongs to
+    exactly one place: a hotel or a guest house (both use this same booking engine)."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name="room_types")
+    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, null=True, blank=True, related_name="room_types")
+    guest_house = models.ForeignKey("property.GuestHouseLodge", on_delete=models.CASCADE, null=True, blank=True, related_name="room_types")
+    name = models.CharField(max_length=120, blank=True, default="")
     category = models.CharField(max_length=15, choices=RoomCategory.choices)
     capacity = models.PositiveSmallIntegerField()
     base_rate_xaf = models.DecimalField(max_digits=10, decimal_places=2)
     amenities = models.JSONField(default=list, blank=True)
+    bed_setup = models.CharField(max_length=120, blank=True, default="")
+    size_sqm = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
+    description = models.TextField(blank=True, default="")
+    # Hidden from guests (and not bookable) without deleting it, e.g. while its rooms are renovated.
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = "hotel_room_types"
+        ordering = ["base_rate_xaf", "name"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(hotel__isnull=False, guest_house__isnull=True) | models.Q(hotel__isnull=True, guest_house__isnull=False),
+                name="room_type_belongs_to_one_place",
+            ),
+        ]
+
+    @property
+    def place(self):
+        """The hotel or guest house this room type belongs to."""
+        return self.hotel or self.guest_house
+
+    @property
+    def owner(self):
+        return self.place.owner
+
+    @property
+    def display_name(self):
+        return self.name or self.get_category_display()
+
+
+class RoomTypePhoto(models.Model):
+    room_type = models.ForeignKey(RoomType, on_delete=models.CASCADE, related_name="photos")
+    url = models.URLField(max_length=500)
+    position = models.PositiveSmallIntegerField(default=0)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "hotel_room_type_photos"
+        ordering = ["position", "id"]
 
 
 class RoomStatus(models.TextChoices):
@@ -86,7 +126,8 @@ class Room(models.Model):
     """An individual physical room — distinct from RoomType (the
     category/rate configuration)."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name="rooms")
+    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, null=True, blank=True, related_name="rooms")
+    guest_house = models.ForeignKey("property.GuestHouseLodge", on_delete=models.CASCADE, null=True, blank=True, related_name="rooms")
     room_type = models.ForeignKey(RoomType, on_delete=models.PROTECT, related_name="rooms")
     room_number = models.CharField(max_length=20)
     floor = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -96,6 +137,9 @@ class Room(models.Model):
     class Meta:
         db_table = "hotel_rooms"
         unique_together = [("hotel", "room_number")]
+        constraints = [
+            models.UniqueConstraint(fields=["guest_house", "room_number"], condition=models.Q(guest_house__isnull=False), name="unique_guest_house_room_number"),
+        ]
 
 
 class SeasonalRate(models.Model):
@@ -149,7 +193,8 @@ class Reservation(models.Model):
     booking (e.g. a new event premium period added later) must never
     retroactively change what an already-confirmed guest is charged."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, related_name="reservations")
+    hotel = models.ForeignKey(Hotel, on_delete=models.CASCADE, null=True, blank=True, related_name="reservations")
+    guest_house = models.ForeignKey("property.GuestHouseLodge", on_delete=models.CASCADE, null=True, blank=True, related_name="room_reservations")
     guest = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="hotel_reservations")
     room_type = models.ForeignKey(RoomType, on_delete=models.PROTECT, related_name="reservations")
     check_in = models.DateField()
@@ -168,6 +213,15 @@ class Reservation(models.Model):
 
     class Meta:
         db_table = "hotel_reservations"
+
+    @property
+    def place(self):
+        return self.hotel or self.guest_house
+
+    @property
+    def owner(self):
+        """Who is paid for this stay (transactions.services.resolve_target_owner reads it)."""
+        return self.place.owner
 
 
 class RoomAssignment(models.Model):

@@ -68,6 +68,12 @@ body {
     outline: 2px solid #a16207;
     outline-offset: 3px;
   }
+
+  /* Footer links are plain text lines; give each a finger-sized tap area without changing the look. */
+  footer a {
+    display: inline-block;
+    padding-block: 0.5rem;
+  }
 }
 
 /* Glassmorphic and subtle elevation utilities */

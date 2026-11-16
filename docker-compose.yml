@@ -56,6 +56,9 @@ services:
       # be lost the next time the backend container is rebuilt.
       - media_data:/app/media
       - static_data:/app/staticfiles
+      # Private files served only through permission-checked endpoints (course PDFs and videos, learners'
+      # assignment submissions, compliance documents) — kept apart from media_data, which nginx serves publicly.
+      - private_media_data:/app/private_media
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,7 +68,8 @@ services:
   # Hourly background sweep for Taskln jobs: expires unaccepted requests, removes
   # technicians who never quote or never show up (refunding held payment), and
   # releases payment on finished jobs the client never confirmed. Without this
-  # container none of those automatic rules ever run.
+  # container none of those automatic rules ever run. It also reminds learners who've gone quiet on a course
+  # (send_course_reminders sends each learner at most one reminder a week, however often it runs).
   scheduler:
     build:
       context: ./backend
@@ -75,12 +79,37 @@ services:
     environment:
       DATABASE_URL: postgres://oaziland:${POSTGRES_PASSWORD}@postgres:5432/oaziland
       REDIS_URL: redis://redis:6379/0
-    command: sh -c "while true; do python manage.py expire_stale_service_requests; python manage.py expire_stale_rides; python manage.py process_marketplace_orders; sleep 3600; done"
+    command: sh /app/run_scheduler.sh
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
+
+  # Nightly database backup: a compressed dump into the backup_data volume, keeping the last 14. This protects against
+  # mistakes and corruption, NOT against losing the server: also copy the dumps off the machine (for example with
+  # `docker compose cp backup:/backups ./offsite` on a schedule). Restore with `pg_restore -d oaziland <file>`.
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: oaziland
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: oaziland
+    volumes:
+      - backup_data:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          pg_dump --format=custom --file=/backups/oaziland-$$(date -u +%Y%m%d-%H%M).dump || echo "backup failed"
+          ls -1t /backups/oaziland-*.dump | tail -n +15 | xargs -r rm --
+          sleep 86400
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   web:
     build:
@@ -89,6 +118,9 @@ services:
         # Baked in at BUILD time, not runtime — see web/Dockerfile's
         # own comment on why this differs from the backend's env vars.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    environment:
+      # Server-side rendering talks to Django over the compose network; "localhost" inside this container is Next.js itself.
+      API_INTERNAL_URL: http://backend:8000
     restart: unless-stopped
     depends_on:
       - backend
@@ -122,8 +154,10 @@ services:
 
 volumes:
   postgres_data:
+  backup_data:
   redis_data:
   media_data:
+  private_media_data:
   static_data:
   certbot_certs:
   certbot_www:

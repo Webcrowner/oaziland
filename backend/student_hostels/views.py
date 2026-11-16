@@ -57,7 +57,7 @@ class StudentHostelViewSet(viewsets.ModelViewSet):
             return StudentHostel.objects.none()
         from trust_safety.report_targets import visible_places
         return visible_places(
-            StudentHostel.objects.select_related("owner__agent_profile").prefetch_related("asset_photos").order_by("-created_at"),
+            StudentHostel.objects.select_related("owner__agent_profile", "listed_by__agent_profile").prefetch_related("asset_photos").order_by("-created_at"),
             self.request.user,
         )
 
@@ -80,6 +80,19 @@ class StudentHostelViewSet(viewsets.ModelViewSet):
         quarter = Quarter.objects.filter(id=data["quarter"]).first()
         if quarter is None:
             return Response({"detail": "That neighborhood was not found."}, status=status.HTTP_400_BAD_REQUEST)
+        name = " ".join(data.get("name", "").split())
+
+        if data.get("landlord", "").strip():
+            from .agents import AgentListingError, list_hostel_for_landlord
+            try:
+                hostel = list_hostel_for_landlord(
+                    agent=request.user, landlord_identifier=data["landlord"], quarter=quarter,
+                    property_type=data["property_type"], name=name,
+                    latitude=data.get("latitude"), longitude=data.get("longitude"),
+                )
+            except AgentListingError as e:
+                return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(StudentHostelSerializer(hostel).data, status=status.HTTP_201_CREATED)
 
         # Same real auto-provisioning pattern already used for
         # marketplace listings — a first-time hostel owner shouldn't
@@ -92,13 +105,21 @@ class StudentHostelViewSet(viewsets.ModelViewSet):
             latitude=data.get("latitude"),
             longitude=data.get("longitude"),
         )
+        if name:
+            hostel.name = name
+            hostel.save(update_fields=["name"])
         return Response(StudentHostelSerializer(hostel).data, status=status.HTTP_201_CREATED)
+
+    def _may_edit(self, request, hostel) -> bool:
+        """The owner, an active manager (full or bookings), or an admin."""
+        from .management import can_manage
+        return can_manage(request.user, hostel)
 
     @action(detail=True, methods=["post"], url_path="set-location")
     def set_location(self, request, pk=None):
         hostel = self.get_object()
-        if hostel.owner_id != request.user.id and not hasattr(request.user, "admin_profile"):
-            return Response({"detail": "Only the hostel's owner can set its location."}, status=status.HTTP_403_FORBIDDEN)
+        if not self._may_edit(request, hostel):
+            return Response({"detail": "Only the hostel's owner or manager can set its location."}, status=status.HTTP_403_FORBIDDEN)
         lat = request.data.get("latitude")
         lng = request.data.get("longitude")
         if lat is None or lng is None:
@@ -111,8 +132,8 @@ class StudentHostelViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="add-photo")
     def add_photo(self, request, pk=None):
         hostel = self.get_object()
-        if hostel.owner_id != request.user.id:
-            return Response({"detail": "Only the hostel's own owner can add photos to it."}, status=status.HTTP_403_FORBIDDEN)
+        if not self._may_edit(request, hostel):
+            return Response({"detail": "Only the hostel's owner or manager can add photos to it."}, status=status.HTTP_403_FORBIDDEN)
         url = request.data.get("url")
         if not url:
             return Response({"detail": "url is required — upload the file to /api/media/upload/ first."}, status=status.HTTP_400_BAD_REQUEST)
@@ -124,8 +145,8 @@ class StudentHostelViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="remove-photo")
     def remove_photo(self, request, pk=None):
         hostel = self.get_object()
-        if hostel.owner_id != request.user.id:
-            return Response({"detail": "Only the hostel's own owner can remove its photos."}, status=status.HTTP_403_FORBIDDEN)
+        if not self._may_edit(request, hostel):
+            return Response({"detail": "Only the hostel's owner or manager can remove its photos."}, status=status.HTTP_403_FORBIDDEN)
         photo_id = request.data.get("photo_id")
         deleted_count, _ = PropertyAssetPhoto.objects.filter(property_asset=hostel, id=photo_id).delete()
         if deleted_count == 0:
@@ -257,19 +278,90 @@ class HostelRoomsViewSet(viewsets.GenericViewSet):
 
     def retrieve(self, request, pk=None):
         from .management import hostel_board
-        return Response(hostel_board(self.get_object(), request.query_params.get("semester")))
+        return Response(hostel_board(self.get_object(), request.query_params.get("semester"), viewer=request.user))
 
     def _act(self, request, work):
         from trust_safety.audit import audit_note
+        from .agents import AgentListingError
         from .management import HostelManagementError, hostel_board, hostel_label
+        from .room_types import RoomTypeError
 
         hostel = self.get_object()
         audit_note(request, target_type="student-hostel", target_label=hostel_label(hostel))
         try:
             work(hostel, request.data)
-        except HostelManagementError as exc:
+        except (HostelManagementError, RoomTypeError, AgentListingError) as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(hostel_board(hostel, request.data.get("semester") or request.query_params.get("semester")))
+        return Response(hostel_board(hostel, request.data.get("semester") or request.query_params.get("semester"), viewer=request.user))
+
+    @action(detail=True, methods=["post"], url_path="add-manager")
+    def add_manager(self, request, pk=None):
+        """The owner gives someone access to run this hostel: "identifier" (phone or username), "scope" FULL or BOOKINGS_ONLY."""
+        from .agents import assign_manager
+        return self._act(request, lambda hostel, data: assign_manager(
+            hostel, by=request.user, identifier=str(data.get("identifier") or ""), scope=str(data.get("scope") or "FULL"),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="remove-manager")
+    def remove_manager(self, request, pk=None):
+        from .agents import revoke_manager
+        return self._act(request, lambda hostel, data: revoke_manager(hostel, by=request.user, contract_id=_uuid(data.get("contract"))))
+
+    @action(detail=True, methods=["post"])
+    def details(self, request, pk=None):
+        """The hostel's name as students see it on its card."""
+        from .management import HostelManagementError
+
+        def work(hostel, data):
+            name = " ".join(str(data.get("name") or "").split())
+            if len(name) > 120:
+                raise HostelManagementError("Keep the hostel's name to 120 characters.")
+            hostel.name = name
+            hostel.save(update_fields=["name"])
+        return self._act(request, work)
+
+    @action(detail=True, methods=["post"], url_path="room-types")
+    def room_types(self, request, pk=None):
+        """Create a room type, or update one (send its "room_type" id)."""
+        from .room_types import room_type_for, save_room_type
+
+        def work(hostel, data):
+            existing = room_type_for(hostel, data.get("room_type")) if data.get("room_type") else None
+            save_room_type(hostel, data, existing)
+        return self._act(request, work)
+
+    @action(detail=True, methods=["post"], url_path="room-type-visibility")
+    def room_type_visibility(self, request, pk=None):
+        from .room_types import room_type_for, set_room_type_active
+        return self._act(request, lambda hostel, data: set_room_type_active(
+            room_type_for(hostel, data.get("room_type")), data.get("is_active") in (True, "true", "1", 1),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="delete-room-type")
+    def delete_room_type(self, request, pk=None):
+        from .room_types import delete_room_type, room_type_for
+        return self._act(request, lambda hostel, data: delete_room_type(room_type_for(hostel, data.get("room_type"))))
+
+    @action(detail=True, methods=["post"], url_path="room-type-photos")
+    def room_type_photos(self, request, pk=None):
+        """Add a photo (upload it to /api/media/upload/ first and send its "url"), or remove one ("remove": photo id)."""
+        from .room_types import add_room_type_photo, remove_room_type_photo, room_type_for
+
+        def work(hostel, data):
+            room_type = room_type_for(hostel, data.get("room_type"))
+            if data.get("remove") not in (None, ""):
+                remove_room_type_photo(room_type, _int(data.get("remove")))
+            else:
+                add_room_type_photo(room_type, data.get("url"))
+        return self._act(request, work)
+
+    @action(detail=True, methods=["post"], url_path="assign-room-type")
+    def assign_room_type(self, request, pk=None):
+        """Put a room under a room type ("room_type": id, or empty for none)."""
+        from .room_types import assign_unit_to_room_type, room_type_for, unit_in
+        return self._act(request, lambda hostel, data: assign_unit_to_room_type(
+            unit_in(hostel, data.get("unit")), room_type_for(hostel, data.get("room_type")) if data.get("room_type") else None,
+        ))
 
     @action(detail=True, methods=["post"])
     def institutions(self, request, pk=None):
@@ -301,11 +393,25 @@ class HostelRoomsViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=["post"])
     def rooms(self, request, pk=None):
+        """Add a room. With a "room_type" it takes that type's kind of room, letting and beds."""
         from .management import create_unit
-        return self._act(request, lambda hostel, data: create_unit(
-            hostel, room_code=str(data.get("room_code") or ""), unit_type=str(data.get("unit_type") or ""),
-            occupancy_model=str(data.get("occupancy_model") or ""), bed_capacity=_int(data.get("bed_capacity"), default=1),
-        ))
+        from .room_types import OccupancyModel, assign_unit_to_room_type, room_type_for
+
+        def work(hostel, data):
+            room_type = room_type_for(hostel, data.get("room_type")) if data.get("room_type") else None
+            if room_type is not None:
+                beds = room_type.beds_per_room if room_type.occupancy_model == OccupancyModel.PER_BED else 1
+                unit = create_unit(
+                    hostel, room_code=str(data.get("room_code") or ""), unit_type=room_type.unit_type,
+                    occupancy_model=room_type.occupancy_model, bed_capacity=beds,
+                )
+                assign_unit_to_room_type(unit, room_type)
+                return
+            create_unit(
+                hostel, room_code=str(data.get("room_code") or ""), unit_type=str(data.get("unit_type") or ""),
+                occupancy_model=str(data.get("occupancy_model") or ""), bed_capacity=_int(data.get("bed_capacity"), default=1),
+            )
+        return self._act(request, work)
 
     @action(detail=True, methods=["post"], url_path="delete-room")
     def delete_room(self, request, pk=None):

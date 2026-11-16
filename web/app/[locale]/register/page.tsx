@@ -35,6 +35,7 @@ function RegisterForm() {
     username: "", phone: "", password: "", role: "renter",
   });
   const [referralCode, setReferralCode] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,9 +50,13 @@ function RegisterForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!accepted) {
+      setError(t("acceptRequired"));
+      return;
+    }
     setLoading(true);
     try {
-      await registerUser({ ...form, ...(referralCode ? { referral_code: referralCode } : {}) });
+      await registerUser({ ...form, accept_terms: true, ...(referralCode ? { referral_code: referralCode } : {}) });
       // Flags the very next login as a fresh signup, so LoginPage
       // knows to route into the real role/intent picker instead of
       // straight to the homepage — but only once, for this new account.
@@ -184,6 +189,19 @@ function RegisterForm() {
               </select>
               <p className="text-[11px] text-slate-500 mt-1.5">{t("roleHint")}</p>
             </div>
+
+            <label className="flex items-start gap-2.5 text-xs text-slate-600 leading-relaxed">
+              <input
+                type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-amber-500"
+              />
+              <span>
+                {t("acceptPrefix")}{" "}
+                <Link href="/terms" target="_blank" className="font-bold text-amber-600 underline">{t("acceptTerms")}</Link>{" "}
+                {t("acceptAnd")}{" "}
+                <Link href="/privacy" target="_blank" className="font-bold text-amber-600 underline">{t("acceptPrivacy")}</Link>
+              </span>
+            </label>
 
             {error && (
               <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 font-medium">

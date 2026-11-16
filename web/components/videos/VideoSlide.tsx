@@ -5,7 +5,7 @@ import { Link } from "@/i18n/navigation";
 import Avatar from "@/components/Avatar";
 import type { ReelPost } from "@/lib/api";
 import {
-  BookmarkIcon, CheckIcon, CommentIcon, HeartFilled, HeartOutline, PlayIcon, PlusIcon, ShareArrowIcon, VolumeIcon,
+  BookmarkIcon, CheckIcon, CommentIcon, HeartFilled, HeartOutline, MoreIcon, PlayIcon, PlusIcon, ShareArrowIcon, VolumeIcon,
 } from "@/components/videos/VideoIcons";
 
 export interface VideoSlideProps {
@@ -20,6 +20,7 @@ export interface VideoSlideProps {
   onFollow: (post: ReelPost) => void;
   onOpenComments: (post: ReelPost) => void;
   onOpenShare: (post: ReelPost) => void;
+  onOpenMore: (post: ReelPost) => void;
   onTagClick: (tag: string) => void;
   onViewed: (post: ReelPost) => void;
 }
@@ -41,7 +42,7 @@ function RailButton({ label, count, onClick, pressed, children }: { label: strin
 }
 
 export default function VideoSlide({
-  post, active, nearby, muted, onToggleMute, onLike, onSave, onFollow, onOpenComments, onOpenShare, onTagClick, onViewed,
+  post, active, nearby, muted, onToggleMute, onLike, onSave, onFollow, onOpenComments, onOpenShare, onOpenMore, onTagClick, onViewed,
 }: VideoSlideProps) {
   const t = useTranslations("VideosPage");
   const locale = useLocale();
@@ -310,6 +311,9 @@ export default function VideoSlide({
           </RailButton>
           <RailButton label={muted ? t("unmute") : t("mute")} onClick={onToggleMute}>
             <VolumeIcon size={24} muted={muted} />
+          </RailButton>
+          <RailButton label={t("more")} onClick={() => onOpenMore(post)}>
+            <MoreIcon size={24} />
           </RailButton>
         </div>
       </div>

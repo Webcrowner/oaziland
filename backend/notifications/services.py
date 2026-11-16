@@ -203,6 +203,19 @@ class EmailDispatcher(NotificationDispatcher):
         return response.ok
 
 
+class PushDispatcher(NotificationDispatcher):
+    """Sends to the recipient's registered phones and browsers (see notifications.push)."""
+
+    @staticmethod
+    def is_configured() -> bool:
+        from .push import web_push_configured
+        return web_push_configured()
+
+    def send(self, notification) -> bool:
+        from .push import push_notification
+        return push_notification(notification) > 0
+
+
 def get_active_dispatcher(channel: str) -> NotificationDispatcher:
     """FIXED: this previously always returned SandboxDispatcher
     regardless of the channel argument — meaning WhatsAppDispatcher and
@@ -217,7 +230,7 @@ def get_active_dispatcher(channel: str) -> NotificationDispatcher:
         "WHATSAPP": WhatsAppDispatcher() if WhatsAppDispatcher.is_configured() else SandboxDispatcher(),
         "SMS": SMSDispatcher() if SMSDispatcher.is_configured() else SandboxDispatcher(),
         "EMAIL": EmailDispatcher() if EmailDispatcher.is_configured() else SandboxDispatcher(),
-        "PUSH": SandboxDispatcher(),
+        "PUSH": PushDispatcher() if PushDispatcher.is_configured() else SandboxDispatcher(),
         "IN_APP": SandboxDispatcher(),
     }.get(channel, SandboxDispatcher())
 
@@ -256,12 +269,49 @@ def notify(*, recipient=None, external_phone_number: str = "", notification_type
     dispatcher = get_active_dispatcher(channel)
     record.delivered = dispatcher.send(record)
     record.save(update_fields=["delivered"])
+    if channel == "IN_APP" and recipient is not None:
+        # Best-effort: the inbox entry is the real record, a failed push must never undo the action.
+        try:
+            from .push import push_notification
+            push_notification(record)
+        except Exception:
+            logger.exception("Push for notification %s failed", record.id)
     if not is_delivery_live(channel):
         logger.warning(
             "%s notification %s (%s) was recorded but NOT delivered: no real %s provider is connected, only the sandbox "
             "stand-in. Connect one in notifications/services.py get_active_dispatcher().",
             channel, record.id, notification_type, channel,
         )
+    return record
+
+
+def notify_important(*, recipient, notification_type: str, title: str, message: str, related_reference: str = ""):
+    """For events involving money or a booking (refunds, payouts, cancellations, confirmations). The person always
+    gets the in-app notice (which also pushes to their devices), and one extra copy on the best external channel
+    that a real provider carries: WhatsApp, then SMS, then email. A channel with no real provider is skipped
+    instead of recording a message that goes nowhere. A failing provider never undoes the action that caused it."""
+    record = notify(
+        recipient=recipient, notification_type=notification_type, title=title, message=message,
+        related_reference=related_reference,
+    )
+    channels = []
+    if recipient.phone:
+        channels += ["WHATSAPP", "SMS"]
+    if recipient.email:
+        channels.append("EMAIL")
+    for channel in channels:
+        if not is_delivery_live(channel):
+            continue
+        try:
+            external = notify(
+                recipient=recipient, notification_type=notification_type, title=title, message=message,
+                channel=channel, related_reference=related_reference,
+            )
+        except Exception:
+            logger.exception("%s copy of notification %s failed", channel, record.id)
+            continue
+        if external.delivered:
+            break
     return record
 
 

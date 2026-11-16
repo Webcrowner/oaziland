@@ -78,36 +78,63 @@ def create_event_booking(*, organiser, venue_space, event_type: str, event_date:
     )
 
 
+class EventPaymentError(Exception):
+    """A venue payment that can't be started (already paid, in progress, wrong state, or refused by the provider)."""
+
+
+def _pay_event_part(*, event_booking, lock_client, payment_gateway, phone_number: str, amount, link_field: str):
+    """Starts one venue payment (deposit or balance). The Booking is linked to the event booking BEFORE the money
+    moves so the payment webhook can find it. The sandbox gateway confirms at once; a real payment returns
+    (event_booking, None) and is confirmed later by the provider's verified webhook."""
+    from transactions.services import (
+        reserve_booking, initiate_booking_payment, fail_payment, confirm_sandbox_payment, InventoryConflictError,
+    )
+    from transactions.models import BookingType
+    from payments.gateways import confirms_instantly
+
+    try:
+        booking = reserve_booking(
+            lock_client=lock_client, requester=event_booking.organiser, booking_type=BookingType.EVENT,
+            target_content_type="events.EventBooking", target_id=event_booking.id, amount_xaf=amount,
+        )
+    except InventoryConflictError:
+        raise EventPaymentError("A payment for this booking is already in progress. Approve it on your phone.")
+    setattr(event_booking, link_field, booking)
+    event_booking.save(update_fields=[link_field])
+    debit = initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
+    if not debit.success:
+        fail_payment(lock_client=lock_client, booking=booking)
+        raise EventPaymentError("The payment could not be started. Check the phone number and try again.")
+    if not confirms_instantly(payment_gateway):
+        return event_booking, None
+    escrow = confirm_sandbox_payment(lock_client=lock_client, booking=booking, payment_gateway=payment_gateway)
+    confirm_event_booking_after_payment(booking)
+    event_booking.refresh_from_db()
+    return event_booking, escrow
+
+
+def _is_paid(booking) -> bool:
+    return booking is not None and hasattr(booking, "escrow")
+
+
 def confirm_event_booking_deposit(*, event_booking, lock_client, payment_gateway, phone_number: str):
     """Confirms the booking by paying the DEPOSIT — 30% by default, per
     the spec — through the EXISTING Booking/PaymentEscrow flow, exactly
-    like every other transaction on the platform."""
-    from django.utils import timezone
-    from transactions.services import reserve_booking, initiate_booking_payment, confirm_payment
-    from transactions.models import BookingType
+    like every other transaction on the platform. The booking becomes
+    CONFIRMED once the payment is confirmed (see confirm_event_booking_after_payment)."""
     from .models import EventBookingStatus
-    from notifications.services import notify
 
-    booking = reserve_booking(
-        lock_client=lock_client, requester=event_booking.organiser, booking_type=BookingType.EVENT,
-        target_content_type="events.EventBooking", target_id=event_booking.id, amount_xaf=event_booking.deposit_amount_xaf,
+    if event_booking.status != EventBookingStatus.PENDING or _is_paid(event_booking.booking):
+        raise EventPaymentError("The deposit for this booking can't be paid now.")
+    if not is_venue_space_available(
+        venue_space=event_booking.venue_space, event_date=event_booking.event_date,
+        start_time=event_booking.start_time, end_time=event_booking.end_time,
+    ):
+        raise EventPaymentError("This slot was taken by another booking. Choose another date or time.")
+    return _pay_event_part(
+        event_booking=event_booking, lock_client=lock_client, payment_gateway=payment_gateway, phone_number=phone_number,
+        amount=event_booking.deposit_amount_xaf, link_field="booking",
     )
-    initiate_booking_payment(booking=booking, payment_gateway=payment_gateway, phone_number=phone_number)
-    escrow = confirm_payment(
-        lock_client=lock_client, booking=booking, provider="MTN_MOMO", provider_reference=booking.idempotency_key,
-        payment_gateway=payment_gateway, raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
-    )
-
-    event_booking.booking = booking
-    event_booking.status = EventBookingStatus.CONFIRMED
-    event_booking.save(update_fields=["booking", "status"])
-
-    notify(
-        recipient=event_booking.organiser, notification_type="EVENT_BOOKING_CONFIRMED",
-        title="Venue Booking Confirmed", channel="WHATSAPP",
-        message=f"Your booking for {event_booking.event_date} is confirmed. Balance of {event_booking.balance_amount_xaf} XAF is due 7 days before the event.",
-    )
-    return event_booking, escrow
 
 
 def confirm_event_booking_balance(*, event_booking, lock_client, payment_gateway, phone_number: str):
@@ -115,22 +142,72 @@ def confirm_event_booking_balance(*, event_booking, lock_client, payment_gateway
     Booking/PaymentEscrow — the real gap this closes: the balance amount
     was tracked as a computed property but had no actual payment step
     anywhere, so it could never really be collected."""
-    from transactions.services import reserve_booking, initiate_booking_payment, confirm_payment
-    from transactions.models import BookingType
+    from .models import EventBookingStatus
+    from .lifecycle import starts_at
+    from django.utils import timezone
 
-    balance_booking = reserve_booking(
-        lock_client=lock_client, requester=event_booking.organiser, booking_type=BookingType.EVENT,
-        target_content_type="events.EventBooking", target_id=event_booking.id, amount_xaf=event_booking.balance_amount_xaf,
-    )
-    initiate_booking_payment(booking=balance_booking, payment_gateway=payment_gateway, phone_number=phone_number)
-    escrow = confirm_payment(
-        lock_client=lock_client, booking=balance_booking, provider="MTN_MOMO", provider_reference=balance_booking.idempotency_key,
-        payment_gateway=payment_gateway, raw_webhook_payload=b"{}", webhook_signature_header="sandbox",
+    if event_booking.status != EventBookingStatus.CONFIRMED or _is_paid(event_booking.balance_booking):
+        raise EventPaymentError("The balance for this booking can't be paid now.")
+    if timezone.now() >= starts_at(event_booking):
+        raise EventPaymentError("The event has already started, so the balance can no longer be paid.")
+    return _pay_event_part(
+        event_booking=event_booking, lock_client=lock_client, payment_gateway=payment_gateway, phone_number=phone_number,
+        amount=event_booking.balance_amount_xaf, link_field="balance_booking",
     )
 
-    event_booking.balance_booking = balance_booking
-    event_booking.save(update_fields=["balance_booking"])
-    return event_booking, escrow
+
+def confirm_event_booking_after_payment(booking):
+    """Runs once a venue payment is confirmed (by the provider's webhook, or at once for the sandbox). A confirmed
+    deposit confirms the event booking; money that arrives for a booking that was cancelled meanwhile goes straight
+    back to the payer's wallet. Safe to run twice."""
+    from django.db import transaction
+    from notifications.services import notify_important
+    from transactions.models import EscrowStatus
+    from transactions.services import settle_escrow
+    from .models import EventBooking, EventBookingStatus
+
+    with transaction.atomic():
+        event_booking = (
+            EventBooking.objects.select_for_update().select_related("organiser")
+            .filter(booking=booking).first()
+        )
+        is_balance = False
+        if event_booking is None:
+            event_booking = EventBooking.objects.select_for_update().filter(balance_booking=booking).first()
+            is_balance = True
+        if event_booking is None:
+            return None
+        if event_booking.status == EventBookingStatus.CANCELLED:
+            escrow = getattr(booking, "escrow", None)
+            if escrow is not None and escrow.status == EscrowStatus.HELD:
+                settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"cancelled event booking #{event_booking.pk}")
+            return event_booking
+        if is_balance or event_booking.status != EventBookingStatus.PENDING:
+            return event_booking
+        if not is_venue_space_available(
+            venue_space=event_booking.venue_space, event_date=event_booking.event_date,
+            start_time=event_booking.start_time, end_time=event_booking.end_time,
+        ):
+            # Someone else's deposit confirmed this slot first: the money goes straight back.
+            escrow = getattr(booking, "escrow", None)
+            if escrow is not None and escrow.status == EscrowStatus.HELD:
+                settle_escrow(escrow=escrow, payer_amount_xaf=escrow.gross_amount_xaf, reference=f"event booking #{event_booking.pk} slot taken")
+            event_booking.status = EventBookingStatus.CANCELLED
+            event_booking.save(update_fields=["status"])
+            notify_important(
+                recipient=event_booking.organiser, notification_type="EVENT_BOOKING_CONFIRMED",
+                title="Venue booking refunded",
+                message=f"The slot on {event_booking.event_date} was booked by someone else just before your payment arrived, so your deposit was returned in full to your Oaziland wallet.",
+            )
+            return event_booking
+        event_booking.status = EventBookingStatus.CONFIRMED
+        event_booking.save(update_fields=["status"])
+    notify_important(
+        recipient=event_booking.organiser, notification_type="EVENT_BOOKING_CONFIRMED",
+        title="Venue Booking Confirmed",
+        message=f"Your booking for {event_booking.event_date} is confirmed. Balance of {event_booking.balance_amount_xaf} XAF is due 7 days before the event.",
+    )
+    return event_booking
 
 
 class EventNotFullyPaidError(Exception):
@@ -139,27 +216,20 @@ class EventNotFullyPaidError(Exception):
     strength of a deposit alone."""
 
 
-def complete_event_booking(*, event_booking, agent=None):
-    """Post-event settlement: releases BOTH the deposit escrow and the
-    balance escrow to the venue owner (computing commission once, off
-    the combined total, if an agent closed the deal) — the real gap
-    this closes: nothing anywhere ever paid a venue owner out for a
-    completed event; both escrows stayed HELD forever."""
-    from transactions.services import complete_booking
+def complete_event_booking(*, event_booking):
+    """Post-event settlement: releases BOTH the deposit escrow and the balance escrow to the venue owner's wallet
+    (platform fee deducted). The event is only settled once the remaining balance has actually been paid. Used by
+    the venue owner's and the organiser's confirm actions and the automatic payout, which add their own timing rules
+    (see events.lifecycle)."""
+    from .lifecycle import release_event_payment
     from .models import EventBookingStatus
 
-    if event_booking.balance_amount_xaf > 0 and event_booking.balance_booking_id is None:
+    if event_booking.balance_amount_xaf > 0 and not _is_paid(event_booking.balance_booking):
         raise EventNotFullyPaidError("The remaining balance has not been paid yet.")
-
-    escrows = []
-    if event_booking.booking_id and hasattr(event_booking.booking, "escrow"):
-        escrows.append(complete_booking(booking=event_booking.booking, agent=agent))
-    if event_booking.balance_booking_id and hasattr(event_booking.balance_booking, "escrow"):
-        escrows.append(complete_booking(booking=event_booking.balance_booking, agent=agent))
-
+    release_event_payment(event_booking)
     event_booking.status = EventBookingStatus.COMPLETED
     event_booking.save(update_fields=["status"])
-    return event_booking, escrows
+    return event_booking
 
 
 BALANCE_REMINDER_DAYS_BEFORE = [14, 7, 3]

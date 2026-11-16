@@ -7,14 +7,16 @@ import {
   createCourseLesson, updateCourseLesson, deleteCourseLesson, createCourseQuestion, updateCourseQuestion, deleteCourseQuestion,
   listCourseStaff, assignCourseStaff, removeCourseStaff, listCourseLearners, completeCourseLearner,
   listCourseSubmissions, openCourseSubmission, reviewCourseSubmission,
-  type ManageCourse, type ManageLesson, type ManageQuestion, type ManageChoice, type LessonKind,
+  type ManageCourse, type ManageLesson, type ManageQuestion, type ManageChoice, type LessonKind, type QuestionKind, type QuestionInput,
   type CourseStaffMember, type CourseLearnerRow, type LessonInput, type CourseSubmissionRow,
 } from "@/lib/api";
 import { TRAINING_CATEGORIES } from "@/lib/trainingCategories";
 import CourseAnalyticsPanel from "@/components/CourseAnalyticsPanel";
 import CourseCertificatePicker from "@/components/CourseCertificatePicker";
+import LessonText from "@/components/LessonText";
 
 const KINDS: LessonKind[] = ["TEXT", "VIDEO", "PDF", "QUIZ", "ASSIGNMENT"];
+const QUESTION_KINDS: QuestionKind[] = ["CHOICE", "SHORT_TEXT", "NUMBER"];
 type Tab = "content" | "settings" | "team" | "learners" | "submissions" | "analytics";
 
 function token() {
@@ -110,6 +112,14 @@ function SubmissionCard({ row, courseId, onDone }: { row: CourseSubmissionRow; c
         <span className="ml-auto text-xs text-gray-500">{t("submittedOn", { date: new Date(row.submitted_at).toLocaleString() })}</span>
       </div>
       {row.reviewed_by && <p className="mt-1 text-xs text-gray-500">{t("reviewedBy", { name: row.reviewed_by })}</p>}
+      {row.peer_review && (
+        <div className="mt-2 rounded-lg bg-violet-50 p-2 text-xs text-violet-900">
+          <p className="font-semibold">{t("peerVerdicts", { count: row.peer_reviews.length })}</p>
+          {row.peer_reviews.map((r, i) => (
+            <p key={i} className="mt-0.5">{r.decision === "APPROVED" ? "✓" : "✗"} {r.feedback || t("noComment")}</p>
+          ))}
+        </div>
+      )}
       <button
         onClick={() => { const tk = token(); if (tk) openCourseSubmission(courseId, row.id, tk).catch(() => setError(t("actionFailed"))); }}
         className="mt-2 text-[var(--navy)] underline"
@@ -135,6 +145,7 @@ function LessonForm({ initial, onSave, onCancel }: { initial?: ManageLesson; onS
   const [f, setF] = useState({
     title: initial?.title ?? "", kind: (initial?.kind ?? "TEXT") as LessonKind, content_text: initial?.content_text ?? "",
     video_url: initial?.video_url ?? "", pass_mark_percent: initial?.pass_mark_percent ?? 70,
+    is_preview: initial?.is_preview ?? false, peer_review: initial?.peer_review ?? false,
   });
   const [pdf, setPdf] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
@@ -191,10 +202,33 @@ function LessonForm({ initial, onSave, onCancel }: { initial?: ManageLesson; onS
           {initial?.pdf_url && <a href={initial.pdf_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--navy)] underline">{t("currentPdf")}</a>}
         </label>
       )}
-      {f.kind !== "QUIZ" && <textarea value={f.content_text} onChange={(e) => setF({ ...f, content_text: e.target.value })} placeholder={t("contentText")} aria-label={t("contentText")} rows={f.kind === "TEXT" ? 6 : 2} className="rounded border px-3 py-2 text-sm" />}
+      {f.kind !== "QUIZ" && (
+        <div className="grid gap-2">
+          <textarea value={f.content_text} onChange={(e) => setF({ ...f, content_text: e.target.value })} placeholder={t("contentText")} aria-label={t("contentText")} rows={f.kind === "TEXT" ? 10 : 3} className="rounded border px-3 py-2 font-mono text-sm" />
+          <p className="text-xs text-slate-500">{t("formattingHint")}</p>
+          {f.content_text.trim() && (
+            <details className="rounded-lg border border-slate-200 bg-white">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-600">{t("previewText")}</summary>
+              <div className="border-t border-slate-100 p-4"><LessonText text={f.content_text} /></div>
+            </details>
+          )}
+        </div>
+      )}
       {f.kind === "QUIZ" && (
         <label className="text-sm">{t("passMark")}
           <input type="number" min={1} max={100} value={f.pass_mark_percent} onChange={(e) => setF({ ...f, pass_mark_percent: Number(e.target.value) })} className="ml-2 w-20 rounded border px-2 py-1" />
+        </label>
+      )}
+      {(f.kind === "TEXT" || f.kind === "VIDEO" || f.kind === "PDF") && (
+        <label className="grid gap-0.5 text-sm">
+          <span className="flex items-center gap-2"><input type="checkbox" checked={f.is_preview} onChange={(e) => setF({ ...f, is_preview: e.target.checked })} />{t("freePreview")}</span>
+          <span className="pl-6 text-xs text-slate-500">{t("freePreviewHint")}</span>
+        </label>
+      )}
+      {f.kind === "ASSIGNMENT" && (
+        <label className="grid gap-0.5 text-sm">
+          <span className="flex items-center gap-2"><input type="checkbox" checked={f.peer_review} onChange={(e) => setF({ ...f, peer_review: e.target.checked })} />{t("peerReview")}</span>
+          <span className="pl-6 text-xs text-slate-500">{t("peerReviewHint")}</span>
         </label>
       )}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
@@ -206,22 +240,29 @@ function LessonForm({ initial, onSave, onCancel }: { initial?: ManageLesson; onS
   );
 }
 
-function QuestionForm({ initial, onSave, onCancel }: { initial?: ManageQuestion; onSave: (q: { text: string; explanation: string; choices: ManageChoice[] }) => Promise<void>; onCancel: () => void }) {
+function QuestionForm({ initial, onSave, onCancel }: { initial?: ManageQuestion; onSave: (q: QuestionInput) => Promise<void>; onCancel: () => void }) {
   const t = useTranslations("CourseManage");
+  const [kind, setKind] = useState<QuestionKind>(initial?.kind ?? "CHOICE");
   const [text, setText] = useState(initial?.text ?? "");
   const [explanation, setExplanation] = useState(initial?.explanation ?? "");
-  const [choices, setChoices] = useState<ManageChoice[]>(initial?.choices.map(({ text, is_correct }) => ({ text, is_correct })) ?? [{ text: "", is_correct: true }, { text: "", is_correct: false }]);
+  const [choices, setChoices] = useState<ManageChoice[]>(
+    initial?.kind === "CHOICE" ? initial.choices.map(({ text, is_correct }) => ({ text, is_correct })) : [{ text: "", is_correct: true }, { text: "", is_correct: false }],
+  );
+  const [accepted, setAccepted] = useState<string[]>(initial && initial.kind !== "CHOICE" && initial.accepted_answers.length ? initial.accepted_answers : [""]);
+  const [tolerance, setTolerance] = useState(initial?.kind === "NUMBER" ? String(Number(initial.tolerance)) : "0");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const setChoice = (i: number, patch: Partial<ManageChoice>) => setChoices(choices.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const setAnswer = (i: number, value: string) => setAccepted(accepted.map((a, j) => (j === i ? value : a)));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      await onSave({ text, explanation, choices });
+      if (kind === "CHOICE") await onSave({ kind, text, explanation, choices });
+      else await onSave({ kind, text, explanation, accepted_answers: accepted.map((a) => a.trim()).filter(Boolean), tolerance: kind === "NUMBER" ? tolerance || "0" : "0" });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("actionFailed"));
     } finally {
@@ -231,16 +272,46 @@ function QuestionForm({ initial, onSave, onCancel }: { initial?: ManageQuestion;
 
   return (
     <form onSubmit={submit} className="grid gap-2 rounded border bg-white p-3">
+      <select value={kind} onChange={(e) => setKind(e.target.value as QuestionKind)} aria-label={t("questionKind")} className="rounded border px-3 py-2 text-sm">
+        {QUESTION_KINDS.map((k) => <option key={k} value={k}>{t(`questionKind_${k}`)}</option>)}
+      </select>
       <textarea required value={text} onChange={(e) => setText(e.target.value)} placeholder={t("questionText")} aria-label={t("questionText")} rows={2} className="rounded border px-3 py-2 text-sm" />
-      <p className="text-xs text-gray-500">{t("quizHint")}</p>
-      {choices.map((c, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input type="checkbox" checked={c.is_correct} onChange={(e) => setChoice(i, { is_correct: e.target.checked })} aria-label={t("isCorrect")} title={t("isCorrect")} />
-          <input required value={c.text} onChange={(e) => setChoice(i, { text: e.target.value })} placeholder={`${t("choiceText")} ${i + 1}`} aria-label={`${t("choiceText")} ${i + 1}`} className="flex-1 rounded border px-3 py-1.5 text-sm" />
-          {choices.length > 2 && <button type="button" onClick={() => setChoices(choices.filter((_, j) => j !== i))} aria-label={t("removeChoice")} className="px-2 text-gray-500">✕</button>}
-        </div>
-      ))}
-      <button type="button" onClick={() => setChoices([...choices, { text: "", is_correct: false }])} className="self-start text-sm text-[var(--navy)] underline">+ {t("addChoice")}</button>
+      {kind === "CHOICE" ? (
+        <>
+          <p className="text-xs text-gray-500">{t("quizHint")}</p>
+          {choices.map((c, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input type="checkbox" checked={c.is_correct} onChange={(e) => setChoice(i, { is_correct: e.target.checked })} aria-label={t("isCorrect")} title={t("isCorrect")} />
+              <input required value={c.text} onChange={(e) => setChoice(i, { text: e.target.value })} placeholder={`${t("choiceText")} ${i + 1}`} aria-label={`${t("choiceText")} ${i + 1}`} className="flex-1 rounded border px-3 py-1.5 text-sm" />
+              {choices.length > 2 && <button type="button" onClick={() => setChoices(choices.filter((_, j) => j !== i))} aria-label={t("removeChoice")} className="px-2 text-gray-500">✕</button>}
+            </div>
+          ))}
+          <button type="button" onClick={() => setChoices([...choices, { text: "", is_correct: false }])} className="self-start text-sm text-[var(--navy)] underline">+ {t("addChoice")}</button>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-gray-500">{kind === "NUMBER" ? t("numberHint") : t("shortTextHint")}</p>
+          {(kind === "NUMBER" ? accepted.slice(0, 1) : accepted).map((a, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                required={i === 0} value={a} onChange={(e) => setAnswer(i, e.target.value)} inputMode={kind === "NUMBER" ? "decimal" : "text"} maxLength={200}
+                placeholder={kind === "NUMBER" ? t("acceptedNumber") : `${t("acceptedAnswer")} ${i + 1}`}
+                aria-label={kind === "NUMBER" ? t("acceptedNumber") : `${t("acceptedAnswer")} ${i + 1}`} className="flex-1 rounded border px-3 py-1.5 text-sm"
+              />
+              {kind === "SHORT_TEXT" && accepted.length > 1 && <button type="button" onClick={() => setAccepted(accepted.filter((_, j) => j !== i))} aria-label={t("removeAnswer")} className="px-2 text-gray-500">✕</button>}
+            </div>
+          ))}
+          {kind === "SHORT_TEXT" && accepted.length < 20 && (
+            <button type="button" onClick={() => setAccepted([...accepted, ""])} className="self-start text-sm text-[var(--navy)] underline">+ {t("addAcceptedAnswer")}</button>
+          )}
+          {kind === "NUMBER" && (
+            <label className="flex items-center gap-2 text-sm">
+              {t("tolerance")}
+              <input type="number" min="0" step="any" value={tolerance} onChange={(e) => setTolerance(e.target.value)} className="w-28 rounded border px-2 py-1" />
+            </label>
+          )}
+        </>
+      )}
       <input value={explanation} onChange={(e) => setExplanation(e.target.value)} placeholder={t("explanation")} aria-label={t("explanation")} className="rounded border px-3 py-2 text-sm" />
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <div className="flex gap-2">
@@ -346,10 +417,24 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
           {course.modules.length === 0 && <p className="text-slate-600">{t("noModules")}</p>}
           {course.modules.map((m) => (
             <section key={m.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center gap-2">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
                 {canEdit ? (
                   <input defaultValue={m.title} aria-label={t("moduleTitle")} onBlur={(e) => e.target.value.trim() && e.target.value !== m.title && act((tk) => updateCourseModule(m.id, { title: e.target.value.trim() }, tk))} className="flex-1 rounded border px-2 py-1 font-semibold" />
                 ) : <h2 className="flex-1 font-semibold">{m.title}</h2>}
+                {canEdit ? (
+                  <label className="flex items-center gap-1.5 text-xs text-slate-600" title={t("moduleDueHint")}>
+                    {t("moduleDue")}
+                    <input
+                      type="number" min={1} max={730} step={1} defaultValue={m.due_after_days ?? ""} aria-label={t("moduleDue")} placeholder="—"
+                      onBlur={(e) => {
+                        const value = e.target.value.trim() ? Number(e.target.value) : null;
+                        if (value !== m.due_after_days) act((tk) => updateCourseModule(m.id, { due_after_days: value }, tk));
+                      }}
+                      className="w-16 rounded border px-2 py-1"
+                    />
+                    {t("days")}
+                  </label>
+                ) : m.due_after_days ? <span className="text-xs text-slate-600">{t("moduleDueRead", { days: m.due_after_days })}</span> : null}
                 {canEdit && <button onClick={() => act((tk) => deleteCourseModule(m.id, tk), t("deleteConfirm"))} className="text-sm text-red-600">{t("delete")}</button>}
               </div>
               {m.lessons.length === 0 && <p className="mb-2 text-sm text-gray-500">{t("noLessons")}</p>}
@@ -362,6 +447,8 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
                       <div className="flex items-center gap-2 text-sm">
                         <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase">{t(`kind${l.kind}`)}</span>
                         <span className="flex-1">{l.title}</span>
+                        {l.is_preview && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">{t("previewBadge")}</span>}
+                        {l.peer_review && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-800">{t("peerBadge")}</span>}
                         {l.kind === "QUIZ" && l.questions.length === 0 && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">{t("needsQuestions")}</span>
                         )}
@@ -387,9 +474,16 @@ export default function CourseEditor({ courseId }: { courseId: string }) {
                                 <button onClick={() => act((tk) => deleteCourseQuestion(q.id, tk), t("deleteConfirm"))} className="text-red-600">{t("delete")}</button>
                               </>}
                             </div>
-                            <ul className="ml-4 text-xs text-gray-700">
-                              {q.choices.map((c, j) => <li key={j}>{c.is_correct ? "✓" : "○"} {c.text}</li>)}
-                            </ul>
+                            {q.kind === "CHOICE" ? (
+                              <ul className="ml-4 text-xs text-gray-700">
+                                {q.choices.map((c, j) => <li key={j}>{c.is_correct ? "✓" : "○"} {c.text}</li>)}
+                              </ul>
+                            ) : (
+                              <p className="ml-4 text-xs text-gray-700">
+                                <span className="mr-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">{t(`questionKind_${q.kind}`)}</span>
+                                ✓ {q.accepted_answers.join(" · ")}{q.kind === "NUMBER" && Number(q.tolerance) > 0 ? ` (± ${Number(q.tolerance)})` : ""}
+                              </p>
+                            )}
                           </div>
                         ))}
                         {canEdit && (editing === `newq:${l.id}` ? (

@@ -131,3 +131,28 @@ class WantedListingResponse(models.Model):
 
     class Meta:
         db_table = "wanted_listing_responses"
+
+
+class MarketplaceSearchTerm(models.Model):
+    """A normalised marketplace search phrase with its running total. Anonymous on purpose: no user or
+    address is stored, only what was searched and how many results it found last time."""
+    term = models.CharField(max_length=60, unique=True)
+    count = models.PositiveIntegerField(default=0)
+    last_searched_at = models.DateTimeField()
+    results_last = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "marketplace_search_terms"
+
+
+class MarketplaceSearchTermDay(models.Model):
+    """Searches per phrase per day, so "trending this week" can be ranked over a window (the running total
+    above can't). Rows older than 30 days are pruned."""
+    term = models.CharField(max_length=60)
+    day = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "marketplace_search_term_days"
+        constraints = [models.UniqueConstraint(fields=["term", "day"], name="uniq_marketplace_search_term_day")]
+        indexes = [models.Index(fields=["day"], name="idx_mkt_search_day")]

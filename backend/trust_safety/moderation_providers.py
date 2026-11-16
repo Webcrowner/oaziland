@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
 
+from django.conf import settings
 
 @dataclass
 class ModerationScore:
@@ -19,6 +20,12 @@ class ModerationScore:
 
 
 class ContentModerationProvider(ABC):
+    model_version = "sandbox-v1"
+
+    def analyze_video(self, video_url: str) -> list:
+        """Videos can't be looked at by default; providers that can't inspect them say so here."""
+        return [ModerationScore(category="SPAM", confidence_score=Decimal("0.000"), action="ALLOW")]
+
     @abstractmethod
     def analyze_text(self, text: str) -> list:
         """Returns a list of ModerationScore — a single piece of text can
@@ -111,4 +118,7 @@ class GoogleVisionModerationProvider(ContentModerationProvider):
 def get_active_moderation_provider() -> ContentModerationProvider:
     """The ONE place that decides which provider is in use — mirrors
     payments.gateways.get_active_gateway(). Always sandbox for now."""
+    if getattr(settings, "OPENAI_API_KEY", ""):
+        from .openai_moderation import OpenAIModerationProvider as RealProvider
+        return RealProvider()
     return SandboxModerationProvider()

@@ -12,6 +12,7 @@ import { PlusIcon } from "@/components/videos/VideoIcons";
 import VideoSlide from "@/components/videos/VideoSlide";
 import CommentsSheet from "@/components/videos/CommentsSheet";
 import ShareSheet from "@/components/videos/ShareSheet";
+import MoreSheet from "@/components/videos/MoreSheet";
 
 const SCOPES: ReelScope[] = ["for_you", "following", "trending", "saved"];
 const KINDS: ReelKind[] = ["all", "rent", "sale", "property", "general"];
@@ -51,6 +52,7 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
   const [loggedIn, setLoggedIn] = useState(false);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
   const [shareFor, setShareFor] = useState<string | null>(null);
+  const [moreFor, setMoreFor] = useState<string | null>(null);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -234,7 +236,7 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-      if (commentsFor || shareFor || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (commentsFor || shareFor || moreFor || e.metaKey || e.ctrlKey || e.altKey) return;
       const active = postsRef.current[activeIndex];
       switch (e.key) {
         case "ArrowDown": case "PageDown": e.preventDefault(); scrollToIndex(activeIndex + 1); break;
@@ -252,7 +254,7 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeIndex, commentsFor, shareFor, scrollToIndex, toggleMute, handleLike]);
+  }, [activeIndex, commentsFor, shareFor, moreFor, scrollToIndex, toggleMute, handleLike]);
 
   function clearFilters() {
     setTerm(""); setTag(""); setAuthor(""); setSearchInput("");
@@ -279,6 +281,7 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
 
   const commentsPost = posts.find((p) => p.id === commentsFor) ?? null;
   const sharePost = posts.find((p) => p.id === shareFor) ?? null;
+  const morePost = posts.find((p) => p.id === moreFor) ?? null;
   const filterLabel = tag
     ? t("showingTag", { tag })
     : term
@@ -410,6 +413,7 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
                   onFollow={handleFollow}
                   onOpenComments={(p) => setCommentsFor(p.id)}
                   onOpenShare={(p) => setShareFor(p.id)}
+                  onOpenMore={(p) => setMoreFor(p.id)}
                   onTagClick={pickTag}
                   onViewed={handleViewed}
                 />
@@ -439,6 +443,12 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
         <ShareSheet
           post={sharePost} loggedIn={loggedIn} onClose={() => setShareFor(null)}
           onShared={(id, count) => updatePost(id, { share_count: count })}
+        />
+      )}
+      {morePost && (
+        <MoreSheet
+          post={morePost} loggedIn={loggedIn} onClose={() => setMoreFor(null)}
+          onDeleted={(id) => { setMoreFor(null); setPosts((prev) => prev.filter((p) => p.id !== id)); }}
         />
       )}
     </div>

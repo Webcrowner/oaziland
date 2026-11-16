@@ -198,13 +198,13 @@ def issue_mfa_challenge(mfa_method):
     type — through the shared notify() function. AUTHENTICATOR_APP
     methods generate their code locally (TOTP) and never reach this
     function at all; only SMS_OTP/EMAIL_OTP need a code dispatched."""
-    import random
+    import secrets
     from django.utils import timezone
     from datetime import timedelta
     from .models import MfaChallenge, MfaType
     from notifications.services import notify
 
-    code = "".join(random.choices("0123456789", k=OTP_LENGTH))
+    code = "".join(secrets.choice("0123456789") for _ in range(OTP_LENGTH))
     challenge = MfaChallenge.objects.create(
         mfa_method=mfa_method, code=code,
         expires_at=timezone.now() + timedelta(minutes=OTP_VALIDITY_MINUTES),
@@ -273,10 +273,20 @@ def confirm_password_reset(*, token_value: str, new_password: str):
     user = reset_token.user
     user.set_password(new_password)
     user.save(update_fields=["password"])
+    revoke_sessions(user)
 
     reset_token.consumed_at = timezone.now()
     reset_token.save(update_fields=["consumed_at"])
     return user
+
+
+def revoke_sessions(user):
+    """Cancels every refresh token issued to this person, so a stolen login stops working once the password
+    is changed or reset (access tokens already issued still expire on their own within the hour)."""
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+    for token in OutstandingToken.objects.filter(user=user):
+        BlacklistedToken.objects.get_or_create(token=token)
 
 
 # ---------------------------------------------------------------------------
@@ -354,11 +364,15 @@ def get_user_public_index(user):
 
     # 2. Owned Hotels
     owned_hotels = []
-    for h in Hotel.objects.filter(owner=user).prefetch_related("room_types", "asset_photos"):
+    # Only what guests can actually find and book: verified, not deleted, and room types on offer.
+    for h in Hotel.objects.filter(owner=user, verified=True, deleted_at__isnull=True).select_related("quarter").prefetch_related("room_types", "asset_photos"):
         primary_photo = h.asset_photos.filter(is_primary=True).first() or h.asset_photos.first()
-        cheapest_rate = min([rt.base_rate_xaf for rt in h.room_types.all()], default=None)
+        offered = sorted((rt for rt in h.room_types.all() if rt.is_active), key=lambda rt: rt.base_rate_xaf)
+        cheapest_rate = offered[0].base_rate_xaf if offered else None
+        name = h.name or ((h.description or "").split("\u2014", 1)[0].strip() if "\u2014" in (h.description or "") else "")
         owned_hotels.append({
             "id": str(h.id),
+            "name": name,
             "quarter_name": h.quarter.name if h.quarter else "",
             "star_rating": h.star_rating,
             "total_rooms": h.total_rooms,
@@ -367,7 +381,7 @@ def get_user_public_index(user):
             "longitude": float(h.longitude) if h.longitude is not None else None,
             "cheapest_rate_xaf": float(cheapest_rate) if cheapest_rate is not None else None,
             "photo_url": primary_photo.url if primary_photo else None,
-            "room_categories": list({rt.category for rt in h.room_types.all()}),
+            "room_categories": [rt.display_name for rt in offered],
         })
 
     # 3. Owned Student Hostels
@@ -378,6 +392,7 @@ def get_user_public_index(user):
         units = HostelUnit.objects.filter(building=sh.building_ptr)
         owned_hostels.append({
             "id": str(sh.id),
+            "name": sh.name,
             "quarter_name": sh.quarter.name if sh.quarter else "",
             "property_type": sh.property_type,
             "total_units": units.count(),
@@ -389,10 +404,13 @@ def get_user_public_index(user):
 
     # 4. Owned Guest Houses & Lodges
     owned_guest_houses = []
-    for gh in GuestHouseLodge.objects.filter(owner=user).prefetch_related("asset_photos"):
+    for gh in GuestHouseLodge.objects.filter(owner=user, deleted_at__isnull=True).prefetch_related("asset_photos", "room_types"):
         primary_photo = gh.asset_photos.filter(is_primary=True).first() or gh.asset_photos.first()
+        offered_rates = [rt.base_rate_xaf for rt in gh.room_types.all() if rt.is_active]
         owned_guest_houses.append({
             "id": str(gh.id),
+            "name": gh.name,
+            "cheapest_rate_xaf": float(min(offered_rates)) if offered_rates else None,
             "quarter_name": gh.quarter.name if gh.quarter else "",
             "is_coastal_leisure": gh.is_coastal_leisure,
             "finish_level": gh.finish_level,
