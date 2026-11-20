@@ -25,7 +25,13 @@ def build_whatsapp_action(*, context: str, triggered_by, target_object, recipien
         reason = "I'm reaching out about something on " + APP_NAME
 
     target_content_type = f"{target_object._meta.app_label}.{target_object.__class__.__name__}"
-    target_link = f"https://oaziland.com/{target_content_type.lower()}/{target_object.id}"
+    type_key = target_content_type.lower()
+    if type_key == "careers.jobposting":
+        target_link = f"https://oaziland.com/careers?job={target_object.id}"
+    elif type_key == "property.listing":
+        target_link = f"https://oaziland.com/listing/{target_object.id}"
+    else:
+        target_link = f"https://oaziland.com/{type_key}/{target_object.id}"
 
     # The source and link are appended HERE, structurally — never left
     # to the admin-edited reason_template to include or omit.

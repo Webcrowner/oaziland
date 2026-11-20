@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity
 import * as SecureStore from "expo-secure-store";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { getListing, Listing, contactListing, getMyFavorites, toggleFavoriteListing } from "../lib/api";
+import { getListing, Listing, contactListing, getMyFavorites, toggleFavoriteListing, getMyUserId } from "../lib/api";
+import { useI18n } from "../i18n";
 import RateAndReport from "../components/RateAndReport";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ListingDetail">;
@@ -23,11 +24,13 @@ function listerRoleLabel(role: string, listingType: string): string {
 
 export default function ListingDetailScreen({ route, navigation }: Props) {
   const { listingId } = route.params;
+  const { t } = useI18n();
   const [listing, setListing] = useState<Listing | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFavorited, setIsFavorited] = useState(false);
   const [contacting, setContacting] = useState(false);
   const [isStagedForCompare, setIsStagedForCompare] = useState(false);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
 
   const COMPARE_STAGING_KEY = "oaziland_comparison_staging";
 
@@ -37,6 +40,13 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
       .catch(() => setListing(null))
       .finally(() => setLoading(false));
   }, [listingId]);
+
+  useEffect(() => {
+    SecureStore.getItemAsync("access_token").then((token) => {
+      if (!token) return;
+      getMyUserId().then(setMyUserId).catch(() => {});
+    });
+  }, []);
 
   useEffect(() => {
     SecureStore.getItemAsync(COMPARE_STAGING_KEY).then((raw) => {
@@ -174,6 +184,12 @@ export default function ListingDetailScreen({ route, navigation }: Props) {
         <TouchableOpacity style={styles.compareButton} onPress={handleToggleCompare}>
           <Text style={styles.compareButtonText}>{isStagedForCompare ? "Remove from Compare" : "Add to Compare"}</Text>
         </TouchableOpacity>
+
+        {myUserId && myUserId === listing.lister_id ? (
+          <TouchableOpacity style={styles.postVideoButton} onPress={() => navigation.navigate("CreateVideo", { linkedListingId: listing.id })}>
+            <Text style={styles.postVideoButtonText}>{t("videos.postForListing")}</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -206,4 +222,6 @@ const styles = StyleSheet.create({
   whatsappButtonText: { color: "#1B2A4A", fontWeight: "bold", fontSize: 16 },
   compareButton: { borderWidth: 1, borderColor: "#1B2A4A", borderRadius: 8, paddingVertical: 14, alignItems: "center", marginTop: 10, marginBottom: 30 },
   compareButtonText: { color: "#1B2A4A", fontWeight: "700", fontSize: 14 },
+  postVideoButton: { backgroundColor: "#1B2A4A", borderRadius: 8, paddingVertical: 14, alignItems: "center", marginBottom: 30 },
+  postVideoButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

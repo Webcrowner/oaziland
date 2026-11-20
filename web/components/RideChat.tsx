@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { NavChatIcon } from "@/components/navIcons";
 import { listRideMessages, sendRideMessage, type RideMessageItem } from "@/lib/api";
 
 const POLL_MS = 6000;
@@ -42,7 +43,8 @@ export default function RideChat({ rideId, myUserId }: { rideId: string; myUserI
     <div className="border border-gray-200 rounded-xl p-3 bg-slate-50 mt-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-          💬 {t("rideChatTitle") || "Trip Chat"}
+          <NavChatIcon size={16} />
+          <span>{t("rideChatTitle") || "Trip Chat"}</span>
         </span>
         <span className="text-[10px] text-slate-400">Live</span>
       </div>

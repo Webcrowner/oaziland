@@ -207,6 +207,7 @@ export default function AccountPage() {
       description: "Your bookings, conversations and saved items.",
       links: [
         { href: "/bookings", label: t("linkBookings"), icon: IconFileText },
+        { href: "/careers", label: t("linkCareers"), icon: IconBriefcase },
         { href: "/messages", label: t("linkMessages"), icon: IconMessageCircle },
         { href: "/notifications", label: t("linkNotifications"), icon: IconBell },
         { href: "/favorites", label: t("linkFavorites"), icon: IconHeart },

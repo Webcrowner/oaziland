@@ -8,8 +8,9 @@ import EmptyState from "@/components/ui/EmptyState";
 import Button from "@/components/ui/Button";
 import PushToggle from "@/components/PushToggle";
 import { enablePush } from "@/lib/push";
-import { IconMapPin, IconChevronRight, IconAlertCircle, IconCar, IconCompass } from "@/components/Icons";
+import { IconAlertCircle, IconCar, IconCompass } from "@/components/Icons";
 import { useOaziGo } from "@/components/oazigo/OaziGoProvider";
+import RouteStops from "@/components/oazigo/RouteStops";
 import { cardCls, inputCls, solidBtnCls } from "@/components/oazigo/styles";
 import LuggageDetails from "@/components/oazigo/LuggageDetails";
 
@@ -106,20 +107,28 @@ export default function OaziGoRequestsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className={`${cardCls} flex flex-wrap items-center justify-between gap-3`}>
-        <div className="min-w-0">
-          <h1 className="text-xl font-black tracking-tight text-slate-900">{t("navRequests")}</h1>
-          <p className="mt-0.5 text-sm text-slate-500">{online ? t("onlineHint") : t("offlineHint")}</p>
-          <p className="mt-1 text-xs text-slate-400">{t("requestsFallbackHint")}</p>
+    <div className="flex flex-col gap-5">
+      <section className="relative overflow-hidden rounded-3xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-900/10 sm:px-8 sm:py-7">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-amber-400/20 blur-3xl" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-400 text-slate-950 shadow-md shadow-amber-400/20">
+              <IconCompass size={22} />
+            </span>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-black tracking-tight sm:text-3xl">{t("navRequests")}</h1>
+              <p className="mt-1 text-sm text-slate-300">{online ? t("onlineHint") : t("offlineHint")}</p>
+              <p className="mt-1 text-xs text-slate-400">{t("requestsFallbackHint")}</p>
+            </div>
+          </div>
+          <button
+            type="button" onClick={toggleOnline} disabled={toggling} aria-pressed={online}
+            className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors cursor-pointer disabled:opacity-60 ${online ? "bg-emerald-500 text-slate-950 hover:bg-emerald-400" : "border border-white/25 bg-white/10 text-white hover:bg-white/20"}`}
+          >
+            {online ? `● ${t("youAreOnline")}` : t("goOnline")}
+          </button>
         </div>
-        <button
-          type="button" onClick={toggleOnline} disabled={toggling} aria-pressed={online}
-          className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors cursor-pointer disabled:opacity-60 ${online ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
-        >
-          {online ? `● ${t("youAreOnline")}` : t("goOnline")}
-        </button>
-      </div>
+      </section>
 
       <PushToggle key={pushKey} variant="driver" />
 
@@ -160,13 +169,8 @@ export default function OaziGoRequestsPage() {
             <article key={ride.id} className={cardCls}>
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
-                    <IconMapPin size={15} className="shrink-0 text-amber-500" />
-                    <span>{ride.pickup_description}</span>
-                    <IconChevronRight size={14} className="shrink-0 text-slate-400" />
-                    <span>{ride.dropoff_description}</span>
-                  </p>
-                  <p className="mt-1.5 text-lg font-black tracking-tight text-slate-900">
+                  <RouteStops pickup={ride.pickup_description} dropoff={ride.dropoff_description} pickupLabel={t("pickupLabel")} dropoffLabel={t("dropoffLabel")} />
+                  <p className="mt-3 text-2xl font-black tracking-tight text-slate-900">
                     {Number(ride.fare_estimate_xaf).toLocaleString()} <span className="text-xs font-bold text-slate-500">XAF</span>
                     {ride.distance_km && <span className="ml-2 text-xs font-bold text-slate-400">· {Number(ride.distance_km).toLocaleString()} km</span>}
                   </p>

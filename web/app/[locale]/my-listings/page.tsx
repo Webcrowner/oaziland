@@ -11,15 +11,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import Panel from "@/components/ui/Panel";
 import { IconMapPin, IconClock, IconAlertCircle, IconBuilding } from "@/components/Icons";
 
-const STATUS_TABS = [
-  { value: "", label: "All" },
-  { value: "PUBLISHED", label: "Published" },
-  { value: "PENDING_REVIEW", label: "Pending review" },
-  { value: "UNDER_OFFER", label: "Under offer" },
-  { value: "CLOSED", label: "Closed" },
-  { value: "REJECTED", label: "Rejected" },
-  { value: "EXPIRED", label: "Expired" },
-] as const;
+const STATUS_TABS = ["", "PUBLISHED", "PENDING_REVIEW", "UNDER_OFFER", "CLOSED", "REJECTED", "EXPIRED"] as const;
 
 const STATUS_STYLE: Record<string, string> = {
   DRAFT: "bg-slate-100 text-slate-700",
@@ -31,15 +23,11 @@ const STATUS_STYLE: Record<string, string> = {
   EXPIRED: "bg-orange-100 text-orange-800",
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  DRAFT: "Draft", PENDING_REVIEW: "Pending review", PUBLISHED: "Published", UNDER_OFFER: "Under offer",
-  CLOSED: "Closed", REJECTED: "Rejected", EXPIRED: "Expired",
-};
-
 const actionBtn =
   "px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50 cursor-pointer";
 
 export default function MyListingsPage() {
+  const t = useTranslations("MyListingsPage");
   const tSignIn = useTranslations("SignInPrompt");
   const [role, setRole] = useState<"landlord" | "agent">("landlord");
   const [token, setToken] = useState<string | null>(null);
@@ -88,7 +76,7 @@ export default function MyListingsPage() {
       setMessage(success);
       await load(token, tab, 1, false);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Something went wrong");
+      setMessage(err instanceof Error ? err.message : t("somethingWrong"));
     } finally {
       setBusyId(null);
     }
@@ -97,9 +85,9 @@ export default function MyListingsPage() {
   const layoutProps = {
     currentRole: role,
     activeHref: "/my-listings",
-    title: "My Listings",
-    subtitle: "View, edit, renew, pause or remove everything you have posted.",
-    action: <Button href="/list-property">+ Add New Property</Button>,
+    title: t("title"),
+    subtitle: t("subtitle"),
+    action: <Button href="/list-property">{t("addProperty")}</Button>,
   } as const;
 
   if (state === "signedOut") {
@@ -116,16 +104,16 @@ export default function MyListingsPage() {
   return (
     <DashboardLayout {...layoutProps}>
       <div className="flex flex-wrap gap-2 mb-5">
-        {STATUS_TABS.map((s) => (
+        {STATUS_TABS.map((value) => (
           <button
-            key={s.value}
+            key={value}
             type="button"
-            onClick={() => setTab(s.value)}
+            onClick={() => setTab(value)}
             className={`px-4 py-2 rounded-full text-sm font-bold border transition-colors cursor-pointer ${
-              tab === s.value ? "bg-slate-900 text-white border-slate-900 shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              tab === value ? "bg-slate-900 text-white border-slate-900 shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
             }`}
           >
-            {s.label}
+            {value ? t(`status_${value}`) : t("tabAll")}
           </button>
         ))}
       </div>
@@ -140,14 +128,14 @@ export default function MyListingsPage() {
         </div>
       ) : state === "error" ? (
         <p className="flex items-center justify-center gap-2 rounded-3xl border border-rose-100 bg-rose-50 py-12 text-sm font-semibold text-rose-700">
-          <IconAlertCircle size={18} /> Could not load your listings. Please try again.
+          <IconAlertCircle size={18} /> {t("loadFailed")}
         </p>
       ) : listings.length === 0 ? (
         <Panel>
           <EmptyState
             icon={<IconBuilding size={28} />}
-            title={tab ? "No listings with this status" : "You haven't posted any listings yet"}
-            action={<Button href="/list-property">List a property</Button>}
+            title={tab ? t("emptyFiltered") : t("emptyNone")}
+            action={<Button href="/list-property">{t("listProperty")}</Button>}
           />
         </Panel>
       ) : (
@@ -155,7 +143,7 @@ export default function MyListingsPage() {
           {listings.map((l) => {
             const photo = l.photos?.find((p) => p.media_type === "PHOTO");
             const busy = busyId === l.id;
-            const closeLabel = l.listing_type === "SALE" ? "Mark as sold" : "Mark as rented";
+            const closeLabel = l.listing_type === "SALE" ? t("markSold") : t("markRented");
             const expires = l.expires_at ? new Date(l.expires_at).toLocaleDateString() : null;
             return (
               <div key={l.id} className="bg-white border border-slate-200/90 rounded-3xl p-3 sm:p-4 flex flex-col sm:flex-row gap-4 shadow-sm transition-shadow hover:shadow-md">
@@ -171,39 +159,42 @@ export default function MyListingsPage() {
                 <div className="flex-1 min-w-0 py-1">
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">
                     <span className={`text-[11px] font-extrabold uppercase tracking-wide px-2.5 py-1 rounded-full ${STATUS_STYLE[l.status] ?? STATUS_STYLE.DRAFT}`}>
-                      {STATUS_LABEL[l.status] ?? l.status}
+                      {t.has(`status_${l.status}`) ? t(`status_${l.status}`) : l.status}
                     </span>
                     <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                      {l.listing_type === "SALE" ? "For sale" : "For rent"} · {l.property_asset.type}
+                      {l.listing_type === "SALE" ? t("forSale") : t("forRent")} · {l.property_asset.type}
                     </span>
                   </div>
                   <p className="font-black tracking-tight text-slate-900 text-xl">{Number(l.price_xaf).toLocaleString()} <span className="text-sm font-bold text-slate-400">XAF</span></p>
                   <p className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-600 truncate"><IconMapPin size={14} className="shrink-0 text-slate-400" />{l.property_asset.quarter_name}</p>
-                  {expires && l.status === "PUBLISHED" && <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400"><IconClock size={12} />Expires {expires}</p>}
-                  {l.status === "PENDING_REVIEW" && <p className="mt-1 text-xs font-semibold text-amber-700">Waiting for admin approval.</p>}
-                  {l.status === "REJECTED" && <p className="mt-1 text-xs font-semibold text-rose-700">Not approved — edit it and contact support to resubmit.</p>}
+                  {expires && l.status === "PUBLISHED" && <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400"><IconClock size={12} />{t("expires", { date: expires })}</p>}
+                  {l.status === "PENDING_REVIEW" && <p className="mt-1 text-xs font-semibold text-amber-700">{t("waitingApproval")}</p>}
+                  {l.status === "REJECTED" && <p className="mt-1 text-xs font-semibold text-rose-700">{t("rejectedNote")}</p>}
 
                   <div className="flex flex-wrap gap-2 mt-4">
-                    <Link href={`/listing/${l.id}`} className={actionBtn}>View</Link>
-                    <Link href={`/listing/${l.id}/edit`} className={actionBtn}>Edit</Link>
+                    <Link href={`/listing/${l.id}`} className={actionBtn}>{t("view")}</Link>
+                    <Link href={`/listing/${l.id}/edit`} className={actionBtn}>{t("edit")}</Link>
+                    {l.status === "PUBLISHED" && (
+                      <Link href={`/videos/create?listing_id=${l.id}`} className={actionBtn}>{t("postVideo")}</Link>
+                    )}
                     {(l.status === "PUBLISHED" || l.status === "EXPIRED") && (
-                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => renewListing(l.id, token!), "Listing renewed.")}>
-                        Renew
+                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => renewListing(l.id, token!), t("renewed"))}>
+                        {t("renew")}
                       </button>
                     )}
                     {l.status === "PUBLISHED" && (
-                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => setListingStatus(l.id, "UNDER_OFFER", token!), "Marked as under offer.")}>
-                        Mark under offer
+                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => setListingStatus(l.id, "UNDER_OFFER", token!), t("markedUnderOffer"))}>
+                        {t("markUnderOffer")}
                       </button>
                     )}
                     {(l.status === "PUBLISHED" || l.status === "UNDER_OFFER") && (
-                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => setListingStatus(l.id, "CLOSED", token!), "Listing closed.")}>
+                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => setListingStatus(l.id, "CLOSED", token!), t("closed"))}>
                         {closeLabel}
                       </button>
                     )}
                     {(l.status === "UNDER_OFFER" || l.status === "CLOSED") && (
-                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => setListingStatus(l.id, "PUBLISHED", token!), "Listing is live again.")}>
-                        {l.status === "CLOSED" ? "Reopen" : "Back to published"}
+                      <button type="button" disabled={busy} className={actionBtn} onClick={() => run(l, () => setListingStatus(l.id, "PUBLISHED", token!), t("liveAgain"))}>
+                        {l.status === "CLOSED" ? t("reopen") : t("backToPublished")}
                       </button>
                     )}
                     {l.status !== "PUBLISHED" && l.status !== "UNDER_OFFER" && (
@@ -212,10 +203,10 @@ export default function MyListingsPage() {
                         disabled={busy}
                         className={`${actionBtn} !text-rose-700 !border-rose-200 hover:!bg-rose-50`}
                         onClick={() => {
-                          if (window.confirm("Delete this listing permanently?")) run(l, () => deleteListing(l.id, token!), "Listing deleted.");
+                          if (window.confirm(t("deleteConfirm"))) run(l, () => deleteListing(l.id, token!), t("deleted"));
                         }}
                       >
-                        Delete
+                        {t("delete")}
                       </button>
                     )}
                   </div>
@@ -226,7 +217,7 @@ export default function MyListingsPage() {
 
           {hasMore && token && (
             <button type="button" className={`${actionBtn} self-center`} onClick={() => load(token, tab, page + 1, true)}>
-              Load more
+              {t("loadMore")}
             </button>
           )}
         </div>

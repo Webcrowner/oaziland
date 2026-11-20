@@ -2,8 +2,9 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Link, useRouter } from "@/i18n/navigation";
+import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import { createPost, CreatePostError, listMyListings, type Listing, type MediaUploadResult } from "@/lib/api";
+import { loginHref } from "@/lib/authRedirect";
 import MediaUploader from "@/components/MediaUploader";
 
 const MAX_CAPTION_LENGTH = 2200;
@@ -11,7 +12,7 @@ const MAX_TAGS = 20;
 const LISTING_LINK = /\/listing\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type Status = "idle" | "posting" | "posted" | "blocked" | "invalid" | "failed";
+type Status = "idle" | "posting" | "posted" | "blocked" | "invalid" | "failed" | "expired";
 
 export default function CreateVideoPage() {
   return (
@@ -25,7 +26,11 @@ function CreateVideoForm() {
   const t = useTranslations("VideoCreatePage");
   const locale = useLocale();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Signing in returns here, keeping a ?listing_id= so the property stays linked.
+  const query = searchParams.toString();
+  const signInHref = loginHref(query ? `${pathname}?${query}` : pathname);
 
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [video, setVideo] = useState<MediaUploadResult | null>(null);
@@ -74,7 +79,7 @@ function CreateVideoForm() {
     if (status === "posting" || status === "posted") return;
     const token = localStorage.getItem("access_token");
     if (!token) {
-      router.push("/login");
+      router.push(signInHref);
       return;
     }
     if (!video) {
@@ -97,6 +102,8 @@ function CreateVideoForm() {
     } catch (err) {
       if (err instanceof CreatePostError && err.kind === "moderation") {
         setStatus("blocked");
+      } else if (err instanceof CreatePostError && err.kind === "auth") {
+        setStatus("expired");
       } else if (err instanceof CreatePostError && err.kind === "validation") {
         setServerMessage(err.message);
         setStatus("invalid");
@@ -114,7 +121,7 @@ function CreateVideoForm() {
       <main className="mx-auto max-w-lg px-4 py-16 text-center">
         <h1 className="mb-3 text-2xl font-bold text-[var(--navy)]">{t("title")}</h1>
         <p className="mb-6 text-gray-600">{t("signInRequired")}</p>
-        <Link href="/login" className="rounded bg-[var(--gold)] px-6 py-2 font-semibold text-[var(--navy)]">{t("signIn")}</Link>
+        <Link href={signInHref} className="rounded bg-[var(--gold)] px-6 py-2 font-semibold text-[var(--navy)]">{t("signIn")}</Link>
       </main>
     );
   }
@@ -128,7 +135,10 @@ function CreateVideoForm() {
         <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
           {video ? (
             <div className="flex flex-col items-center gap-3">
-              <video src={video.url} controls playsInline className="max-h-[26rem] rounded-xl bg-black" />
+              <video src={`${video.url}#t=0.1`} controls playsInline preload="metadata" className="max-h-[26rem] rounded-xl bg-black" />
+              {video.video_codec === "hevc" && (
+                <p role="note" className="max-w-sm text-center text-xs text-amber-800">{t("hevcWarning")}</p>
+              )}
               <button type="button" onClick={() => setVideo(null)} className="text-sm font-semibold text-rose-600 hover:underline">
                 {t("removeVideo")}
               </button>
@@ -185,6 +195,12 @@ function CreateVideoForm() {
         </fieldset>
 
         {status === "blocked" && <p role="alert" className="text-sm text-red-600">{t("blocked")}</p>}
+        {status === "expired" && (
+          <p role="alert" className="text-sm text-red-600">
+            {t("sessionExpired")}{" "}
+            <Link href={signInHref} className="font-bold underline">{t("signIn")}</Link>
+          </p>
+        )}
         {status === "invalid" && <p role="alert" className="text-sm text-red-600">{serverMessage || t("failed")}</p>}
         {status === "failed" && <p role="alert" className="text-sm text-red-600">{t("failed")}</p>}
         {status === "posted" && <p role="status" className="text-sm text-green-700">{t("posted")}</p>}

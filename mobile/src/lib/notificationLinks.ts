@@ -8,6 +8,7 @@ export type NotificationRoute =
   | { name: "MarketplaceOffers"; params: { role?: NotificationRole } }
   | { name: "MarketplaceListingDetail"; params: { category: BrowsableCategory; listingId: string } }
   | { name: "ListingDetail"; params: { listingId: string } }
+  | { name: "Careers"; params: { jobId?: string } | undefined }
   | { name: "OaziGo"; params: undefined };
 
 const CATEGORIES: readonly string[] = ["warehouses", "stores", "businesses", "cars", "goods"];
@@ -31,6 +32,8 @@ export function notificationRoute(target: NotificationTarget | null | undefined)
         : null;
     case "listing":
       return id ? { name: "ListingDetail", params: { listingId: id } } : null;
+    case "job":
+      return id ? { name: "Careers", params: { jobId: id } } : null;
     case "ride":
       return { name: "OaziGo", params: undefined };
     default:

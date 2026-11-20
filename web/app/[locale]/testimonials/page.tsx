@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { listTestimonials } from "@/lib/api";
 import EmptyState from "@/components/ui/EmptyState";
+import LoadErrorNotice from "@/components/ui/LoadErrorNotice";
 import { IconMessageCircle, IconStar } from "@/components/Icons";
 import ReportContentButton from "@/components/ReportContentButton";
 import type { Metadata } from "next";
@@ -23,7 +24,9 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
  */
 export default async function TestimonialsPage() {
   const t = await getTranslations("TestimonialsPage");
-  const data = await listTestimonials().catch(() => ({ count: 0, results: [] as never[] }));
+  const fetched = await listTestimonials().catch(() => null);
+  const loadFailed = fetched === null;
+  const data = fetched ?? { count: 0, results: [] };
   const average = data.results.length > 0 ? data.results.reduce((sum, r) => sum + r.score, 0) / data.results.length : null;
 
   return (
@@ -44,7 +47,9 @@ export default async function TestimonialsPage() {
         </div>
       </section>
 
-      {data.results.length === 0 ? (
+      {loadFailed ? (
+        <LoadErrorNotice message={t("loadFailed")} />
+      ) : data.results.length === 0 ? (
         <EmptyState icon={<IconMessageCircle size={28} />} title={t("noTestimonialsYet")} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">

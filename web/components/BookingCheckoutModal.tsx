@@ -12,6 +12,7 @@ import {
   type Hotel,
 } from "@/lib/api";
 import Button from "@/components/ui/Button";
+import { MomoBadges } from "@/components/PaymentIcons";
 import {
   IconLock,
   IconShieldCheck,
@@ -351,9 +352,12 @@ export default function BookingCheckoutModal({
 
             {/* Cameroon Payment Method */}
             <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700">
-                {t("momoLabel")}
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                  {t("momoLabel")}
+                </label>
+                <MomoBadges size={16} />
+              </div>
               <div className="relative">
                 <input
                   required

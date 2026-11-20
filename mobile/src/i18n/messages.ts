@@ -5,6 +5,7 @@ import { en as ordersEn, fr as ordersFr } from "./mkt/orders";
 import { en as dashEn, fr as dashFr } from "./mkt/dash";
 import { en as chatEn, fr as chatFr } from "./chat";
 import { en as authEn, fr as authFr } from "./auth";
+import { en as careersEn, fr as careersFr } from "./careers";
 
 /**
  * App text in English and French. Keys are flat strings; `{name}` placeholders are filled in by t().
@@ -441,6 +442,7 @@ export const en = {
   "videos.follow": "Follow",
   "videos.following": "Following",
   "videos.post": "Post a video",
+  "videos.postForListing": "Post a video of this property",
   "videos.viewProperty": "View the property",
   "videos.forRent": "For rent",
   "videos.forSale": "For sale",
@@ -471,7 +473,7 @@ export const en = {
   "videos.create.subtitle": "Share a short tour or clip. Add a caption and tags so people can find it.",
   "videos.create.choose": "Choose a video",
   "videos.create.change": "Choose a different video",
-  "videos.create.hint": "MP4 or MOV, up to 500 MB.",
+  "videos.create.hint": "MP4 or MOV, up to 500 MB and 3 minutes.",
   "videos.create.uploading": "Uploading…",
   "videos.create.ready": "Video ready",
   "videos.create.caption": "Write a caption…",
@@ -482,7 +484,7 @@ export const en = {
   "videos.create.posted": "Your video is live!",
   "videos.create.blocked": "This video was blocked by content moderation. Please revise it and try again.",
   "videos.create.failed": "We could not publish your video. Check your connection and try again.",
-  "videos.create.uploadFailed": "That video could not be uploaded. It must be an MP4 or MOV file of at most 500 MB.",
+  "videos.create.uploadFailed": "That video could not be uploaded. It must be an MP4 or MOV file of at most 500 MB and 3 minutes.",
   "videos.create.permissionTitle": "Permission needed",
   "videos.create.permissionBody": "Allow access to your videos so you can post one.",
   "videos.create.signInTitle": "Sign in required",
@@ -537,6 +539,7 @@ export const en = {
   ...dashEn,
   ...chatEn,
   ...authEn,
+  ...careersEn,
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -969,6 +972,7 @@ export const fr: Record<MessageKey, string> = {
   "videos.follow": "Suivre",
   "videos.following": "Abonné",
   "videos.post": "Publier une vidéo",
+  "videos.postForListing": "Publier une vidéo de ce bien",
   "videos.viewProperty": "Voir le bien",
   "videos.forRent": "À louer",
   "videos.forSale": "À vendre",
@@ -999,7 +1003,7 @@ export const fr: Record<MessageKey, string> = {
   "videos.create.subtitle": "Partagez une courte visite ou un extrait. Ajoutez une légende et des tags pour être trouvé.",
   "videos.create.choose": "Choisir une vidéo",
   "videos.create.change": "Choisir une autre vidéo",
-  "videos.create.hint": "MP4 ou MOV, 500 Mo maximum.",
+  "videos.create.hint": "MP4 ou MOV, 500 Mo et 3 minutes maximum.",
   "videos.create.uploading": "Envoi en cours…",
   "videos.create.ready": "Vidéo prête",
   "videos.create.caption": "Écrivez une légende…",
@@ -1010,7 +1014,7 @@ export const fr: Record<MessageKey, string> = {
   "videos.create.posted": "Votre vidéo est en ligne !",
   "videos.create.blocked": "Cette vidéo a été bloquée par la modération. Modifiez-la et réessayez.",
   "videos.create.failed": "Impossible de publier votre vidéo. Vérifiez votre connexion et réessayez.",
-  "videos.create.uploadFailed": "Impossible d'envoyer cette vidéo. Elle doit être un fichier MP4 ou MOV de 500 Mo maximum.",
+  "videos.create.uploadFailed": "Impossible d'envoyer cette vidéo. Elle doit être un fichier MP4 ou MOV de 500 Mo et 3 minutes maximum.",
   "videos.create.permissionTitle": "Autorisation nécessaire",
   "videos.create.permissionBody": "Autorisez l'accès à vos vidéos pour en publier une.",
   "videos.create.signInTitle": "Connexion requise",
@@ -1065,4 +1069,5 @@ export const fr: Record<MessageKey, string> = {
   ...dashFr,
   ...chatFr,
   ...authFr,
+  ...careersFr,
 };

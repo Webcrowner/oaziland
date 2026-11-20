@@ -92,6 +92,7 @@ def generate_data_export(user):
     from transactions.models import Booking
     from social.models import Review
     from monetization.models import Wallet
+    from careers.models import JobApplication, JobPosting
 
     export_request = DataExportRequest.objects.create(user=user)
 
@@ -106,6 +107,8 @@ def generate_data_export(user):
         "kyc": None,
         "bookings": [],
         "reviews_written": [],
+        "job_applications": [],
+        "job_postings": [],
         "wallet_balance_xaf": None,
     }
 
@@ -127,6 +130,26 @@ def generate_data_export(user):
 
     for review in Review.objects.filter(author=user):
         data["reviews_written"].append({"score": review.score, "text": review.text, "created_at": review.created_at.isoformat()})
+
+    for app in JobApplication.objects.select_related("job_posting").filter(applicant=user):
+        data["job_applications"].append({
+            "id": str(app.id),
+            "job_title": app.job_posting.title,
+            "company_name": app.job_posting.company_name,
+            "status": app.status,
+            "years_experience": app.years_experience,
+            "has_cv": bool(app.cv_file),
+            "applied_at": app.applied_at.isoformat(),
+        })
+
+    for job in JobPosting.objects.filter(posted_by=user):
+        data["job_postings"].append({
+            "id": str(job.id),
+            "title": job.title,
+            "role_category": job.role_category,
+            "status": job.status,
+            "posted_at": job.posted_at.isoformat(),
+        })
 
     wallet = Wallet.objects.filter(owner=user).first()
     if wallet:
@@ -187,5 +210,9 @@ def complete_account_deletion(user):
     # once the account itself is gone (unlike financial transaction records).
     if hasattr(user, "kyc_profile"):
         user.kyc_profile.delete()
+
+    # Delete the departing user's job applications (and private CV PDFs via post_delete) and close any open postings.
+    user.job_applications.all().delete()
+    user.job_postings.filter(status="OPEN").update(status="CLOSED")
 
     return user

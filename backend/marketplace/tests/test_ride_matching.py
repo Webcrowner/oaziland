@@ -6,7 +6,7 @@ from django.utils import timezone
 from identity.models import User
 from marketplace.models import RideBooking, RideOffer, RideOfferStatus, RideStatus
 from marketplace.tests.test_marketplace_api import _verify, _auth_client
-from marketplace.tests.test_ride_safety import _verified_driver
+from marketplace.tests.test_ride_safety import _verified_driver, _new_rider
 from marketplace.tests.test_driver_tracking import BASTOS, DOUALA, _ride_at, _go_online
 
 NEAR = ("3.8750000", "11.5210000")      # ~0.5 km from Bastos
@@ -95,7 +95,7 @@ def test_a_busy_driver_or_one_already_holding_an_offer_is_skipped():
     _go_online(near_client, NEAR)
     _go_online(far_client, FURTHER)
     first = _ride_at(rider, BASTOS)
-    second = _ride_at(rider, BASTOS)
+    second = _ride_at(_new_rider(), BASTOS)
     assert _offer(near_client)["ride"]["id"] == first["id"]
     assert _offer(far_client)["ride"]["id"] == second["id"]
 

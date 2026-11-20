@@ -24,6 +24,17 @@ class MediaTooLargeError(Exception):
     pass
 
 
+class VideoTooLongError(MediaTooLargeError):
+    """A video longer than the folder allows. A MediaTooLargeError, so every caller that already reports a refused
+    upload reports this one too."""
+
+
+# Upload folders whose videos are capped in length (the setting FEED_VIDEO_MAX_SECONDS): the short-video feed.
+# Other folders (an agent's introduction, a listing's walkthrough, course lessons...) have no length cap.
+LENGTH_LIMITED_VIDEO_FOLDERS = {"videos"}
+DEFAULT_FEED_VIDEO_MAX_SECONDS = 180
+
+
 def detect_media_type(content_type: str) -> str:
     if content_type in ALLOWED_IMAGE_TYPES:
         return "PHOTO"
@@ -101,6 +112,42 @@ def inspect_and_clean(file):
     return InMemoryUploadedFile(out, "file", file.name, file.content_type, out.getbuffer().nbytes, None)
 
 
+def max_video_seconds(folder: str) -> int | None:
+    """The longest video the folder accepts, or None when its videos are not capped in length."""
+    from django.conf import settings
+
+    if folder not in LENGTH_LIMITED_VIDEO_FOLDERS:
+        return None
+    return getattr(settings, "FEED_VIDEO_MAX_SECONDS", DEFAULT_FEED_VIDEO_MAX_SECONDS)
+
+
+def _length_text(seconds: float) -> str:
+    whole = int(round(seconds))
+    minutes, rest = divmod(whole, 60)
+    return f"{minutes} min {rest:02d} s" if minutes else f"{rest} s"
+
+
+def check_video_length(file, *, folder: str):
+    """Reads the video's headers and returns its VideoInfo (None when unreadable). In a length-capped folder, a video
+    that is too long, or whose length cannot be read at all, is refused — the latter usually means the file is not a
+    normal MP4/MOV (e.g. a stream recording) and would not play for viewers either."""
+    from .video_info import read_video_info
+
+    info = read_video_info(file)
+    limit = max_video_seconds(folder)
+    if limit is None:
+        return info
+    if info is None or info.duration_seconds is None:
+        raise UnsupportedMediaTypeError(
+            "We couldn't read this video's length. Export it again as a standard MP4 (H.264) and retry."
+        )
+    if info.duration_seconds > limit:
+        raise VideoTooLongError(
+            f"This video is {_length_text(info.duration_seconds)} long — videos here can be at most {_length_text(limit)}."
+        )
+    return info
+
+
 def upload_media_file(*, file, folder: str):
     """The one real entry point every caller (post creation, listing
     photos, etc.) should use — validates BEFORE handing the file to
@@ -110,5 +157,10 @@ def upload_media_file(*, file, folder: str):
 
     validate_upload_size(content_type=file.content_type, size_bytes=file.size, folder=folder)
     file = inspect_and_clean(file)
+    info = check_video_length(file, folder=folder) if detect_media_type(file.content_type) == "VIDEO" else None
     provider = get_active_provider()
-    return provider.upload(file=file, folder=folder)
+    result = provider.upload(file=file, folder=folder)
+    if info is not None:
+        result.duration_seconds = round(info.duration_seconds) if info.duration_seconds else None
+        result.video_codec = info.codec
+    return result

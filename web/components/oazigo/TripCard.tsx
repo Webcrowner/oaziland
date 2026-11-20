@@ -2,15 +2,17 @@
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
-  startRide, completeRide, cancelRide, releaseRide, raiseRideSos, RIDE_CANCEL_REASONS, RIDE_RELEASE_REASONS,
+  startRide, completeRide, cancelRide, releaseRide, raiseRideSos, RIDE_CANCEL_REASONS, RIDE_RELEASE_REASONS, SYSTEM_RIDE_CANCEL_REASONS,
   type RideBookingItem, type RideCancelReason, type RideReleaseReason,
 } from "@/lib/api";
 import Badge from "@/components/ui/Badge";
 import RideChat from "@/components/RideChat";
 import RateAndReport from "@/components/RateAndReport";
-import { IconMapPin, IconCompass, IconAlertCircle, IconMessageCircle, IconChevronRight } from "@/components/Icons";
+import { MomoBadges } from "@/components/PaymentIcons";
+import { IconMapPin, IconCompass, IconAlertCircle, IconMessageCircle } from "@/components/Icons";
 import { useOaziGo } from "./OaziGoProvider";
 import DriverTrackingMap from "./DriverTrackingMap";
+import RouteStops from "./RouteStops";
 import { cardCls, dangerBtnCls, inputCls, labelCls, pillBtnCls, solidBtnCls } from "./styles";
 import LuggageDetails from "@/components/oazigo/LuggageDetails";
 import { RideStatusBadge, TripProgress } from "./RideStatus";
@@ -73,7 +75,8 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
     setPhoneNumber("");
   }
 
-  const waitingForPayment = waitingForFare && ride.status === "IN_PROGRESS";
+  // The server remembers a payment that is waiting for the rider's approval, so this survives a page reload.
+  const waitingForPayment = (waitingForFare || Boolean(ride.payment_pending)) && ride.status === "IN_PROGRESS";
   useEffect(() => {
     if (!waitingForPayment) return;
     const started = Date.now();
@@ -118,37 +121,53 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
   // Mirrors RIDE_ISSUE_WINDOW_DAYS on the server.
   const [withinReportWindow] = useState(() => Date.now() - new Date(ride.requested_at).getTime() < 14 * 24 * 60 * 60 * 1000);
 
+  const live = ride.status === "REQUESTED" || inTrip;
+  const bannerKey =
+    ride.status === "REQUESTED" ? "liveHeadline_REQUESTED"
+      : ride.status === "ACCEPTED" ? (isDriver ? "liveHeadline_ACCEPTED_driver" : "liveHeadline_ACCEPTED_rider")
+        : isDriver ? "liveHeadline_IN_PROGRESS_driver" : "liveHeadline_IN_PROGRESS_rider";
+  const counterpart = isRider ? ride.driver_name : ride.rider_name;
+
   return (
-    <article className={`${cardCls} transition-shadow hover:shadow-md`}>
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
-            <IconMapPin size={15} className="shrink-0 text-amber-500" />
-            <span>{ride.pickup_description}</span>
-            <IconChevronRight size={14} className="shrink-0 text-slate-400" />
-            <span>{ride.dropoff_description}</span>
-          </p>
-          <p className="mt-1.5 text-lg font-black tracking-tight text-slate-900">
-            {Number(ride.fare_estimate_xaf).toLocaleString(locale)} <span className="text-xs font-bold text-slate-500">XAF</span>
-            {ride.distance_km && <span className="ml-2 text-xs font-bold text-slate-400">· {Number(ride.distance_km).toLocaleString(locale)} km</span>}
-          </p>
-          <p className="mt-0.5 text-xs text-slate-400">
-            <time dateTime={ride.requested_at}>
-              {t("requestedOn", { date: new Date(ride.requested_at).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) })}
-            </time>
-          </p>
+    <article className={`${cardCls} overflow-hidden transition-shadow hover:shadow-md`}>
+      {live && (
+        <div
+          role="status"
+          className={`-mx-5 -mt-5 mb-4 flex items-center gap-3 px-5 py-3.5 sm:-mx-6 sm:-mt-6 sm:px-6 ${
+            ride.status === "REQUESTED" ? "bg-amber-50 text-amber-950" : "bg-slate-900 text-white"
+          }`}
+        >
+          <span aria-hidden="true" className="relative flex h-2.5 w-2.5 shrink-0">
+            <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${ride.status === "REQUESTED" ? "bg-amber-500" : "bg-emerald-400"}`} />
+            <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${ride.status === "REQUESTED" ? "bg-amber-500" : "bg-emerald-400"}`} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-black tracking-tight">{t(bannerKey)}</p>
+            {ride.status === "REQUESTED" && isRider && (
+              <p className="mt-0.5 text-xs font-medium text-amber-900/80">{ride.matching ? t("matchingRider") : t("openToAllRider")}</p>
+            )}
+          </div>
         </div>
+      )}
+
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-2xl font-black tracking-tight text-slate-900">
+          {Number(ride.fare_estimate_xaf).toLocaleString(locale)} <span className="text-xs font-bold text-slate-500">XAF</span>
+          {ride.distance_km && <span className="ml-2 text-xs font-bold text-slate-400">· {Number(ride.distance_km).toLocaleString(locale)} km</span>}
+        </p>
         <RideStatusBadge status={ride.status} />
       </div>
 
-      <TripProgress status={ride.status} />
+      <div className="mt-4">
+        <RouteStops pickup={ride.pickup_description} dropoff={ride.dropoff_description} pickupLabel={t("pickupLabel")} dropoffLabel={t("dropoffLabel")} />
+      </div>
+      <p className="mt-3 text-xs text-slate-400">
+        <time dateTime={ride.requested_at}>
+          {t("requestedOn", { date: new Date(ride.requested_at).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) })}
+        </time>
+      </p>
 
-      {ride.status === "REQUESTED" && isRider && (
-        <p role="status" className="mt-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-semibold text-amber-900">
-          {ride.matching && <span className="h-2 w-2 shrink-0 animate-ping rounded-full bg-amber-500" aria-hidden="true" />}
-          {ride.matching ? t("matchingRider") : t("openToAllRider")}
-        </p>
-      )}
+      <TripProgress status={ride.status} />
 
       <div className="mt-3 flex items-center gap-2 flex-wrap">
         <Badge variant="neutral">{t(`category_${ride.ride_category}`)}</Badge>
@@ -160,8 +179,8 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
       {ride.status === "CANCELLED" && ride.cancellation_reason && (
         <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-xs text-slate-600">
           <p className="font-bold text-slate-800">
-            {ride.cancellation_reason === "NO_DRIVER_FOUND"
-              ? t("cancelReason_NO_DRIVER_FOUND")
+            {(SYSTEM_RIDE_CANCEL_REASONS as readonly string[]).includes(ride.cancellation_reason)
+              ? t(`cancelReason_${ride.cancellation_reason}`)
               : t(isRider ? "youCancelledBecause" : "riderCancelledBecause", { reason: t(`cancelReason_${ride.cancellation_reason}`) })}
           </p>
           {ride.cancellation_note && <p className="mt-1 italic">&ldquo;{ride.cancellation_note}&rdquo;</p>}
@@ -176,12 +195,27 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
       )}
 
       {ride.driver && ride.status !== "CANCELLED" && (
-        <p className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-xs text-slate-600">
-          <span className="font-bold text-slate-800">
-            {isRider ? t("yourDriver", { name: ride.driver_name ?? "" }) : t("yourRider", { name: ride.rider_name })}
+        <div className="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 px-3.5 py-3">
+          <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-black text-amber-300">
+            {(counterpart || "?").trim().charAt(0).toUpperCase()}
           </span>
-          {ride.vehicle_details && ` · ${ride.vehicle_details.make} ${ride.vehicle_details.model} · ${ride.vehicle_details.plate_number}`}
-        </p>
+          <div className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-bold text-slate-900">
+              {isRider ? t("yourDriver", { name: ride.driver_name ?? "" }) : t("yourRider", { name: ride.rider_name })}
+            </span>
+            {ride.vehicle_details && (
+              <span className="block truncate text-xs text-slate-500">{ride.vehicle_details.make} {ride.vehicle_details.model}</span>
+            )}
+          </div>
+          {ride.vehicle_details?.plate_number && (
+            <span aria-label={`${t("plateNumber")}: ${ride.vehicle_details.plate_number}`} className="shrink-0 rounded-lg border-2 border-slate-900 bg-amber-50 px-2.5 py-1 font-mono text-xs font-black tracking-wider text-slate-900">
+              {ride.vehicle_details.plate_number}
+            </span>
+          )}
+        </div>
+      )}
+      {isRider && ride.status === "ACCEPTED" && ride.vehicle_details && (
+        <p className="mt-2 px-1 text-[11px] font-medium text-slate-500">{t("checkPlateNote")}</p>
       )}
 
       {((ride.pickup_latitude && ride.pickup_longitude) || (ride.dropoff_latitude && ride.dropoff_longitude)) && (
@@ -225,7 +259,7 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
 
       {waitingForPayment && (
         <p role="status" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-semibold text-amber-900">
-          {t("approveFareOnPhone")}
+          {isRider ? t("approveFareOnPhone") : t("driverWaitsForPayment")}
         </p>
       )}
 
@@ -239,7 +273,7 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
         {ride.status === "ACCEPTED" && isDriver && (
           <button onClick={() => run((token) => startRide(ride.id, token))} className={solidBtnCls}>{t("startRide")}</button>
         )}
-        {ride.status === "IN_PROGRESS" && !paying && !waitingForPayment && (
+        {ride.status === "IN_PROGRESS" && isRider && !paying && !waitingForPayment && (
           <button onClick={() => setPaying(true)} className={solidBtnCls}>{t("completeAndPay")}</button>
         )}
         {ride.status === "ACCEPTED" && isDriver && !asking && (
@@ -271,7 +305,10 @@ export default function TripCard({ ride }: { ride: RideBookingItem }) {
 
       {paying && (
         <div className="mt-3 flex flex-col sm:flex-row gap-2">
-          <input placeholder={t("phoneNumberPlaceholder")} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className={`${inputCls} sm:flex-1`} />
+          <div className="relative sm:flex-1">
+            <input placeholder={t("phoneNumberPlaceholder")} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} className={`${inputCls} w-full pr-14`} />
+            <MomoBadges size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" />
+          </div>
           <button onClick={handleComplete} disabled={!phoneNumber} className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{t("pay")}</button>
         </div>
       )}

@@ -13,17 +13,19 @@ from django.utils import timezone
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
-from oaziland.permissions import IsOwnerOrReadOnly
+from oaziland.permissions import IsKycVerified, IsOwnerOrReadOnly
 from .models import TrainingProgram, TrainingEnrollment, TrainingEnrollmentStatus, JobPosting, JobApplication
 from .serializers import (
     TrainingProgramSerializer, TrainingEnrollmentSerializer, JobPostingSerializer, JobApplicationSerializer,
-    UpdateApplicationStatusSerializer, ShareJobPostingSerializer,
+    UpdateApplicationStatusSerializer, ShareJobPostingSerializer, JobApplySerializer,
 )
 from .services import (
-    enroll_in_training, AlreadyEnrolledError, apply_to_job, AlreadyAppliedError,
+    enroll_in_training, AlreadyEnrolledError, apply_to_job, AlreadyAppliedError, JobNotOpenError, OwnJobError,
+    InvalidCvError, moderate_job_posting_text, withdraw_job_application,
+    close_job_posting, reopen_job_posting,
     update_application_status, share_job_posting_via_whatsapp, mark_training_in_progress, drop_training,
     InvalidEnrollmentTransitionError, requires_payment, pay_for_training, CoursePaymentError,
     CoursePaymentInProgressError,
@@ -393,35 +395,188 @@ class MyEnrollmentViewSet(viewsets.ReadOnlyModelViewSet):
         return Response({**result, "status": enrollment.status, "progress": course_progress(enrollment)})
 
 
+def _certificates_by_user(user_ids) -> dict:
+    """Loads verified Oaziland certificates for a batch of applicants in 1 query (zero N+1)."""
+    ids = list(set(user_ids))
+    if not ids:
+        return {}
+    grouped = {uid: [] for uid in ids}
+    rows = (
+        TrainingEnrollment.objects.select_related("program")
+        .filter(student_id__in=ids, certificate_issued_at__isnull=False)
+        .exclude(certificate_code="")
+        .order_by("-certificate_issued_at")
+    )
+    for row in rows:
+        bucket = grouped[row.student_id]
+        if len(bucket) < 5:
+            bucket.append({"code": row.certificate_code, "title": row.program.title})
+    return grouped
+
+
+def _cv_pdf_response(application: JobApplication):
+    """Streams an applicant's private PDF CV safely with nosniff headers."""
+    safe_name = (application.cv_filename or "cv.pdf").replace('"', "")
+    response = FileResponse(application.cv_file.open("rb"), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{safe_name}"'
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 class JobPostingViewSet(viewsets.ModelViewSet):
-    """The real gap this closes: JobPosting/JobApplication had real
-    models and real service functions (apply_to_job,
-    update_application_status) but no endpoint anywhere ever exposed
-    either one. list/retrieve public — browsing open positions
-    shouldn't require an account; create requires login; only the
-    posting's own poster can update it (IsOwnerOrReadOnly, now
-    extended to recognize posted_by alongside listed_by/owner/etc.)."""
+    """list/retrieve public — browsing open positions shouldn't require an account;
+    creating a job requires KYC verification + automated anti-scam text moderation;
+    only the posting's own poster can update it, view applicants, or download applicant CVs."""
     serializer_class = JobPostingSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [IsKycVerified()]
+        return super().get_permissions()
+
+    def get_throttles(self):
+        throttles = super().get_throttles()
+        if self.action == "create":
+            self.throttle_scope = "job_create"
+            throttles.append(ScopedRateThrottle())
+        elif self.action == "apply":
+            self.throttle_scope = "job_apply"
+            throttles.append(ScopedRateThrottle())
+        return throttles
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return JobPosting.objects.none()
-        if self.action == "list":
-            return JobPosting.objects.filter(status="OPEN").select_related("quarter", "posted_by").order_by("-posted_at")
-        return JobPosting.objects.select_related("quarter", "posted_by")
+        queryset = JobPosting.objects.select_related("quarter__village_or_district", "posted_by").annotate(applications_total=Count("applications"))
+        if self.action != "list":
+            return queryset
+        params = self.request.query_params
+        user = self.request.user
+        # "mine" is a poster's own list, closed ones included; everyone else only sees what can still be applied to.
+        if params.get("mine") and user.is_authenticated:
+            queryset = queryset.filter(posted_by=user)
+        else:
+            queryset = queryset.filter(status="OPEN").filter(Q(closes_at__isnull=True) | Q(closes_at__gt=timezone.now()))
+            if user.is_authenticated:
+                from engagement.models import BlockRelationship
+                blocked_either_way = set(
+                    BlockRelationship.objects.filter(blocker=user).values_list("blocked_id", flat=True)
+                ) | set(
+                    BlockRelationship.objects.filter(blocked=user).values_list("blocker_id", flat=True)
+                )
+                if blocked_either_way:
+                    queryset = queryset.exclude(posted_by_id__in=blocked_either_way)
+        role = params.get("role_category")
+        if role:
+            queryset = queryset.filter(role_category=role)
+        emp_type = params.get("employment_type")
+        if emp_type:
+            queryset = queryset.filter(employment_type=emp_type)
+        workplace = params.get("workplace_type")
+        if workplace:
+            queryset = queryset.filter(workplace_type=workplace)
+        quarter_id = params.get("quarter")
+        if quarter_id:
+            queryset = queryset.filter(quarter_id=quarter_id)
+        text = (params.get("q") or "").strip()
+        if text:
+            queryset = queryset.filter(
+                Q(title__icontains=text)
+                | Q(company_name__icontains=text)
+                | Q(description__icontains=text)
+                | Q(quarter__name__icontains=text)
+                | Q(quarter__village_or_district__name__icontains=text)
+            )
+        return queryset.order_by("-posted_at")
 
-    def perform_create(self, serializer):
-        serializer.save(posted_by=self.request.user)
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        user = getattr(self.request, "user", None)
+        if user is not None and user.is_authenticated:
+            context["my_applications"] = dict(JobApplication.objects.filter(applicant=user).values_list("job_posting_id", "status"))
+        return context
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def create(self, request, *args, **kwargs):
+        from trust_safety.services import ContentBlockedError
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            moderate_job_posting_text(
+                title=serializer.validated_data.get("title", ""),
+                company_name=serializer.validated_data.get("company_name", ""),
+                description=serializer.validated_data.get("description", ""),
+            )
+        except ContentBlockedError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save(posted_by=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        from trust_safety.services import ContentBlockedError
+
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        try:
+            moderate_job_posting_text(
+                title=serializer.validated_data.get("title", instance.title),
+                company_name=serializer.validated_data.get("company_name", instance.company_name),
+                description=serializer.validated_data.get("description", instance.description),
+            )
+        except ContentBlockedError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated],
+        parser_classes=[JSONParser, MultiPartParser, FormParser],
+    )
     def apply(self, request, pk=None):
         posting = self.get_object()
+        input_serializer = JobApplySerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
         try:
-            application = apply_to_job(job_posting=posting, applicant=request.user, cover_message=request.data.get("cover_message", ""))
+            application = apply_to_job(
+                job_posting=posting,
+                applicant=request.user,
+                cover_message=input_serializer.validated_data["cover_message"],
+                cv_file=input_serializer.validated_data.get("cv_file"),
+                years_experience=input_serializer.validated_data.get("years_experience"),
+            )
+        except InvalidCvError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except AlreadyAppliedError as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
-        return Response(JobApplicationSerializer(application).data, status=status.HTTP_201_CREATED)
+        except JobNotOpenError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        except OwnJobError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        certs = _certificates_by_user([request.user.id])
+        return Response(JobApplicationSerializer(application, context={"certificates_by_user": certs}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def close(self, request, pk=None):
+        """The poster stops taking applications (a filled position, or one that was posted by mistake)."""
+        posting = self.get_object()
+        if posting.posted_by_id != request.user.id:
+            return Response({"detail": "Only the job's poster can close it."}, status=status.HTTP_403_FORBIDDEN)
+        close_job_posting(job_posting=posting)
+        return Response(self.get_serializer(posting).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def reopen(self, request, pk=None):
+        """Lets the job's poster reopen a closed job posting."""
+        posting = self.get_object()
+        if posting.posted_by_id != request.user.id:
+            return Response({"detail": "Only the job's poster can reopen it."}, status=status.HTTP_403_FORBIDDEN)
+        reopen_job_posting(job_posting=posting)
+        return Response(self.get_serializer(posting).data)
 
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def applications(self, request, pk=None):
@@ -430,7 +585,25 @@ class JobPostingViewSet(viewsets.ModelViewSet):
         posting = self.get_object()
         if posting.posted_by_id != request.user.id:
             return Response({"detail": "Only the job's poster can view its applications."}, status=status.HTTP_403_FORBIDDEN)
-        return Response(JobApplicationSerializer(posting.applications.select_related("applicant").order_by("-applied_at"), many=True).data)
+        apps = list(posting.applications.select_related("applicant", "job_posting").order_by("-applied_at"))
+        certs = _certificates_by_user([a.applicant_id for a in apps])
+        return Response(JobApplicationSerializer(apps, many=True, context={"certificates_by_user": certs}).data)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path=r"applications/(?P<application_id>[0-9a-fA-F-]{32,36})/cv",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def application_cv(self, request, pk=None, application_id=None):
+        """Permission-checked CV download: only the job's poster or the applicant themselves may download the PDF."""
+        posting = self.get_object()
+        application = posting.applications.filter(id=application_id).first()
+        if application is None or not application.cv_file:
+            return Response({"detail": "No CV was uploaded with this application."}, status=status.HTTP_404_NOT_FOUND)
+        if request.user.id not in (posting.posted_by_id, application.applicant_id):
+            return Response({"detail": "Only the job's poster or the applicant can download this CV."}, status=status.HTTP_403_FORBIDDEN)
+        return _cv_pdf_response(application)
 
     @action(detail=True, methods=["post"], url_path="update-application", permission_classes=[permissions.IsAuthenticated])
     def update_application(self, request, pk=None):
@@ -443,11 +616,12 @@ class JobPostingViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Only the job's poster can update an application's status."}, status=status.HTTP_403_FORBIDDEN)
         input_serializer = UpdateApplicationStatusSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
-        application = posting.applications.filter(id=input_serializer.validated_data["application_id"]).first()
+        application = posting.applications.select_related("applicant", "job_posting").filter(id=input_serializer.validated_data["application_id"]).first()
         if application is None:
             return Response({"detail": "That application was not found on this job posting."}, status=status.HTTP_404_NOT_FOUND)
         update_application_status(application=application, new_status=input_serializer.validated_data["new_status"])
-        return Response(JobApplicationSerializer(application).data)
+        certs = _certificates_by_user([application.applicant_id])
+        return Response(JobApplicationSerializer(application, context={"certificates_by_user": certs}).data)
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def share(self, request, pk=None):
@@ -465,15 +639,37 @@ class JobPostingViewSet(viewsets.ModelViewSet):
 
 
 class MyJobApplicationViewSet(viewsets.ReadOnlyModelViewSet):
-    """A real applicant's own application history — the same 'my X'
-    pattern as MyEnrollmentViewSet directly above."""
+    """A real applicant's own application history — plus CV download and withdrawal."""
     serializer_class = JobApplicationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return JobApplication.objects.none()
-        return JobApplication.objects.filter(applicant=self.request.user).select_related("job_posting").order_by("-applied_at")
+        return JobApplication.objects.filter(applicant=self.request.user).select_related("applicant", "job_posting").order_by("-applied_at")
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        user = getattr(self.request, "user", None)
+        if user is not None and user.is_authenticated:
+            context["certificates_by_user"] = _certificates_by_user([user.id])
+        return context
+
+    @action(detail=True, methods=["get"])
+    def cv(self, request, pk=None):
+        application = self.get_object()
+        if not application.cv_file:
+            return Response({"detail": "No CV was uploaded with this application."}, status=status.HTTP_404_NOT_FOUND)
+        return _cv_pdf_response(application)
+
+    @action(detail=True, methods=["post"])
+    def withdraw(self, request, pk=None):
+        application = self.get_object()
+        try:
+            withdraw_job_application(application=application, user=request.user)
+        except JobNotOpenError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CertificateView(viewsets.ViewSet):

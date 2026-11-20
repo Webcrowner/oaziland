@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { IconMessageCircle } from "@/components/Icons";
+import { NavAiIcon } from "@/components/navIcons";
 import { useRouter, Link } from "@/i18n/navigation";
 import {
   startSupportChat, continueSupportChat, askChatbotAnonymously,
@@ -176,10 +176,13 @@ export default function SupportChatWidget() {
     <div data-open={isOpen} className={`support-widget z-50 flex flex-col items-end gap-3 ${isOpen ? "fixed bottom-5 right-4 md:right-5" : "relative mx-auto my-6 w-fit md:fixed md:bottom-5 md:right-5 md:m-0"}`}>
       {isOpen && (
         <div className="w-[min(92vw,360px)] h-[min(70vh,520px)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
-          <div className="bg-[var(--navy)] text-white px-4 py-3 flex items-center justify-between">
-            <div>
-              <p className="font-bold text-sm">Oazi — Oaziland Support</p>
-              <p className="text-[11px] text-white/70">{aiHandled ? "AI assistant" : "Connected to our team"}</p>
+          <div className="bg-[var(--navy)] text-white px-4 py-3 flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <NavAiIcon size={30} />
+              <div className="min-w-0">
+                <p className="font-bold text-sm truncate">Oazi — Oaziland Support</p>
+                <p className="text-[11px] text-white/70">{aiHandled ? "AI assistant" : "Connected to our team"}</p>
+              </div>
             </div>
             <button aria-label={t("close")} onClick={() => setIsOpen(false)} className="min-h-11 min-w-11 text-white/80 hover:text-white text-lg leading-none">
               ×
@@ -252,11 +255,11 @@ export default function SupportChatWidget() {
 
       <button
         onClick={() => setIsOpen((v) => !v)}
-        className="min-h-11 rounded-full bg-[var(--navy)] px-4 py-3 text-white shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity md:w-14 md:h-14 md:p-0"
+        className="min-h-11 rounded-full bg-[var(--navy)] px-4 py-2.5 text-white shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity md:w-14 md:h-14 md:p-0"
         aria-label={isOpen ? t("close") : t("open")}
         aria-expanded={isOpen}
       >
-        {isOpen ? <span aria-hidden="true">×</span> : <IconMessageCircle size={22} />}
+        {isOpen ? <span aria-hidden="true">×</span> : <NavAiIcon size={34} />}
         <span className="text-sm font-semibold md:hidden">{isOpen ? t("close") : t("open")}</span>
       </button>
     </div>

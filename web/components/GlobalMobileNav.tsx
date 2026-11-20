@@ -5,7 +5,8 @@ import { Link, usePathname } from "@/i18n/navigation";
 import MobileTabBar, { type MobileTabItem } from "@/components/MobileTabBar";
 import { HeaderSearch, MobileGroup, useSiteMenus } from "@/components/Navbar";
 import { SIDEBAR_ROUTES } from "@/components/SiteChrome";
-import { IconCompass, IconHome, IconMessageCircle, IconUser, IconX } from "@/components/Icons";
+import { NavChatIcon, NavUserIcon } from "@/components/navIcons";
+import { IconCompass, IconHome, IconX } from "@/components/Icons";
 
 // Focused flows where a site-wide tab bar would only be a distraction.
 const HIDDEN_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password", "/mfa-setup", "/admin"];
@@ -70,16 +71,16 @@ export default function GlobalMobileNav() {
       active: exploreOpen || inExploreSection,
     },
     { id: "list", label: t("list"), icon: <IconPlus />, href: "/list-property", primary: true, active: pathname === "/list-property" },
-    { id: "messages", label: t("messages"), icon: <IconMessageCircle size={22} />, href: "/messages", active: pathname === "/messages" },
+    { id: "messages", label: t("messages"), icon: <NavChatIcon size={24} />, href: "/messages", active: pathname === "/messages" },
     isLoggedIn
       ? {
           id: "account",
           label: t("account"),
-          icon: <IconUser size={22} />,
+          icon: <NavUserIcon size={24} />,
           href: "/account",
           active: pathname !== "/messages" && SIDEBAR_ROUTES.has(pathname),
         }
-      : { id: "account", label: t("signIn"), icon: <IconUser size={22} />, href: "/login" },
+      : { id: "account", label: t("signIn"), icon: <NavUserIcon size={24} />, href: "/login" },
   ];
 
   return (

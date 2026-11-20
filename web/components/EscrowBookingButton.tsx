@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
 import BookingCheckoutModal from "@/components/BookingCheckoutModal";
-import { IconLock, IconShieldCheck } from "@/components/Icons";
+import { MomoBadges } from "@/components/PaymentIcons";
+import { IconLock } from "@/components/Icons";
 
 interface EscrowBookingButtonProps {
   listingId: string;
@@ -26,13 +27,19 @@ export default function EscrowBookingButton({
 
   return (
     <>
-      <button
-        onClick={() => setModalOpen(true)}
-        className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 text-xs sm:text-sm font-black transition-all shadow-md shadow-slate-900/15 flex items-center justify-center gap-2 border border-slate-700/80"
-      >
-        <IconLock size={15} className="text-amber-400" />
-        <span>{isRent ? "Lock Rental Deposit via Escrow" : "Reserve Property with Escrow Deposit"}</span>
-      </button>
+      <div className="space-y-1.5">
+        <button
+          onClick={() => setModalOpen(true)}
+          className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 text-xs sm:text-sm font-black transition-all shadow-md shadow-slate-900/15 flex items-center justify-center gap-2 border border-slate-700/80"
+        >
+          <IconLock size={15} className="text-amber-400" />
+          <span>{isRent ? "Lock Rental Deposit via Escrow" : "Reserve Property with Escrow Deposit"}</span>
+        </button>
+        <p className="flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-500">
+          <MomoBadges size={15} />
+          <span>MTN MoMo &amp; Orange Money</span>
+        </p>
+      </div>
 
       <BookingCheckoutModal
         isOpen={modalOpen}

@@ -4,6 +4,7 @@ because knowing what services a marketplace offers (before ever
 signing up) is exactly the kind of thing that should be visible
 without an account, same as browsing a listing.
 """
+from django.db.models import Prefetch
 from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -15,13 +16,18 @@ from .services import request_partner_service
 
 class PartnerServiceCategoryViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PartnerServiceCategorySerializer
-    queryset = PartnerServiceCategory.objects.prefetch_related("offerings").order_by("name")
+    queryset = PartnerServiceCategory.objects.all()
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return PartnerServiceCategory.objects.none()
-        return self.queryset
+        # Only offerings people can actually request (the request endpoint rejects inactive ones), and no empty categories.
+        active = PartnerServiceOffering.objects.filter(is_active=True).order_by("name")
+        return (
+            PartnerServiceCategory.objects.filter(offerings__is_active=True).distinct()
+            .prefetch_related(Prefetch("offerings", queryset=active)).order_by("name")
+        )
 
 
 class RequestPartnerServiceView(APIView):

@@ -30,12 +30,20 @@ export default function PrivacySettingsPage() {
   const [saved, setSaved] = useState(false);
   const [blocked, setBlocked] = useState<BlockedUser[]>([]);
   const [token, setToken] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [attempt, setAttempt] = useState(0);
 
   async function handleUnblock(userId: string) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
-    await setUserBlocked(userId, false, token);
-    setBlocked((prev) => prev.filter((u) => u.id !== userId));
+    setActionError("");
+    try {
+      await setUserBlocked(userId, false, token);
+      setBlocked((prev) => prev.filter((u) => u.id !== userId));
+    } catch {
+      setActionError(t("unblockFailed"));
+    }
   }
 
   useEffect(() => {
@@ -44,17 +52,29 @@ export default function PrivacySettingsPage() {
       void Promise.resolve().then(() => setLoggedIn(false));
       return;
     }
-    getMyPresenceSettings(token).then(setSettings).catch(() => {});
-    listBlockedUsers(token).then((data) => setBlocked(data.results)).catch(() => {});
-    void Promise.resolve().then(() => setToken(token));
-  }, []);
+    void Promise.resolve().then(() => {
+      setToken(token);
+      setLoadFailed(false);
+    });
+    getMyPresenceSettings(token).then(setSettings).catch(() => setLoadFailed(true));
+    listBlockedUsers(token).then((data) => setBlocked(data.results)).catch(() => setLoadFailed(true));
+  }, [attempt]);
 
   async function handleToggle(field: keyof PresenceSettings) {
     const token = localStorage.getItem("access_token");
     if (!token || !settings) return;
+    const previous = settings;
     const updated = { ...settings, [field]: !settings[field] };
     setSettings(updated);
-    await updateMyPresenceSettings({ [field]: updated[field] }, token);
+    setActionError("");
+    try {
+      await updateMyPresenceSettings({ [field]: updated[field] }, token);
+    } catch {
+      // Put the switch back so the screen never shows a setting that wasn't saved.
+      setSettings(previous);
+      setActionError(t("saveFailed"));
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
@@ -65,8 +85,21 @@ export default function PrivacySettingsPage() {
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
           <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
           <Link href="/login" className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90">
-            {t("signInRequired")}
+            {t("signIn")}
           </Link>
+        </div>
+      </AccountSidebarLayout>
+    );
+  }
+
+  if (!settings && loadFailed) {
+    return (
+      <AccountSidebarLayout activeHref="/privacy-settings">
+        <div role="alert" className="bg-white border border-red-100 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-red-700 mb-4 text-sm font-semibold">{t("loadFailed")}</p>
+          <button type="button" onClick={() => setAttempt((n) => n + 1)} className="inline-block bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded hover:opacity-90 cursor-pointer">
+            {t("retry")}
+          </button>
         </div>
       </AccountSidebarLayout>
     );
@@ -109,6 +142,11 @@ export default function PrivacySettingsPage() {
       </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+        {(actionError || loadFailed) && (
+          <p role="alert" className="xl:col-span-2 rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
+            {actionError || t("blockedLoadFailed")}
+          </p>
+        )}
         <section className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm">
           <h2 className="text-base font-black tracking-tight text-slate-900 mb-4">{t("activityVisibility")}</h2>
           <ul className="divide-y divide-slate-100">
@@ -138,7 +176,7 @@ export default function PrivacySettingsPage() {
                       />
                     </button>
                     <span className={`text-[10px] font-black uppercase tracking-wider ${on ? "text-emerald-600" : "text-slate-400"}`}>
-                      {on ? "On" : "Off"}
+                      {on ? t("toggleOn") : t("toggleOff")}
                     </span>
                   </div>
                 </li>

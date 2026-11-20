@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { getMyCreatorPremiumStatus, subscribeCreatorPremium, cancelCreatorPremium } from "@/lib/api";
 import AccountSidebarLayout from "@/components/AccountSidebarLayout";
+import { MomoBadges } from "@/components/PaymentIcons";
 import Button from "@/components/ui/Button";
 
 export default function PremiumPage() {
@@ -86,10 +87,13 @@ export default function PremiumPage() {
         </>
       ) : (
         <form onSubmit={handleSubscribe} className="flex flex-col gap-3">
-          <input
-            type="tel" required placeholder={t("phonePlaceholder")} value={phone}
-            onChange={(e) => setPhone(e.target.value)} className="border rounded px-3 py-2"
-          />
+          <div className="relative">
+            <input
+              type="tel" required placeholder={t("phonePlaceholder")} value={phone}
+              onChange={(e) => setPhone(e.target.value)} className="w-full border rounded pl-3 pr-14 py-2"
+            />
+            <MomoBadges size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" />
+          </div>
           {error && <p className="text-red-600 text-sm">{error}</p>}
           <button type="submit" disabled={status === "subscribing"} className="bg-[var(--gold)] text-[var(--navy)] font-semibold py-3 rounded hover:opacity-90 disabled:opacity-50">
             {status === "subscribing" ? t("subscribing") : t("subscribe")}

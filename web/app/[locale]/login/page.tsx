@@ -92,9 +92,9 @@ export default function LoginPage() {
               <Image
                 src="/logo.png"
                 alt="Oaziland"
-                width={96}
+                width={130}
                 height={96}
-                style={{ width: "96px", height: "96px" }}
+                style={{ width: "auto", height: "96px" }}
                 priority
                 className="object-contain drop-shadow-md"
               />

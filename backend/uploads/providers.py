@@ -26,6 +26,9 @@ CHUNK_SIZE_BYTES = 20 * 1024 * 1024
 class UploadResult:
     url: str
     media_type: str  # "PHOTO" or "VIDEO"
+    # Read from a video's headers (see uploads.video_info); None / "" for photos or when unreadable.
+    duration_seconds: int | None = None
+    video_codec: str = ""  # "h264", "hevc" or "other"
 
 
 class MediaStorageProvider(ABC):

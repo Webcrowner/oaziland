@@ -190,7 +190,7 @@ export default function PostCard({ post, onDeleted, onTagClick }: PostCardProps)
         <div className="flex flex-col gap-1 bg-slate-100">
           {post.media.map((item) =>
             item.media_type === "VIDEO" ? (
-              <video key={item.id} src={item.file_url} controls preload="metadata" playsInline className="w-full max-h-[32rem] bg-black" />
+              <video key={item.id} src={`${item.file_url}#t=0.1`} controls preload="metadata" playsInline className="w-full max-h-[32rem] bg-black" />
             ) : item.media_type === "AUDIO" ? (
               <audio key={item.id} src={item.file_url} controls preload="none" className="w-full" />
             ) : (

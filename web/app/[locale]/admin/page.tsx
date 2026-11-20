@@ -94,6 +94,7 @@ import AdminUserOverviewPanel from "@/components/admin/AdminUserOverviewPanel";
 import MobileTabBar, { type MobileTabItem } from "@/components/MobileTabBar";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import PlatformAccountPanel from "@/components/PlatformAccountPanel";
+import { MtnIcon, OrangeIcon } from "@/components/PaymentIcons";
 import {
   IconShield,
   IconShieldCheck,
@@ -2195,7 +2196,10 @@ export default function AdminConsolePage() {
                     <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
                       <dt className="font-semibold text-slate-500">{t("withdrawalSendTo")}</dt>
                       <dd className="mt-0.5 font-bold text-slate-900">{destination}</dd>
-                      <dd className="text-slate-500">{providerLabel}</dd>
+                      <dd className="mt-0.5 flex items-center gap-1.5 text-slate-500">
+                        {w.provider === "ORANGE_MONEY" ? <OrangeIcon size={15} /> : <MtnIcon size={15} />}
+                        <span>{providerLabel}</span>
+                      </dd>
                     </div>
                     <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
                       <dt className="font-semibold text-slate-500">{t("withdrawalBalanceLeft")}</dt>

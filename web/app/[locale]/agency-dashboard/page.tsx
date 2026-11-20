@@ -21,7 +21,7 @@ import { IconShare, IconQrCode, IconArrowUpRight, IconUsers, IconBuilding, IconM
 export default function AgencyDashboardPage() {
   const t = useTranslations("AgencyDashboardPage");
   const [dashboard, setDashboard] = useState<AgencyDashboard | null>(null);
-  const [status, setStatus] = useState<"loading" | "signedOut" | "notInAgency" | "ready">("loading");
+  const [status, setStatus] = useState<"loading" | "signedOut" | "notInAgency" | "loadFailed" | "ready">("loading");
   const [newAgentId, setNewAgentId] = useState("");
   const [rosterStatus, setRosterStatus] = useState<"idle" | "busy" | "error">("idle");
   const [rosterError, setRosterError] = useState("");
@@ -40,7 +40,17 @@ export default function AgencyDashboardPage() {
         setUserId(profile.id);
         setStatus("ready");
       })
-      .catch(() => setStatus("notInAgency"));
+      .catch((err: unknown) => {
+        const code = (err as { status?: number })?.status;
+        if (code === 401) {
+          localStorage.removeItem("access_token");
+          setStatus("signedOut");
+        } else if (code === 403 || code === 404) {
+          setStatus("notInAgency");
+        } else {
+          setStatus("loadFailed");
+        }
+      });
   }, []);
 
   useEffect(() => {
@@ -68,8 +78,14 @@ export default function AgencyDashboardPage() {
   async function handleRemoveAgent(agentUserId: string) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
-    await removeAgentFromRoster(agentUserId, token);
-    load();
+    if (!window.confirm(t("removeConfirm"))) return;
+    setRosterError("");
+    try {
+      await removeAgentFromRoster(agentUserId, token);
+      load();
+    } catch (err) {
+      setRosterError(err instanceof Error ? err.message : t("removeFailed"));
+    }
   }
 
   if (status === "signedOut") {
@@ -77,7 +93,7 @@ export default function AgencyDashboardPage() {
       <DashboardLayout currentRole="agent" activeHref="/agency-dashboard" title={t("title")}>
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
           <p className="text-gray-600 mb-4">{t("signInRequired")}</p>
-          <Button href="/login">{t("signInRequired")}</Button>
+          <Button href="/login">{t("signIn")}</Button>
         </div>
       </DashboardLayout>
     );
@@ -88,6 +104,17 @@ export default function AgencyDashboardPage() {
       <DashboardLayout currentRole="agent" activeHref="/agency-dashboard" title={t("title")}>
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
           <p className="text-slate-600 font-semibold text-sm">{t("notInAgency")}</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (status === "loadFailed") {
+    return (
+      <DashboardLayout currentRole="agent" activeHref="/agency-dashboard" title={t("title")}>
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
+          <p className="text-slate-600 font-semibold text-sm mb-4">{t("loadFailed")}</p>
+          <Button onClick={() => { setStatus("loading"); load(); }}>{t("retry")}</Button>
         </div>
       </DashboardLayout>
     );

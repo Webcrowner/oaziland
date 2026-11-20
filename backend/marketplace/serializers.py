@@ -387,6 +387,7 @@ class RideBookingSerializer(serializers.ModelSerializer):
     vehicle_details = RideVehicleSerializer(source="vehicle", read_only=True)
     distance_km = serializers.SerializerMethodField()
     matching = serializers.SerializerMethodField()
+    payment_pending = serializers.SerializerMethodField()
 
     class Meta:
         model = RideBooking
@@ -398,6 +399,7 @@ class RideBookingSerializer(serializers.ModelSerializer):
             "luggage_count", "luggage_size", "luggage_photo_urls", "cargo_description",
             "requested_at", "completed_at", "sos_raised_at",
             "cancelled_at", "cancellation_reason", "cancellation_note", "release_reason", "release_note", "matching",
+            "payment_pending",
         ]
         read_only_fields = [
             "rider", "driver", "vehicle", "fare_estimate_xaf", "distance_km", "status", "requested_at", "completed_at", "sos_raised_at",
@@ -407,6 +409,11 @@ class RideBookingSerializer(serializers.ModelSerializer):
     def get_matching(self, obj) -> bool:
         """True while the request is being offered to nearby drivers one at a time."""
         return obj.status == RideStatus.REQUESTED and obj.matching_ended_at is None
+
+    def get_payment_pending(self, obj) -> bool:
+        """True while a fare payment is waiting for the rider's approval (only ever looked up for rides in progress)."""
+        from .services import ride_payment_pending
+        return ride_payment_pending(obj)
 
     def get_distance_km(self, obj) -> str:
         if obj.distance_km is not None:
@@ -593,8 +600,9 @@ class CompleteRideSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
 
 
-# NO_DRIVER_FOUND is only ever set by the expiry job, never chosen by a rider.
-RIDER_CANCEL_REASONS = [choice for choice in RideCancelReason.choices if choice[0] != RideCancelReason.NO_DRIVER_FOUND]
+# The system reasons are only ever set by the scheduled jobs, never chosen by a rider.
+SYSTEM_CANCEL_REASONS = (RideCancelReason.NO_DRIVER_FOUND, RideCancelReason.TRIP_NEVER_STARTED, RideCancelReason.TRIP_ABANDONED)
+RIDER_CANCEL_REASONS = [choice for choice in RideCancelReason.choices if choice[0] not in SYSTEM_CANCEL_REASONS]
 
 
 class RideCancelSerializer(serializers.Serializer):

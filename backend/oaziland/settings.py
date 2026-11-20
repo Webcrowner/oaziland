@@ -296,6 +296,8 @@ GOOGLE_CLOUD_VISION_API_KEY = env('GOOGLE_CLOUD_VISION_API_KEY', default='')
 # With the real moderation provider, videos can't be looked at by software: 1 sends every video to the admin
 # review queue (it stays online meanwhile); 0 lets them through unchecked.
 MODERATION_FLAG_UNSCANNED_VIDEOS = env.bool('MODERATION_FLAG_UNSCANNED_VIDEOS', default=True)
+# The longest video the short-video feed accepts, in seconds (uploads.services.LENGTH_LIMITED_VIDEO_FOLDERS).
+FEED_VIDEO_MAX_SECONDS = env.int('FEED_VIDEO_MAX_SECONDS', default=180)
 # Lets uploads.services.is_platform_media_url recognise files stored on Cloudinary.
 CLOUDINARY_CLOUD_NAME = env('CLOUDINARY_CLOUD_NAME', default='')
 
@@ -369,6 +371,8 @@ REST_FRAMEWORK = {
         'post_create': '30/hour',
         'comment_create': '120/hour',
         'media_upload': '80/hour',
+        'job_create': '20/hour',
+        'job_apply': '30/hour',
         # Sending and guessing one-time codes.
         'otp': '30/hour',
         # Anonymous page-view pings from the website (visitor analytics).

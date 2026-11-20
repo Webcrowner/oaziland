@@ -12,6 +12,7 @@ import MediaUploader from "@/components/MediaUploader";
 import MediaThumbs from "@/components/MediaThumbs";
 import LocationCapture from "@/components/LocationCapture";
 import DirectChatButton from "@/components/DirectChatButton";
+import { MomoBadges } from "@/components/PaymentIcons";
 import { Link } from "@/i18n/navigation";
 import InterestCaptureModal from "@/components/InterestCaptureModal";
 import {
@@ -215,7 +216,10 @@ export default function HotelsPage() {
             <IconLock size={20} />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Mobile Money Escrow</h4>
+            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+              <span>Mobile Money Escrow</span>
+              <MomoBadges size={15} />
+            </h4>
             <p className="text-xs text-slate-500 mt-0.5">Pay via MTN MoMo or Orange Money safely</p>
           </div>
         </div>

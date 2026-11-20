@@ -250,6 +250,7 @@ FRENCH_ERRORS = {
     "A question needs at least two choices.": "Une question doit avoir au moins deux choix.",
     "Mark at least one choice as correct.": "Indiquez au moins une bonne réponse.",
     "Video files can be at most 500 MB.": "Les fichiers vidéo ne peuvent pas dépasser 500 Mo.",
+    "We couldn't read this video's length. Export it again as a standard MP4 (H.264) and retry.": "Impossible de lire la durée de cette vidéo. Exportez-la à nouveau en MP4 standard (H.264) puis réessayez.",
     "Upload a valid MP4, WebM, OGG or MOV video.": "Importez une vidéo MP4, WebM, OGG ou MOV valide.",
     "The pass mark must be between 1 and 100.": "La note de réussite doit être comprise entre 1 et 100.",
     "Cover images can be at most 10 MB.": "Les images de couverture ne peuvent pas dépasser 10 Mo.",
@@ -321,6 +322,8 @@ FRENCH_PATTERNS = [
     (re.compile(r"A certificate can have at most (\d+) elements\."), lambda m: f"Un certificat peut contenir au maximum {m[1]} éléments."),
     (re.compile(r"Unknown font '(.+)'\."), lambda m: f"Police inconnue : « {m[1]} »."),
     (re.compile(r"Unknown alignment '(.+)'\."), lambda m: f"Alignement inconnu : « {m[1]} »."),
+    (re.compile(r"This video is (.+) long — videos here can be at most (.+)\."),
+     lambda m: f"Cette vidéo dure {m[1]} — les vidéos ici ne peuvent pas dépasser {m[2]}."),
 ]
 
 

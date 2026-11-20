@@ -20,17 +20,22 @@ export default function ParentPortalPage() {
   const [status, setStatus] = useState<"loading" | "idle" | "error">("loading");
   const [error, setError] = useState("");
 
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (!token) {
       void Promise.resolve().then(() => setStatus("idle"));
       return;
     }
+    void Promise.resolve().then(() => setStatus("loading"));
     getMyGuardianAccesses(token)
-      .then((data) => setGrants(data))
-      .catch(() => {})
-      .finally(() => setStatus("idle"));
-  }, []);
+      .then((data) => {
+        setGrants(data);
+        setStatus("idle");
+      })
+      .catch(() => setStatus("error"));
+  }, [attempt]);
 
   const loadStudentData = useCallback((studentId: string) => {
     const token = localStorage.getItem("access_token");
@@ -57,6 +62,11 @@ export default function ParentPortalPage() {
 
       {status === "loading" ? (
         <p className="text-slate-400 text-sm">Loading...</p>
+      ) : status === "error" ? (
+        <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>Your linked students couldn&apos;t be loaded. This doesn&apos;t mean access was removed.</span>
+          <button type="button" onClick={() => setAttempt((n) => n + 1)} className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold cursor-pointer">Try again</button>
+        </div>
       ) : grants.length > 0 ? (
         <div className="flex flex-wrap gap-2 mb-6">
           {grants.map((grant) => (

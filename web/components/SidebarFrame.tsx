@@ -7,11 +7,10 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { getMyProfile, devSwitchRole, type UserProfile } from "@/lib/api";
 import { currentPath, loginHref } from "@/lib/authRedirect";
 import { disablePush } from "@/lib/push";
+import { NavCelebrationDarkIcon, NavChatIcon, NavHotelIcon } from "@/components/navIcons";
 import {
   IconSearch,
-  IconHotel,
   IconGraduationCap,
-  IconParty,
   IconHome,
   IconCompass,
   IconChevronRight,
@@ -117,9 +116,9 @@ export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
 
   const exploreLinks = [
     { href: "/search", label: t("exploreProperties"), icon: IconSearch },
-    { href: "/hotels", label: t("hotels"), icon: IconHotel },
+    { href: "/hotels", label: t("hotels"), icon: NavHotelIcon },
     { href: "/student-hostels", label: t("studentHostels"), icon: IconGraduationCap },
-    { href: "/events", label: t("events"), icon: IconParty },
+    { href: "/events", label: t("events"), icon: NavCelebrationDarkIcon },
     { href: "/guest-houses", label: t("guestHouses"), icon: IconHome },
     { href: "/wanted", label: t("wantedBoard"), icon: IconCompass },
   ];
@@ -134,9 +133,9 @@ export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
           <Image
             src="/logo.png"
             alt="Oaziland"
-            width={116}
-            height={116}
-            style={{ width: "auto", height: "60px" }}
+            width={152}
+            height={112}
+            style={{ width: "auto", height: "56px" }}
             priority
             className="object-contain drop-shadow"
           />
@@ -234,8 +233,9 @@ export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
           )}
         </div>
         <div className="grid grid-cols-3 gap-1.5">
-          <Link href="/messages" className={actionClass}>
-            Messages
+          <Link href="/messages" className={`${actionClass} gap-1.5`}>
+            <NavChatIcon size={15} />
+            <span>Messages</span>
           </Link>
           <Link href="/account" className={actionClass}>
             {t("myAccount")}
@@ -261,8 +261,8 @@ export default function SidebarFrame({ sidebar, children }: SidebarFrameProps) {
           <Image
             src="/logo.png"
             alt="Oaziland"
-            width={116}
-            height={116}
+            width={108}
+            height={80}
             style={{ width: "auto", height: "40px" }}
             priority
             className="object-contain"

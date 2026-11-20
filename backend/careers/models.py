@@ -11,6 +11,8 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 
 
 def private_storage():
@@ -34,6 +36,19 @@ class JobPostingStatus(models.TextChoices):
     CLOSED = "CLOSED", "Closed"
 
 
+class EmploymentType(models.TextChoices):
+    FULL_TIME = "FULL_TIME", "Full-time"
+    PART_TIME = "PART_TIME", "Part-time"
+    CONTRACT = "CONTRACT", "Contract"
+    INTERNSHIP = "INTERNSHIP", "Internship"
+
+
+class WorkplaceType(models.TextChoices):
+    ON_SITE = "ON_SITE", "On-site"
+    HYBRID = "HYBRID", "Hybrid"
+    REMOTE = "REMOTE", "Remote"
+
+
 class JobPosting(models.Model):
     """Postable by Owners/Agencies/Institutions — deliberately just a
     plain User FK (posted_by) rather than a new polymorphic role, since
@@ -42,8 +57,11 @@ class JobPosting(models.Model):
     User, etc.) without needing a fourth ownership concept."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     posted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="job_postings")
+    company_name = models.CharField(max_length=150, blank=True)
     title = models.CharField(max_length=200)
     role_category = models.CharField(max_length=20, choices=JobRoleCategory.choices)
+    employment_type = models.CharField(max_length=15, choices=EmploymentType.choices, default=EmploymentType.FULL_TIME)
+    workplace_type = models.CharField(max_length=12, choices=WorkplaceType.choices, default=WorkplaceType.ON_SITE)
     description = models.TextField()
     quarter = models.ForeignKey("geo.Quarter", on_delete=models.SET_NULL, null=True, blank=True)
     salary_min_xaf = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
@@ -70,12 +88,22 @@ class JobApplication(models.Model):
     job_posting = models.ForeignKey(JobPosting, on_delete=models.CASCADE, related_name="applications")
     applicant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="job_applications")
     cover_message = models.TextField(blank=True)
+    cv_file = models.FileField(upload_to="job_cvs/", blank=True, storage=private_storage)
+    cv_filename = models.CharField(max_length=255, blank=True)
+    years_experience = models.PositiveSmallIntegerField(null=True, blank=True, validators=[MaxValueValidator(60)])
     status = models.CharField(max_length=15, choices=JobApplicationStatus.choices, default=JobApplicationStatus.SUBMITTED)
     applied_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "job_applications"
         unique_together = [("job_posting", "applicant")]  # one application per person per posting
+
+
+@receiver(post_delete, sender=JobApplication)
+def _delete_application_cv_file(sender, instance: JobApplication, **kwargs):
+    """Ensures private CV PDFs are removed from disk even when deleted via SQL CASCADE (job or user deletion)."""
+    if instance.cv_file:
+        instance.cv_file.delete(save=False)
 
 
 class TrainingCategory(models.TextChoices):

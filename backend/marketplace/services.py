@@ -539,6 +539,82 @@ class DriverNotVerifiedError(Exception):
     pass
 
 
+# An accepted trip that still hasn't started this long after it was requested is dropped, and a trip that has been
+# in progress this long without its fare being paid is closed. Requests expire after STALE_RIDE_HOURS, so an accepted
+# trip has always been accepted at least (STALE_ACCEPTED_RIDE_HOURS - STALE_RIDE_HOURS) hours before it is dropped.
+STALE_ACCEPTED_RIDE_HOURS = 3
+STALE_IN_PROGRESS_RIDE_HOURS = 12
+# Marks the report that closing an unpaid trip files for the team. While one is open the rider can't book again.
+UNPAID_FARE_REPORT_PREFIX = "Automatic report: "
+
+
+def close_stuck_rides(*, now=None) -> dict:
+    """Closes trips that can never finish on their own, so nobody is left blocked by them. Meant to run on a schedule.
+
+    - Accepted but never started: cancelled, both sides told.
+    - In progress for too long with no fare paid: cancelled as abandoned, and an unpaid-fare report is filed for the
+      team in the driver's name. The rider can't book again until the team resolves it. A fare that still arrives
+      later goes straight back to the rider's wallet (see confirm_ride_after_payment)."""
+    from datetime import timedelta
+    from django.db import IntegrityError, transaction
+    from django.utils import timezone
+    from identity.models import User
+    from notifications.services import notify
+    from .models import RideBooking, RideCancelReason, RideIssueCategory, RideIssueReport, RideStatus
+
+    now = now or timezone.now()
+    never_started, abandoned = [], []
+
+    for ride in RideBooking.objects.filter(status=RideStatus.ACCEPTED, requested_at__lt=now - timedelta(hours=STALE_ACCEPTED_RIDE_HOURS)).select_related("rider", "driver"):
+        if RideBooking.objects.filter(pk=ride.pk, status=RideStatus.ACCEPTED).update(
+            status=RideStatus.CANCELLED, cancelled_at=now, cancellation_reason=RideCancelReason.TRIP_NEVER_STARTED,
+        ):
+            never_started.append(ride)
+            _notify_ride(ride.rider, "Your trip was cancelled", "The trip never started, so it was cancelled automatically. You can request again.", ride)
+            if ride.driver is not None:
+                _notify_ride(ride.driver, "The trip was cancelled", "The trip never started, so it was cancelled automatically and you are free to take other trips.", ride)
+
+    for ride in RideBooking.objects.filter(status=RideStatus.IN_PROGRESS, requested_at__lt=now - timedelta(hours=STALE_IN_PROGRESS_RIDE_HOURS)).select_related("rider", "driver"):
+        # A payment still waiting for the rider's approval is not abandoned.
+        if ride_payment_pending(ride):
+            continue
+        if not RideBooking.objects.filter(pk=ride.pk, status=RideStatus.IN_PROGRESS).update(
+            status=RideStatus.CANCELLED, cancelled_at=now, cancellation_reason=RideCancelReason.TRIP_ABANDONED,
+        ):
+            continue
+        abandoned.append(ride)
+        description = (
+            f"{UNPAID_FARE_REPORT_PREFIX}this trip was in progress for over {STALE_IN_PROGRESS_RIDE_HOURS} hours and its fare of "
+            f"{ride.fare_estimate_xaf:.0f} XAF was never paid, so it was closed."
+        )
+        if ride.driver is not None:
+            try:
+                with transaction.atomic():
+                    RideIssueReport.objects.create(ride=ride, reported_by=ride.driver, category=RideIssueCategory.FARE, description=description)
+            except IntegrityError:
+                pass
+            _notify_ride(ride.driver, "The trip was closed", "The trip was never completed or paid, so it was closed. The Oaziland team will follow up on the fare.", ride)
+        _notify_ride(ride.rider, "Your trip was closed", "Your trip was never completed or paid, so it was closed. The fare is still due: contact support to settle it before you book again.", ride)
+        for admin in User.objects.filter(admin_profile__isnull=False):
+            notify(recipient=admin, notification_type="RIDE_ISSUE", title="A ride fare was never paid", message=f"{ride.pickup_description} → {ride.dropoff_description}: {description}", related_reference=str(ride.id))
+
+    return {"never_started": never_started, "abandoned": abandoned}
+
+
+def rider_has_unpaid_fare(user) -> bool:
+    """True while the team still has an open report for a trip of this rider that was closed unpaid."""
+    from .models import RideIssueReport, RideIssueStatus
+    return RideIssueReport.objects.filter(
+        ride__rider=user, status=RideIssueStatus.OPEN, description__startswith=UNPAID_FARE_REPORT_PREFIX,
+    ).exists()
+
+
+def rider_active_ride(user):
+    """The rider's trip that is still going (being matched, on its way, or under way), if any."""
+    from .models import RideBooking, RideStatus
+    return RideBooking.objects.filter(rider=user, status__in=[RideStatus.REQUESTED, RideStatus.ACCEPTED, RideStatus.IN_PROGRESS]).first()
+
+
 class VehicleCategoryMismatchError(Exception):
     pass
 
@@ -882,6 +958,22 @@ def complete_ride_with_payment(*, ride, lock_client, payment_gateway, phone_numb
     ride.refresh_from_db()
     escrow.refresh_from_db()
     return booking, escrow
+
+
+def ride_payment_pending(ride) -> bool:
+    """True while the rider has started paying the fare and the provider has not confirmed it yet, so the app can keep
+    showing 'approve on your phone' after a page reload instead of offering to pay a second time."""
+    from django.db.models import Q
+    from django.utils import timezone
+    from transactions.models import Booking, BookingStatus, BookingType
+    from .models import RideStatus
+
+    if ride.status != RideStatus.IN_PROGRESS:
+        return False
+    return Booking.objects.filter(
+        booking_type=BookingType.RIDE, target_content_type="marketplace.RideBooking", target_id=ride.id,
+        status__in=[BookingStatus.PENDING, BookingStatus.PAYMENT_PROCESSING],
+    ).filter(Q(hold_expires_at__isnull=True) | Q(hold_expires_at__gt=timezone.now())).exists()
 
 
 def confirm_ride_after_payment(booking):

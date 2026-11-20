@@ -155,7 +155,7 @@ export default function VideoSlide({
           {video && nearby && !failed ? (
             <video
               ref={videoRef}
-              src={video.file_url}
+              src={`${video.file_url}#t=0.1`}
               poster={poster}
               loop
               muted={muted}

@@ -1,13 +1,13 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "@/i18n/navigation";
+import { MomoBadges, MtnIcon, OrangeIcon } from "@/components/PaymentIcons";
 import { getMyWallet, withdrawWallet, type WalletDetail } from "@/lib/api";
 import {
   IconCreditCard,
   IconCheckCircle,
   IconAlertCircle,
   IconClock,
-  IconShieldCheck,
   IconDownload,
   IconUpload,
   IconX,
@@ -175,8 +175,8 @@ export default function WalletPayoutCard({
               {showWithdrawForm ? <IconX size={16} /> : <IconUpload size={16} />}
               {showWithdrawForm ? "Hide payout form" : "Withdraw to Mobile Money"}
             </button>
-            <span className="text-[11px] text-slate-400 flex items-center gap-1">
-              <IconShieldCheck size={12} className="text-emerald-400" />
+            <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <MomoBadges size={15} />
               <span>MTN MoMo &amp; Orange Money</span>
             </span>
           </div>
@@ -225,8 +225,8 @@ export default function WalletPayoutCard({
               </span>
               <div className="grid grid-cols-2 gap-2">
                 {([
-                  { value: "MTN_MOMO", label: "MTN Mobile Money", dot: "bg-yellow-400" },
-                  { value: "ORANGE_MONEY", label: "Orange Money", dot: "bg-orange-500" },
+                  { value: "MTN_MOMO", label: "MTN Mobile Money" },
+                  { value: "ORANGE_MONEY", label: "Orange Money" },
                 ] as const).map((p) => (
                   <button
                     key={p.value}
@@ -238,7 +238,7 @@ export default function WalletPayoutCard({
                         : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                     }`}
                   >
-                    <span className={`h-3 w-3 rounded-full ${p.dot}`} />
+                    {p.value === "MTN_MOMO" ? <MtnIcon size={18} /> : <OrangeIcon size={18} />}
                     {p.label}
                   </button>
                 ))}

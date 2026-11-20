@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
+import { NavChatIcon } from "@/components/navIcons";
 import { getOrCreateConversation, sendConversationMessage, type MarketplaceCategory } from "@/lib/api";
 
 /** One-tap openers, like Jiji or Facebook Marketplace; each is a translation key per kind of listing. */
@@ -58,8 +59,9 @@ export default function ListingChatButton({
   if (compact) {
     return (
       <div>
-        <button type="button" disabled={sending} onClick={() => send(t("compactOpener"))} className="text-sm font-semibold text-[var(--navy)] underline disabled:opacity-50">
-          💬 {sending ? t("opening") : t("messageAboutThis")}
+        <button type="button" disabled={sending} onClick={() => send(t("compactOpener"))} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--navy)] underline disabled:opacity-50">
+          <NavChatIcon size={16} />
+          <span>{sending ? t("opening") : t("messageAboutThis")}</span>
         </button>
         {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       </div>
@@ -69,7 +71,8 @@ export default function ListingChatButton({
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className={buttonClass}>
-        💬 {category === "cars" ? (isSale ? t("chatSeller") : t("chatOwner")) : t("chatLister")}
+        <NavChatIcon size={18} />
+        <span>{category === "cars" ? (isSale ? t("chatSeller") : t("chatOwner")) : t("chatLister")}</span>
       </button>
     );
   }

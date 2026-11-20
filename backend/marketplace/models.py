@@ -726,6 +726,9 @@ class RideCancelReason(models.TextChoices):
     FOUND_OTHER_TRANSPORT = "FOUND_OTHER_TRANSPORT", "Found other transport"
     OTHER = "OTHER", "Other"
     NO_DRIVER_FOUND = "NO_DRIVER_FOUND", "No driver accepted in time"
+    # Set by the system when an accepted trip never gets going, or gets going and is never paid.
+    TRIP_NEVER_STARTED = "TRIP_NEVER_STARTED", "The trip never started"
+    TRIP_ABANDONED = "TRIP_ABANDONED", "The trip was never completed or paid"
 
 
 class RideReleaseReason(models.TextChoices):

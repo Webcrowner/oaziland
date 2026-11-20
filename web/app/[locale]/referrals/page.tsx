@@ -23,6 +23,9 @@ export default function ReferralsPage() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [origin, setOrigin] = useState("");
+  const [codeFailed, setCodeFailed] = useState(false);
+  const [listFailed, setListFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -30,18 +33,22 @@ export default function ReferralsPage() {
       setOrigin(window.location.origin);
       if (!token) {
         setLoggedIn(false);
+        return;
       }
+      setCodeFailed(false);
+      setListFailed(false);
+      setLoadingList(true);
     });
     if (!token) return;
     getMyReferralCode(token)
       .then((data) => setCode(data.referral_code))
-      .catch(() => {});
+      .catch(() => setCodeFailed(true));
 
     getMyReferrals(token)
       .then(setReferralsData)
-      .catch(() => {})
+      .catch(() => setListFailed(true))
       .finally(() => setLoadingList(false));
-  }, []);
+  }, [attempt]);
 
   const referralLink = code && origin ? `${origin}/${locale}/register?ref=${code}` : "";
 
@@ -64,7 +71,7 @@ export default function ReferralsPage() {
       <AccountSidebarLayout activeHref="/referrals">
         <div className="bg-white border border-slate-200/90 rounded-3xl p-8 text-center max-w-md mx-auto">
           <p className="text-gray-600 mb-4">{t("signInToSeeCode")}</p>
-          <Button href="/login">{t("signInToSeeCode")}</Button>
+          <Button href="/login">{t("signIn")}</Button>
         </div>
       </AccountSidebarLayout>
     );
@@ -151,6 +158,11 @@ export default function ReferralsPage() {
 
               {loadingList ? (
                 <p className="text-xs text-slate-400 py-6 text-center">Loading referral activity...</p>
+              ) : listFailed ? (
+                <div role="alert" className="p-6 text-center text-xs text-red-700 bg-red-50 rounded-xl border border-red-100">
+                  <p className="font-semibold">{t("listLoadFailed")}</p>
+                  <button type="button" onClick={() => setAttempt((n) => n + 1)} className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-1.5 font-bold cursor-pointer">{t("retry")}</button>
+                </div>
               ) : !referralsData || referralsData.results.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 text-xs bg-slate-50 rounded-xl border border-dashed border-slate-200">
                   <span className="text-2xl block mb-2">🎁</span>
@@ -205,6 +217,11 @@ export default function ReferralsPage() {
               )}
             </div>
           </>
+        ) : codeFailed ? (
+          <div role="alert" className="max-w-md mx-auto rounded-2xl border border-red-100 bg-red-50 p-6 text-center text-sm text-red-700">
+            <p className="font-semibold">{t("codeLoadFailed")}</p>
+            <button type="button" onClick={() => setAttempt((n) => n + 1)} className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold cursor-pointer">{t("retry")}</button>
+          </div>
         ) : (
           <p className="text-gray-400 text-center">...</p>
         )}

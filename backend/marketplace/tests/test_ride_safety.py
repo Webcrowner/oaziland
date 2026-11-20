@@ -8,13 +8,20 @@ from django.core.management import call_command
 from django.utils import timezone
 
 from identity.models import User, AdminProfile
-from marketplace.models import RideBooking, RideStatus
-from marketplace.services import expire_stale_rides
+from marketplace.models import RideBooking, RideIssueReport, RideStatus
+from marketplace.services import close_stuck_rides, expire_stale_rides
 from notifications.models import Notification
 from marketplace.tests.test_marketplace_api import _verify, _auth_client, RIDE_POINTS
 
 
 _admin_counter = iter(range(100000, 999999))
+_rider_counter = iter(range(1000, 9999))
+
+
+def _new_rider():
+    """A verified rider of their own, for tests that need several trips open at once (a rider can only have one)."""
+    n = next(_rider_counter)
+    return _verify(User.objects.create(username=f"rs_extra_rider{n}", phone=f"+23769940{n}"))
 
 
 def _verified_driver(name, phone, category="STANDARD"):
@@ -63,7 +70,7 @@ def test_a_ride_keeps_the_distance_its_fare_was_charged_on(road):
     road.km = Decimal("17.4")
     far = _request_ride(rider)
     road.km = Decimal("5")
-    assert Decimal(_request_ride(rider)["distance_km"]) == Decimal("5.00")
+    assert Decimal(_request_ride(_new_rider())["distance_km"]) == Decimal("5.00")
     assert _auth_client(rider).get(f"/api/rides/{far['id']}/").data["distance_km"] == far["distance_km"] == "17.40"
 
     # A ride created before distance_km existed still reports the distance implied by its fare.
@@ -157,9 +164,103 @@ def test_release_reason_reaches_the_rider_but_not_other_drivers():
 
 
 @pytest.mark.django_db
+def test_a_rider_can_only_have_one_trip_going_at_a_time():
+    rider = _verify(User.objects.create(username="rs_one_rider", phone="+237699300301"))
+    first = _request_ride(rider)
+
+    blocked = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
+    assert blocked.status_code == 409 and blocked.data["code"] == "ACTIVE_RIDE_EXISTS"
+    assert RideBooking.objects.filter(rider=rider).count() == 1
+
+    assert _auth_client(rider).post(f"/api/rides/{first['id']}/cancel/").status_code == 200
+    _request_ride(rider)
+
+
+@pytest.mark.django_db
+def test_accepted_trips_that_never_start_are_cancelled_and_both_sides_told():
+    rider = _verify(User.objects.create(username="rs_stuck_rider", phone="+237699300311"))
+    driver, _client, _vehicle = _verified_driver("rs_stuck_driver", "+237699300312")
+    old = RideBooking.objects.create(
+        rider=rider, driver=driver, pickup_description="A", dropoff_description="B", fare_estimate_xaf=Decimal("2000"), status=RideStatus.ACCEPTED,
+    )
+    recent = RideBooking.objects.create(
+        rider=User.objects.create(username="rs_stuck_rider2", phone="+237699300313"), driver=driver,
+        pickup_description="A", dropoff_description="B", fare_estimate_xaf=Decimal("2000"), status=RideStatus.ACCEPTED,
+    )
+    RideBooking.objects.filter(pk=old.pk).update(requested_at=timezone.now() - timedelta(hours=4))
+
+    result = close_stuck_rides()
+
+    assert [r.pk for r in result["never_started"]] == [old.pk] and result["abandoned"] == []
+    old.refresh_from_db()
+    assert old.status == RideStatus.CANCELLED and old.cancellation_reason == "TRIP_NEVER_STARTED"
+    assert RideBooking.objects.get(pk=recent.pk).status == RideStatus.ACCEPTED
+    assert Notification.objects.filter(recipient=rider, related_reference=str(old.id)).exists()
+    assert Notification.objects.filter(recipient=driver, related_reference=str(old.id)).exists()
+
+
+@pytest.mark.django_db
+def test_an_unpaid_trip_is_closed_reported_and_blocks_the_rider_until_the_team_resolves_it():
+    rider = _verify(User.objects.create(username="rs_unpaid_rider", phone="+237699300321"))
+    driver, _client, _vehicle = _verified_driver("rs_unpaid_driver", "+237699300322")
+    admin = User.objects.get(username="rs_unpaid_driver_admin")
+    ride = RideBooking.objects.create(
+        rider=rider, driver=driver, pickup_description="A", dropoff_description="B", fare_estimate_xaf=Decimal("2000"), status=RideStatus.IN_PROGRESS,
+    )
+    RideBooking.objects.filter(pk=ride.pk).update(requested_at=timezone.now() - timedelta(hours=13))
+
+    result = close_stuck_rides()
+
+    assert [r.pk for r in result["abandoned"]] == [ride.pk]
+    ride.refresh_from_db()
+    assert ride.status == RideStatus.CANCELLED and ride.cancellation_reason == "TRIP_ABANDONED"
+    report = RideIssueReport.objects.get(ride=ride)
+    assert report.reported_by == driver and report.category == "FARE" and report.status == "OPEN"
+    assert Notification.objects.filter(recipient=admin, related_reference=str(ride.id)).exists()
+    assert close_stuck_rides()["abandoned"] == []  # running again changes nothing
+
+    blocked = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS})
+    assert blocked.status_code == 403 and blocked.data["code"] == "UNPAID_FARE"
+
+    RideIssueReport.objects.filter(pk=report.pk).update(status="RESOLVED")
+    _request_ride(rider)
+
+
+@pytest.mark.django_db
+def test_a_trip_with_a_payment_waiting_for_approval_is_not_closed_as_unpaid():
+    from transactions.models import Booking, BookingStatus, BookingType
+    rider = _verify(User.objects.create(username="rs_wait_rider", phone="+237699300331"))
+    driver = User.objects.create(username="rs_wait_driver", phone="+237699300332")
+    ride = RideBooking.objects.create(
+        rider=rider, driver=driver, pickup_description="A", dropoff_description="B", fare_estimate_xaf=Decimal("2000"), status=RideStatus.IN_PROGRESS,
+    )
+    RideBooking.objects.filter(pk=ride.pk).update(requested_at=timezone.now() - timedelta(hours=13))
+    Booking.objects.create(
+        booking_type=BookingType.RIDE, target_content_type="marketplace.RideBooking", target_id=ride.id, requester=rider,
+        status=BookingStatus.PAYMENT_PROCESSING, amount_xaf=ride.fare_estimate_xaf, idempotency_key="rs-wait-1",
+        hold_expires_at=timezone.now() + timedelta(minutes=5),
+    )
+
+    assert close_stuck_rides()["abandoned"] == []
+    assert RideBooking.objects.get(pk=ride.pk).status == RideStatus.IN_PROGRESS
+
+
+@pytest.mark.django_db
+def test_a_rider_cannot_pick_a_system_only_cancellation_reason():
+    rider = _verify(User.objects.create(username="rs_reason_rider", phone="+237699300341"))
+    ride = _request_ride(rider)
+
+    response = _auth_client(rider).post(f"/api/rides/{ride['id']}/cancel/", {"reason": "TRIP_ABANDONED"})
+
+    assert response.status_code == 400
+    assert RideBooking.objects.get(pk=ride["id"]).status == RideStatus.REQUESTED
+
+
+@pytest.mark.django_db
 def test_stale_ride_requests_expire():
     rider = _verify(User.objects.create(username="rs_rider5", phone="+237699300041"))
-    old, fresh = _request_ride(rider), _request_ride(rider)
+    other = _verify(User.objects.create(username="rs_rider5b", phone="+237699300042"))
+    old, fresh = _request_ride(rider), _request_ride(other)
     RideBooking.objects.filter(pk=old["id"]).update(requested_at=timezone.now() - timedelta(hours=3))
 
     assert [r.pk for r in expire_stale_rides()] == [RideBooking.objects.get(pk=old["id"]).pk]
@@ -343,7 +444,7 @@ def test_a_user_manages_their_own_emergency_contact(monkeypatch):
 def test_admins_see_sos_rides_with_where_who_and_who_to_call_and_can_mark_them_handled():
     rider = _verify(User.objects.create(username="rs_rider15", phone="+237699300151", first_name="Marie", last_name="Ngono"))
     driver, driver_client, vehicle_id = _verified_driver("rs_driver15", "+237699300153")
-    quiet = _request_ride(rider)
+    quiet = _request_ride(_new_rider())
     ride = _request_ride(rider)
     driver_client.post(f"/api/rides/{ride['id']}/accept/", {"vehicle_id": vehicle_id})
     rider_client = _auth_client(rider)

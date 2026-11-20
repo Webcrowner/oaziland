@@ -92,6 +92,7 @@ export default function SecurityPage() {
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [error, setError] = useState("");
   const [mfaEnabled, setMfaEnabled] = useState<boolean | null>(null);
+  const [mfaStatusFailed, setMfaStatusFailed] = useState(false);
   // null until the browser has been checked, so the form never flashes up for signed-out visitors.
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
@@ -99,7 +100,7 @@ export default function SecurityPage() {
     const token = localStorage.getItem("access_token");
     void Promise.resolve().then(() => setSignedIn(Boolean(token)));
     if (!token) return;
-    getMfaStatus(token).then((r) => setMfaEnabled(r.mfa_enabled)).catch(() => {});
+    getMfaStatus(token).then((r) => setMfaEnabled(r.mfa_enabled)).catch(() => setMfaStatusFailed(true));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -216,14 +217,17 @@ export default function SecurityPage() {
                   <h2 className="text-sm font-black text-slate-900">{t("mfaTitle")}</h2>
                   {mfaEnabled !== null && (
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${mfaEnabled ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
-                      {mfaEnabled ? "On" : "Off"}
+                      {mfaEnabled ? t("mfaOn") : t("mfaOff")}
                     </span>
                   )}
                 </div>
-                <p className="mt-1 text-sm text-slate-500">{mfaEnabled ? t("mfaEnabledDesc") : t("mfaDisabledDesc")}</p>
+                {/* Unknown (still loading or failed) must not read as "off": that would invite setting it up twice. */}
+                <p className="mt-1 text-sm text-slate-500">
+                  {mfaStatusFailed ? t("mfaStatusFailed") : mfaEnabled === null ? "…" : mfaEnabled ? t("mfaEnabledDesc") : t("mfaDisabledDesc")}
+                </p>
               </div>
             </div>
-            {!mfaEnabled && (
+            {mfaEnabled === false && (
               <Link
                 href="/mfa-setup"
                 className="mt-5 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800 transition-colors"

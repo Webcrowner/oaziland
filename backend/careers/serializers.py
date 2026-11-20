@@ -133,11 +133,38 @@ class TrainingEnrollmentSerializer(serializers.ModelSerializer):
 
 class JobApplicationSerializer(serializers.ModelSerializer):
     applicant_name = serializers.CharField(source="applicant.full_name", read_only=True)
+    applicant_phone = serializers.CharField(source="applicant.phone", read_only=True)
+    job_title = serializers.CharField(source="job_posting.title", read_only=True)
+    company_name = serializers.CharField(source="job_posting.company_name", read_only=True)
+    has_cv = serializers.SerializerMethodField()
+    certificates = serializers.SerializerMethodField()
+
+    def get_has_cv(self, obj) -> bool:
+        return bool(obj.cv_file)
+
+    def get_certificates(self, obj) -> list[dict]:
+        """Verified Oaziland course certificates earned by this applicant (preloaded in context when listing)."""
+        preloaded = self.context.get("certificates_by_user")
+        if preloaded is not None:
+            return preloaded.get(obj.applicant_id, [])
+        from .models import TrainingEnrollment
+        rows = (
+            TrainingEnrollment.objects.select_related("program")
+            .filter(student_id=obj.applicant_id, certificate_issued_at__isnull=False)
+            .exclude(certificate_code="")
+            .order_by("-certificate_issued_at")[:5]
+        )
+        return [{"code": r.certificate_code, "title": r.program.title} for r in rows]
 
     class Meta:
         model = JobApplication
-        fields = ["id", "job_posting", "applicant", "applicant_name", "cover_message", "status", "applied_at"]
-        read_only_fields = ["applicant", "status", "applied_at"]
+        fields = [
+            "id", "job_posting", "job_title", "company_name",
+            "applicant", "applicant_name", "applicant_phone",
+            "cover_message", "years_experience", "has_cv", "cv_filename",
+            "certificates", "status", "applied_at",
+        ]
+        read_only_fields = ["applicant", "status", "applied_at", "cv_filename"]
 
 
 class UpdateApplicationStatusSerializer(serializers.Serializer):
@@ -151,17 +178,47 @@ class ShareJobPostingSerializer(serializers.Serializer):
 
 class JobPostingSerializer(serializers.ModelSerializer):
     quarter_name = serializers.CharField(source="quarter.name", read_only=True, default=None)
+    city_name = serializers.CharField(source="quarter.village_or_district.name", read_only=True, default=None)
     posted_by_name = serializers.CharField(source="posted_by.full_name", read_only=True)
     application_count = serializers.SerializerMethodField()
+    is_open = serializers.SerializerMethodField()
+    my_application_status = serializers.SerializerMethodField()
 
     def get_application_count(self, posting) -> int:
-        return posting.applications.count()
+        annotated = getattr(posting, "applications_total", None)
+        return annotated if annotated is not None else posting.applications.count()
+
+    def get_is_open(self, posting) -> bool:
+        from .services import job_is_open
+        return job_is_open(posting)
+
+    def get_my_application_status(self, posting):
+        """The viewer's own application to this job, if any. The view looks them all up once, so a list costs one query."""
+        return self.context.get("my_applications", {}).get(posting.id)
+
+    def validate(self, attrs):
+        from django.utils import timezone
+        low = attrs.get("salary_min_xaf", getattr(self.instance, "salary_min_xaf", None))
+        high = attrs.get("salary_max_xaf", getattr(self.instance, "salary_max_xaf", None))
+        if low is not None and high is not None and low > high:
+            raise serializers.ValidationError({"salary_max_xaf": "The maximum salary can't be lower than the minimum."})
+        closes_at = attrs.get("closes_at")
+        if closes_at is not None and closes_at <= timezone.now():
+            raise serializers.ValidationError({"closes_at": "The closing date must be in the future."})
+        return attrs
 
     class Meta:
         model = JobPosting
         fields = [
-            "id", "posted_by", "posted_by_name", "title", "role_category", "description",
-            "quarter", "quarter_name", "salary_min_xaf", "salary_max_xaf", "status",
-            "posted_at", "closes_at", "application_count",
+            "id", "posted_by", "posted_by_name", "company_name", "title",
+            "role_category", "employment_type", "workplace_type", "description",
+            "quarter", "quarter_name", "city_name", "salary_min_xaf", "salary_max_xaf",
+            "status", "is_open", "posted_at", "closes_at", "application_count", "my_application_status",
         ]
         read_only_fields = ["posted_by", "status", "posted_at"]
+
+
+class JobApplySerializer(serializers.Serializer):
+    cover_message = serializers.CharField(required=False, allow_blank=True, max_length=2000, default="")
+    years_experience = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=60, default=None)
+    cv_file = serializers.FileField(required=False, allow_null=True, default=None)

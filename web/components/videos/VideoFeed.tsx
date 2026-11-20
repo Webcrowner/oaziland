@@ -8,6 +8,7 @@ import {
   type ReelKind, type ReelPage, type ReelPost, type ReelScope,
 } from "@/lib/api";
 import { IconChevronRight, IconSearch, IconX } from "@/components/Icons";
+import { loginHref } from "@/lib/authRedirect";
 import { PlusIcon } from "@/components/videos/VideoIcons";
 import VideoSlide from "@/components/videos/VideoSlide";
 import CommentsSheet from "@/components/videos/CommentsSheet";
@@ -163,9 +164,11 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
 
   const requireLogin = useCallback(() => {
     if (localStorage.getItem("access_token")) return false;
-    router.push("/login");
+    // After signing in, come back to the clip the person was on.
+    const clip = postsRef.current[activeIndex];
+    router.push(loginHref(clip ? `/videos/${clip.id}` : "/videos"));
     return true;
-  }, [router]);
+  }, [router, activeIndex]);
 
   const handleLike = useCallback(async (post: ReelPost) => {
     if (requireLogin()) return;
@@ -293,7 +296,7 @@ export default function VideoFeed({ initialPostId }: { initialPostId?: string })
   const message = needsLogin ? (
     <p className="text-center text-sm text-slate-300">
       {scope === "saved" ? t("signInSaved") : t("signInFollowing")}{" "}
-      <Link href="/login" className="font-bold text-amber-300 underline">{t("signIn")}</Link>
+      <Link href={loginHref(`/videos?scope=${scope}`)} className="font-bold text-amber-300 underline">{t("signIn")}</Link>
     </p>
   ) : phase === "loading" ? (
     <div role="status" className="flex flex-col items-center gap-3 text-sm text-slate-300">

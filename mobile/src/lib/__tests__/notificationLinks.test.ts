@@ -23,8 +23,9 @@ describe("notificationRoute", () => {
     expect(notificationRoute({ kind: "marketplace_listing", id: "l1", category: "boats" })).toBeNull();
   });
 
-  it("opens property listings and rides", () => {
+  it("opens property listings, jobs and rides", () => {
     expect(notificationRoute({ kind: "listing", id: 7 })).toEqual({ name: "ListingDetail", params: { listingId: "7" } });
+    expect(notificationRoute({ kind: "job", id: "j1" })).toEqual({ name: "Careers", params: { jobId: "j1" } });
     expect(notificationRoute({ kind: "ride", id: "r1" })).toEqual({ name: "OaziGo", params: undefined });
   });
 

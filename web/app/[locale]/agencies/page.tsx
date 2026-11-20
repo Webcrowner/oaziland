@@ -3,6 +3,7 @@ import { Link } from "@/i18n/navigation";
 import { listAgencies } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import EmptyState from "@/components/ui/EmptyState";
+import LoadErrorNotice from "@/components/ui/LoadErrorNotice";
 import type { Metadata } from "next";
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -22,13 +23,17 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
  */
 export default async function AgenciesDirectoryPage() {
   const t = await getTranslations("AgenciesDirectoryPage");
-  const data = await listAgencies().catch(() => ({ count: 0, results: [] as never[] }));
+  const fetched = await listAgencies().catch(() => null);
+  const loadFailed = fetched === null;
+  const data = fetched ?? { count: 0, results: [] };
 
   return (
     <main className="max-w-5xl mx-auto px-4 py-8">
       <PageHeader title={t("title")} subtitle={t("subtitle")} />
 
-      {data.results.length === 0 ? (
+      {loadFailed ? (
+        <LoadErrorNotice message={t("loadFailed")} />
+      ) : data.results.length === 0 ? (
         <EmptyState icon="🏢" title={t("noAgenciesYet")} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import { MtnIcon, OrangeIcon } from "@/components/PaymentIcons";
 import { IconShieldCheck, IconLock, IconPhoneCall } from "./Icons";
 
 /**
@@ -54,16 +55,26 @@ export default function Footer() {
             <Image
               src="/logo.png"
               alt="Oaziland"
-              width={72}
-              height={72}
+              width={174}
+              height={128}
               style={{ width: "auto", height: "64px" }}
               className="object-contain drop-shadow"
             />
           </Link>
           <p className="text-xs leading-relaxed text-slate-400 mb-4">{t("tagline")}</p>
           <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400">
-            <p className="font-medium text-slate-300 mb-1">{t("supportedPayments")}</p>
-            <p className="text-amber-400 font-semibold">MTN MoMo • Orange Money • Visa</p>
+            <p className="font-medium text-slate-300 mb-1.5">{t("supportedPayments")}</p>
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-amber-400 font-semibold">
+              <span className="inline-flex items-center gap-1">
+                <MtnIcon size={16} />
+                <span>MTN MoMo</span>
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <OrangeIcon size={16} />
+                <span>Orange Money</span>
+              </span>
+              <span>• Visa</span>
+            </div>
           </div>
         </div>
 

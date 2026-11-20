@@ -2797,29 +2797,118 @@ export async function getAgencyPublicProfile(agencyId: string): Promise<AgencyDi
 // ---------------------------------------------------------------------------
 export interface JobPosting {
   id: string;
+  posted_by?: string;
   posted_by_name: string;
+  company_name?: string;
   title: string;
   role_category: string;
+  employment_type?: string;
+  workplace_type?: string;
   description: string;
   quarter_name: string | null;
+  city_name?: string | null;
   salary_min_xaf: string | null;
   salary_max_xaf: string | null;
+  application_count?: number;
+  is_open?: boolean;
+  my_application_status?: string | null;
 }
 
-export async function listJobPostings(): Promise<PaginatedResponse<JobPosting>> {
-  const res = await fetch(`${API_BASE_URL}/api/jobs/`);
+export interface MobileJobApplication {
+  id: string;
+  job_posting: string;
+  job_title: string;
+  company_name?: string;
+  applicant: string;
+  applicant_name: string;
+  applicant_phone?: string;
+  cover_message: string;
+  years_experience?: number | null;
+  status: string;
+  applied_at: string;
+}
+
+export const JOB_ROLE_CATEGORIES = [
+  "PROPERTY_MANAGER",
+  "AGENT",
+  "HOSTEL_WARDEN",
+  "MAINTENANCE_STAFF",
+  "DRIVER",
+  "OTHER",
+] as const;
+
+export async function listJobPostings(filters?: { q?: string; roleCategory?: string }): Promise<PaginatedResponse<JobPosting>> {
+  const params = new URLSearchParams();
+  if (filters?.q) params.set("q", filters.q);
+  if (filters?.roleCategory) params.set("role_category", filters.roleCategory);
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${params.toString() ? `?${params.toString()}` : ""}`, { headers });
   if (!res.ok) throw new Error(`Job postings fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function applyToJob(jobId: string, coverMessage: string) {
+export async function applyToJob(jobId: string, coverMessage: string, yearsExperience?: number | null) {
+  const body: Record<string, unknown> = { cover_message: coverMessage };
+  if (yearsExperience !== null && yearsExperience !== undefined) body.years_experience = yearsExperience;
   const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/apply/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-    body: JSON.stringify({ cover_message: coverMessage }),
+    body: JSON.stringify(body),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "Could not submit application");
+  return data;
+}
+
+export async function listMyJobApplicationsMobile(): Promise<MobileJobApplication[]> {
+  const res = await fetch(`${API_BASE_URL}/api/my-job-applications/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load applications");
+  const data = await res.json();
+  return data.results ?? data;
+}
+
+export async function withdrawMyJobApplicationMobile(applicationId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/my-job-applications/${applicationId}/withdraw/`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "Could not withdraw application");
+  }
+}
+
+export async function listMyJobPostingsMobile(): Promise<JobPosting[]> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/?mine=1`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load your job postings");
+  const data = await res.json();
+  return data.results ?? data;
+}
+
+export async function listJobApplicantsMobile(jobId: string): Promise<MobileJobApplication[]> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/applications/`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error("Could not load applicants");
+  return res.json();
+}
+
+export async function updateJobApplicantStatusMobile(jobId: string, applicationId: string, newStatus: string): Promise<MobileJobApplication> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/update-application/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ application_id: applicationId, new_status: newStatus }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Could not update status");
+  return data;
+}
+
+export async function toggleJobOpenStateMobile(jobId: string, reopen: boolean): Promise<JobPosting> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/${reopen ? "reopen" : "close"}/`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Action failed");
   return data;
 }
 

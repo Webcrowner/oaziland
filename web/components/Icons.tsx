@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement> & {
@@ -397,11 +398,17 @@ export function IconHeart({ size = 18, className = "", ...props }: IconProps) {
   );
 }
 
-export function IconMessageCircle({ size = 18, className = "", ...props }: IconProps) {
+export function IconMessageCircle({ size = 18, className = "" }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
-      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
-    </svg>
+    <Image
+      src="/icons/nav/chat.png"
+      alt=""
+      aria-hidden="true"
+      width={size * 2}
+      height={size * 2}
+      style={{ width: size, height: size }}
+      className={`shrink-0 object-contain ${className}`.trim()}
+    />
   );
 }
 

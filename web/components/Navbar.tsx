@@ -4,9 +4,13 @@ import { useTranslations } from "next-intl";
 import { Link, useRouter, usePathname } from "@/i18n/navigation";
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import LanguageSwitcher from "./LanguageSwitcher";
+import { useMarketplaceCartCount } from "./CartLink";
 import {
-  IconBed, IconBriefcase, IconBuilding, IconCar, IconChevronRight, IconCompass, IconFileText, IconGraduationCap,
-  IconHome, IconHotel, IconMessageCircle, IconParty, IconSearch, IconShoppingBag, IconSparkles, IconUsers, IconWrench,
+  NavCarIcon, NavCartIcon, NavCelebrationDarkIcon, NavChatIcon, NavGpsIcon, NavHotelIcon, NavMarketIcon, NavUserIcon,
+} from "./navIcons";
+import {
+  IconBed, IconBriefcase, IconBuilding, IconChevronRight, IconCompass, IconFileText, IconGraduationCap,
+  IconHome, IconSparkles, IconUsers, IconWrench,
 } from "./Icons";
 import { getMyProfile, listQuarters, type Quarter, type UserProfile } from "@/lib/api";
 import { disablePush } from "@/lib/push";
@@ -118,7 +122,7 @@ export function HeaderSearch({ placeholder, label, className = "" }: { placehold
 
   return (
     <form onSubmit={submit} role="search" className={`relative ${className}`}>
-      <IconSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+      <NavGpsIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
       <input
         list="header-quarters"
         value={value}
@@ -137,16 +141,37 @@ export function HeaderSearch({ placeholder, label, className = "" }: { placehold
   );
 }
 
-function AvatarMenu({ profile, items, onLogOut, logOutLabel }: {
+function NavbarCartButton({ count }: { count: number }) {
+  const tCart = useTranslations("MarketplaceCart");
+  const label = count > 0 ? tCart("cartWithCount", { count }) : tCart("myCart");
+
+  return (
+    <Link
+      href="/marketplace/cart"
+      aria-label={label}
+      title={label}
+      className="relative w-10 h-10 rounded-full flex items-center justify-center text-slate-200 hover:text-white hover:bg-white/10 transition-colors"
+    >
+      <NavCartIcon size={24} />
+      {count > 0 && (
+        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-black leading-none text-slate-950">
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function AvatarMenu({ profile, items, onLogOut, logOutLabel, accountLabel }: {
   profile: UserProfile | null;
   items: { href: string; label: string }[];
   onLogOut: () => void;
   logOutLabel: string;
+  accountLabel: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, () => setOpen(false));
   const name = profile?.full_name || profile?.username || "";
-  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("") || "?";
 
   return (
     <div ref={ref} className="relative">
@@ -154,10 +179,12 @@ function AvatarMenu({ profile, items, onLogOut, logOutLabel }: {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={name || accountLabel}
+        title={name || accountLabel}
         onClick={() => setOpen((o) => !o)}
-        className="w-10 h-10 rounded-full bg-amber-400 text-slate-950 font-extrabold text-sm flex items-center justify-center ring-2 ring-white/20 hover:ring-amber-300 transition-shadow"
+        className="w-10 h-10 rounded-full flex items-center justify-center ring-2 ring-white/20 hover:ring-amber-300 transition-shadow overflow-hidden"
       >
-        {initials}
+        <NavUserIcon size={36} />
       </button>
       {open && (
         <div className="absolute right-0 top-full pt-2 z-50">
@@ -225,15 +252,15 @@ export function useSiteMenus() {
     { href: "/wanted", label: t("wantedBoard"), icon: IconCompass },
   ];
   const staysMenu: NavMenuItem[] = [
-    { href: "/hotels", label: t("hotels"), icon: IconHotel },
+    { href: "/hotels", label: t("hotels"), icon: NavHotelIcon },
     { href: "/guest-houses", label: t("guestHouses"), icon: IconBed },
     { href: "/student-hostels", label: t("studentHostels"), icon: IconGraduationCap },
-    { href: "/events", label: t("events"), icon: IconParty },
+    { href: "/events", label: t("events"), icon: NavCelebrationDarkIcon },
   ];
   const servicesMenu: NavMenuItem[] = [
     { href: "/taskln-service", label: t("homeServices"), icon: IconWrench },
-    { href: "/oazigo", label: t("rides"), icon: IconCar },
-    { href: "/marketplace", label: t("marketplace"), icon: IconShoppingBag },
+    { href: "/oazigo", label: t("rides"), icon: NavCarIcon },
+    { href: "/marketplace", label: t("marketplace"), icon: NavMarketIcon },
     { href: "/marketplace/deals", label: td("navLabel"), icon: IconSparkles },
     { href: "/trainings", label: t("trainings"), icon: IconGraduationCap },
     { href: "/careers", label: t("careers"), icon: IconBriefcase },
@@ -253,6 +280,7 @@ export default function Navbar(): ReactNode {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const cartCount = useMarketplaceCartCount(pathname);
 
   // Re-checked on every route change so a login/logout on another page is picked up.
   useEffect(() => {
@@ -303,9 +331,9 @@ export default function Navbar(): ReactNode {
             <Image
               src="/logo.png"
               alt="Oaziland"
-              width={116}
-              height={116}
-              style={{ width: "auto", height: "56px" }}
+              width={146}
+              height={108}
+              style={{ width: "auto", height: "54px" }}
               priority
               className="transition-transform duration-200 group-hover:scale-105 object-contain drop-shadow"
             />
@@ -330,6 +358,7 @@ export default function Navbar(): ReactNode {
 
           <div className="hidden md:flex items-center gap-3 shrink-0">
             <LanguageSwitcher />
+            <NavbarCartButton count={cartCount} />
             {isLoggedIn ? (
               <>
                 <Link
@@ -338,13 +367,14 @@ export default function Navbar(): ReactNode {
                   title={t("messages")}
                   className="w-10 h-10 rounded-full flex items-center justify-center text-slate-200 hover:text-white hover:bg-white/10 transition-colors"
                 >
-                  <IconMessageCircle size={22} />
+                  <NavChatIcon size={26} />
                 </Link>
-                <AvatarMenu profile={profile} items={accountItems} onLogOut={handleLogOut} logOutLabel={t("logOut")} />
+                <AvatarMenu profile={profile} items={accountItems} onLogOut={handleLogOut} logOutLabel={t("logOut")} accountLabel={t("myAccount")} />
               </>
             ) : (
-              <Link href="/login" className="whitespace-nowrap text-sm font-semibold text-slate-200 hover:text-white px-3 py-2 rounded-lg hover:bg-white/10 transition-colors">
-                {t("signIn")}
+              <Link href="/login" className="whitespace-nowrap flex items-center gap-2 text-sm font-semibold text-slate-200 hover:text-white px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
+                <NavUserIcon size={24} />
+                <span>{t("signIn")}</span>
               </Link>
             )}
             <Link
@@ -357,6 +387,7 @@ export default function Navbar(): ReactNode {
           </div>
 
           <div className="flex md:hidden items-center gap-2">
+            <NavbarCartButton count={cartCount} />
             <LanguageSwitcher />
             <button
               className="text-slate-200 hover:text-white p-2 rounded-lg bg-white/5 border border-white/10"

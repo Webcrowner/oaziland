@@ -6,7 +6,7 @@ from django.utils import timezone
 from identity.models import User
 from marketplace.models import DriverProfile
 from marketplace.tests.test_marketplace_api import _verify, _auth_client
-from marketplace.tests.test_ride_safety import _verified_driver, _request_ride
+from marketplace.tests.test_ride_safety import _verified_driver, _request_ride, _new_rider
 
 # Bastos and Mvan are a few km apart; Douala is hundreds of km away.
 BASTOS = ("3.8800000", "11.5210000")
@@ -51,10 +51,10 @@ def test_open_requests_are_nearby_nearest_first_and_match_the_vehicle():
     rider = _verify(User.objects.create(username="dt_rider2", phone="+237699400003"))
     driver, client, _ = _verified_driver("dt_driver2", "+237699400004", category="STANDARD")
     near = _ride_at(rider, BASTOS)
-    nearer = _ride_at(rider, ("3.8700000", "11.5210000"))
-    _ride_at(rider, DOUALA)
-    _ride_at(rider, BASTOS, ride_category="MOTO")
-    _ride_at(rider, BASTOS, transport_type="CARGO", cargo_description="cement", ride_category="TRUCK")
+    nearer = _ride_at(_new_rider(), ("3.8700000", "11.5210000"))
+    _ride_at(_new_rider(), DOUALA)
+    _ride_at(_new_rider(), BASTOS, ride_category="MOTO")
+    _ride_at(_new_rider(), BASTOS, transport_type="CARGO", cargo_description="cement", ride_category="TRUCK")
     _go_online(client, ("3.8650000", "11.5210000"))
 
     response = client.get("/api/rides/open/")

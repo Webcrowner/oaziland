@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { rechargeWallet, getMyGifts, convertGiftsToWalletBalance, type GiftItem } from "@/lib/api";
+import { MomoBadges } from "@/components/PaymentIcons";
 import { IconCreditCard, IconGift, IconCheckCircle, IconAlertCircle } from "@/components/Icons";
 
 const inputClass =
@@ -67,7 +68,10 @@ export default function RechargeAndGiftsCard({ onWalletChanged }: { onWalletChan
           </span>
           <div>
             <h3 className="text-base font-black tracking-tight text-slate-900">Top Up Your Wallet</h3>
-            <p className="text-xs text-slate-500">Add funds via MTN MoMo or Orange Money.</p>
+            <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+              <MomoBadges size={15} />
+              <span>Add funds via MTN MoMo or Orange Money.</span>
+            </p>
           </div>
         </div>
         <form onSubmit={handleRecharge} className="flex flex-col gap-3">

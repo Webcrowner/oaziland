@@ -252,6 +252,37 @@ def test_only_the_rider_can_complete_and_pay_for_their_own_ride():
 
 
 @pytest.mark.django_db
+def test_a_ride_reports_a_fare_payment_that_is_still_waiting_for_approval():
+    from datetime import timedelta
+    from django.utils import timezone
+    from marketplace.models import RideBooking
+    from transactions.models import Booking, BookingStatus, BookingType
+
+    rider = _verify(User.objects.create(username="mp_ride_pending_rider", phone="+237699777781"))
+    driver = User.objects.create(username="mp_ride_pending_driver", phone="+237699777782")
+    ride = RideBooking.objects.create(
+        rider=rider, driver=driver, pickup_description="A", dropoff_description="B",
+        fare_estimate_xaf=Decimal("2375.00"), status=RideStatus.IN_PROGRESS,
+    )
+    client = _auth_client(rider)
+
+    def pending():
+        return client.get(f"/api/rides/{ride.id}/").data["payment_pending"]
+
+    assert pending() is False
+
+    booking = Booking.objects.create(
+        booking_type=BookingType.RIDE, target_content_type="marketplace.RideBooking", target_id=ride.id, requester=rider,
+        status=BookingStatus.PAYMENT_PROCESSING, amount_xaf=ride.fare_estimate_xaf, idempotency_key="ride-pending-1",
+        hold_expires_at=timezone.now() + timedelta(minutes=5),
+    )
+    assert pending() is True
+
+    Booking.objects.filter(pk=booking.pk).update(hold_expires_at=timezone.now() - timedelta(minutes=1))
+    assert pending() is False
+
+
+@pytest.mark.django_db
 def test_ride_private_chat_between_rider_and_driver():
     from identity.models import AdminProfile
     rider = _verify(User.objects.create(username="mp_ride_chat_rider", phone="+237699777771"))
@@ -563,15 +594,18 @@ def test_riders_can_describe_and_photograph_their_luggage_and_drivers_see_it(set
     assert _auth_client(rider).post("/api/rides/", {**body, "luggage_photo_urls": ["https://evil.example/x.jpg"]}, format="json").status_code == 400
     assert _auth_client(rider).post("/api/rides/", {**body, "luggage_photo_urls": [photo] * 4}, format="json").status_code == 400
     assert _auth_client(rider).post("/api/rides/", {**body, "luggage_size": "HUGE"}, format="json").status_code == 400
-    no_bags = _auth_client(rider).post("/api/rides/", {**body, "has_luggage": False}, format="json")
+    # A rider can only have one trip open, so the last check uses a second rider.
+    other = _verify(User.objects.create(username="ride_bags_rider2", phone="+237699888891"))
+    no_bags = _auth_client(other).post("/api/rides/", {**body, "has_luggage": False}, format="json")
     assert no_bags.status_code == 201 and no_bags.data["luggage_photo_urls"] == [] and no_bags.data["luggage_count"] is None
 
 
 @pytest.mark.django_db
 def test_moto_and_comfort_fares_are_genuinely_different_not_one_formula_for_everyone():
     rider = _verify(User.objects.create(username="ride_fare_rider", phone="+237699888814"))
+    other = _verify(User.objects.create(username="ride_fare_rider2", phone="+237699888892"))
     moto_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS, "ride_category": "MOTO"})
-    comfort_response = _auth_client(rider).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS, "ride_category": "COMFORT"})
+    comfort_response = _auth_client(other).post("/api/rides/", {"pickup_description": "A", "dropoff_description": "B", **RIDE_POINTS, "ride_category": "COMFORT"})
 
     assert Decimal(moto_response.data["fare_estimate_xaf"]) < Decimal(comfort_response.data["fare_estimate_xaf"])
 

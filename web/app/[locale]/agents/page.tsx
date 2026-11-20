@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { AGENT_LANGUAGES, AGENT_SPECIALTIES, listAgents, type AgentDirectoryEntry } from "@/lib/api";
 import EmptyState from "@/components/ui/EmptyState";
+import LoadErrorNotice from "@/components/ui/LoadErrorNotice";
 import { IconStar, IconShieldCheck, IconBuilding, IconChevronRight, IconBriefcase, IconMapPin, IconSearch } from "@/components/Icons";
 import type { Metadata } from "next";
 
@@ -24,7 +25,9 @@ export default async function AgentsDirectoryPage({ searchParams }: { searchPara
     q: (search.q ?? "").slice(0, 100), specialty: search.specialty ?? "", language: search.language ?? "",
     verified: search.verified === "1", page,
   };
-  const data = await listAgents(filters).catch(() => ({ count: 0, page, has_more: false, results: [] as AgentDirectoryEntry[] }));
+  const fetched = await listAgents(filters).catch(() => null);
+  const loadFailed = fetched === null;
+  const data = fetched ?? { count: 0, page, has_more: false, results: [] as AgentDirectoryEntry[] };
   const filtered = Boolean(filters.q || filters.specialty || filters.language || filters.verified);
 
   const pageHref = (target: number) => {
@@ -86,7 +89,9 @@ export default async function AgentsDirectoryPage({ searchParams }: { searchPara
 
       <p className="mb-4 text-sm text-slate-500" aria-live="polite">{t("resultCount", { count: data.count })}</p>
 
-      {data.results.length === 0 ? (
+      {loadFailed ? (
+        <LoadErrorNotice message={t("loadFailed")} />
+      ) : data.results.length === 0 ? (
         <EmptyState icon={<IconBriefcase size={28} />} title={filtered ? t("noMatches") : t("noAgentsYet")} />
       ) : (
         <ul className="grid grid-cols-1 lg:grid-cols-2 gap-5">

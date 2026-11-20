@@ -104,9 +104,9 @@ export default function AdminLoginPage() {
               <Image
                 src="/logo.png"
                 alt="Oaziland"
-                width={120}
-                height={120}
-                style={{ width: "120px", height: "120px" }}
+                width={141}
+                height={104}
+                style={{ width: "auto", height: "104px" }}
                 priority
                 className="object-contain drop-shadow-md"
               />

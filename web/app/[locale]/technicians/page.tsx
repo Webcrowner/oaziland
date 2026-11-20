@@ -15,14 +15,33 @@ export default function TechniciansDirectoryPage() {
   const [specialty, setSpecialty] = useState("");
   const [technicians, setTechnicians] = useState<TechnicianDirectoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    void Promise.resolve().then(() => setLoading(true));
+    // Ignore answers to an earlier filter that arrive after the user picked another one.
+    let current = true;
+    void Promise.resolve().then(() => {
+      if (!current) return;
+      setLoading(true);
+      setFailed(false);
+    });
     listTechnicianDirectory(specialty || undefined)
-      .then(setTechnicians)
-      .catch(() => setTechnicians([]))
-      .finally(() => setLoading(false));
-  }, [specialty]);
+      .then((rows) => {
+        if (current) setTechnicians(rows);
+      })
+      .catch(() => {
+        if (!current) return;
+        setTechnicians([]);
+        setFailed(true);
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [specialty, attempt]);
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-8">
@@ -52,6 +71,11 @@ export default function TechniciansDirectoryPage() {
 
       {loading ? (
         <p className="text-gray-400">...</p>
+      ) : failed ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{t("loadFailed")}</span>
+          <button type="button" onClick={() => setAttempt((n) => n + 1)} className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold">{t("retry")}</button>
+        </div>
       ) : technicians.length === 0 ? (
         <EmptyState icon="🛠️" title={t("empty")} />
       ) : (

@@ -30,6 +30,8 @@ export function notificationHref(target: NotificationTarget | null | undefined):
       return target.category ? `/marketplace/${segment(target.category)}/${id}` : null;
     case "listing":
       return `/listing/${id}`;
+    case "job":
+      return `/careers?job=${id}`;
     case "ride":
       return "/oazigo/trips";
     default:

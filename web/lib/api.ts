@@ -326,7 +326,7 @@ export async function getMyProfile(accessToken: string): Promise<UserProfile> {
   const res = await fetch(`${API_BASE_URL}/api/auth/me/`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!res.ok) throw new Error(`Profile fetch failed: ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(`Profile fetch failed: ${res.status}`), { status: res.status });
   return res.json();
 }
 
@@ -474,6 +474,9 @@ export interface Listing {
 export interface MediaUploadResult {
   url: string;
   media_type: "PHOTO" | "VIDEO";
+  /** Videos only, read from the file's headers by the server. */
+  duration_seconds?: number | null;
+  video_codec?: "h264" | "hevc" | "other" | "";
 }
 
 // Mirrors the backend's upload rules (uploads/services.py) so problems surface before a long upload.
@@ -493,13 +496,25 @@ export function checkMediaFile(file: File): MediaFileProblem | null {
   return null;
 }
 
-/** Uploads one file via XMLHttpRequest (fetch can't report upload progress); `signal` cancels it. */
-export function uploadMediaFile(
+/** True when a JWT access token has expired or is about to (so a long upload isn't started with it). */
+function accessTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" && payload.exp * 1000 < Date.now() + 30_000;
+  } catch {
+    return false;
+  }
+}
+
+type UploadReply = { status: number; data: { detail?: string } & Partial<MediaUploadResult> };
+
+/** Sends one file via XMLHttpRequest (fetch can't report upload progress) and resolves with the server's reply. */
+function sendMediaFile(
   file: File,
   folder: string,
   accessToken: string,
-  options: { onProgress?: (percent: number) => void; signal?: AbortSignal } = {}
-): Promise<MediaUploadResult> {
+  options: { onProgress?: (percent: number) => void; signal?: AbortSignal },
+): Promise<UploadReply> {
   return new Promise((resolve, reject) => {
     if (options.signal?.aborted) {
       reject(new DOMException("Upload cancelled", "AbortError"));
@@ -516,20 +531,38 @@ export function uploadMediaFile(
       if (e.lengthComputable) options.onProgress?.(Math.round((e.loaded / e.total) * 100));
     };
     xhr.onload = () => {
-      let data: { detail?: string } & Partial<MediaUploadResult> = {};
+      let data: UploadReply["data"] = {};
       try {
         data = JSON.parse(xhr.responseText);
       } catch {
         // non-JSON error body (e.g. a proxy page) — fall through to the generic message
       }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data as MediaUploadResult);
-      else reject(new Error(data.detail || "Upload failed"));
+      resolve({ status: xhr.status, data });
     };
     xhr.onerror = () => reject(new Error("Upload failed"));
     xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
     options.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(formData);
   });
+}
+
+/** Uploads one file; `signal` cancels it. An expired sign-in is refreshed first (so a large file isn't sent just to
+ * be refused), and refreshed once more if the server still answers 401. */
+export async function uploadMediaFile(
+  file: File,
+  folder: string,
+  accessToken: string,
+  options: { onProgress?: (percent: number) => void; signal?: AbortSignal } = {}
+): Promise<MediaUploadResult> {
+  let token = accessToken;
+  if (accessTokenExpired(token)) {
+    const stored = localStorage.getItem("access_token");
+    token = stored && !accessTokenExpired(stored) ? stored : await refreshOnce();
+  }
+  let reply = await sendMediaFile(file, folder, token, options);
+  if (reply.status === 401) reply = await sendMediaFile(file, folder, await refreshOnce(), options);
+  if (reply.status >= 200 && reply.status < 300) return reply.data as MediaUploadResult;
+  throw new Error(reply.data.detail || "Upload failed");
 }
 
 export async function addListingPhoto(listingId: string, url: string, mediaType: "PHOTO" | "VIDEO", accessToken: string) {
@@ -2221,10 +2254,21 @@ export interface ServiceCategory {
   offerings: ServiceOffering[];
 }
 
+export const PARTNER_SERVICE_REQUESTED_EVENT = "oaziland:partner-service-requested";
+
 export async function listServiceCategories(): Promise<PaginatedResponse<ServiceCategory>> {
-  const res = await fetch(`${API_BASE_URL}/api/service-categories/`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Service catalogue fetch failed: ${res.status}`);
-  return res.json();
+  // The API pages categories 20 at a time; follow every page so none are silently dropped.
+  const results: ServiceCategory[] = [];
+  let count = 0;
+  for (let page = 1; ; page++) {
+    const res = await fetch(`${API_BASE_URL}/api/service-categories/?page=${page}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Service catalogue fetch failed: ${res.status}`);
+    const data: PaginatedResponse<ServiceCategory> = await res.json();
+    results.push(...data.results);
+    count = data.count;
+    if (!data.next || data.results.length === 0) break;
+  }
+  return { count, next: null, previous: null, results };
 }
 
 export interface PartnerServiceRequestItem {
@@ -3207,12 +3251,24 @@ export const deleteCourseQuestion = (id: string, token: string) => courseRequest
 // ---------------------------------------------------------------------------
 // Job posting management (poster side) & WhatsApp share.
 // ---------------------------------------------------------------------------
+export interface JobApplicationCertificate {
+  code: string;
+  title: string;
+}
+
 export interface JobApplicationItem {
   id: string;
   job_posting: string;
+  job_title: string;
+  company_name?: string;
   applicant: string;
   applicant_name: string;
+  applicant_phone?: string;
   cover_message: string;
+  years_experience?: number | null;
+  has_cv?: boolean;
+  cv_filename?: string;
+  certificates?: JobApplicationCertificate[];
   status: string;
   applied_at: string;
 }
@@ -3221,6 +3277,126 @@ export async function listJobApplications(jobId: string, accessToken: string): P
   const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/applications/`, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error("Could not fetch applications");
   return res.json();
+}
+
+/** The signed-in user's own applications, newest first. */
+export async function listMyJobApplications(accessToken: string): Promise<JobApplicationItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/my-job-applications/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch your applications");
+  const data = await res.json();
+  return data.results ?? data;
+}
+
+/** The signed-in user's own postings, closed ones included. */
+export async function listMyJobPostings(accessToken: string): Promise<JobPosting[]> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/?mine=1`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error("Could not fetch your job postings");
+  const data = await res.json();
+  return data.results ?? data;
+}
+
+export interface JobPostingInput {
+  company_name?: string;
+  title: string;
+  role_category: string;
+  employment_type?: string;
+  workplace_type?: string;
+  quarter?: string | null;
+  description: string;
+  salary_min_xaf?: string | null;
+  salary_max_xaf?: string | null;
+  closes_at?: string | null;
+}
+
+/** Field errors from the server ({ field: ["message"] }) are joined into one readable message. */
+function jobErrorMessage(data: unknown, fallback: string): string {
+  if (data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+    if (typeof record.detail === "string") return record.detail;
+    const first = Object.values(record).flat().find((v) => typeof v === "string");
+    if (typeof first === "string") return first;
+  }
+  return fallback;
+}
+
+export async function createJobPosting(input: JobPostingInput, accessToken: string): Promise<JobPosting> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(jobErrorMessage(data, "Could not post this job")), { status: res.status });
+  return data;
+}
+
+export async function updateJobPosting(
+  jobId: string,
+  input: Partial<JobPostingInput>,
+  accessToken: string,
+): Promise<JobPosting> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${encodeURIComponent(jobId)}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(jobErrorMessage(data, "Could not update this job")), { status: res.status });
+  return data;
+}
+
+export async function closeJobPosting(jobId: string, accessToken: string): Promise<JobPosting> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/close/`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(jobErrorMessage(data, "Could not close this job"));
+  return data;
+}
+
+export async function reopenJobPosting(jobId: string, accessToken: string): Promise<JobPosting> {
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${encodeURIComponent(jobId)}/reopen/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(jobErrorMessage(data, "Could not reopen this job"));
+  return data;
+}
+
+/** Downloads an applicant's private PDF CV (authorized for the job poster or the applicant). */
+export async function downloadApplicationCv(
+  opts: { jobId: string; applicationId: string } | { myApplicationId: string },
+  accessToken: string,
+  fallbackFilename = "cv.pdf",
+): Promise<void> {
+  const url =
+    "myApplicationId" in opts
+      ? `${API_BASE_URL}/api/my-job-applications/${opts.myApplicationId}/cv/`
+      : `${API_BASE_URL}/api/jobs/${opts.jobId}/applications/${opts.applicationId}/cv/`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(jobErrorMessage(data, "Could not download CV"));
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = fallbackFilename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+}
+
+export async function withdrawMyJobApplication(applicationId: string, accessToken: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/my-job-applications/${applicationId}/withdraw/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(jobErrorMessage(data, "Could not withdraw application"));
+  }
 }
 
 export async function updateJobApplicationStatus(jobId: string, applicationId: string, newStatus: string, accessToken: string): Promise<JobApplicationItem> {
@@ -3297,7 +3473,7 @@ export async function getMyAgencyDashboard(accessToken: string): Promise<AgencyD
   const res = await fetch(`${API_BASE_URL}/api/my-agency-dashboard/`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!res.ok) throw new Error(`Agency dashboard fetch failed: ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(`Agency dashboard fetch failed: ${res.status}`), { status: res.status });
   return res.json();
 }
 
@@ -5073,7 +5249,7 @@ export async function recordReelShare(postId: string, channel: "WHATSAPP" | "FAC
   return res.json();
 }
 
-export type CreatePostErrorKind = "moderation" | "validation" | "network";
+export type CreatePostErrorKind = "moderation" | "validation" | "network" | "auth";
 
 export class CreatePostError extends Error {
   kind: CreatePostErrorKind;
@@ -5099,6 +5275,8 @@ export async function createPost(
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    // Still 401 after the one automatic refresh: the sign-in has really ended.
+    if (res.status === 401) throw new CreatePostError("Your session has expired — please sign in again.", "auth");
     // A `detail` on a 400 is the moderation gate; DRF field errors come back keyed by field instead.
     if (res.status === 400 && typeof data.detail === "string") throw new CreatePostError(data.detail, "moderation");
     const firstFieldError = Object.values(data).flat()[0];
@@ -5270,33 +5448,102 @@ export interface JobPosting {
   id: string;
   posted_by: string;
   posted_by_name: string;
+  company_name?: string;
   title: string;
   role_category: string;
+  employment_type?: string;
+  workplace_type?: string;
   description: string;
   quarter: string | null;
   quarter_name: string | null;
+  city_name?: string | null;
   salary_min_xaf: string | null;
   salary_max_xaf: string | null;
   status: string;
   posted_at: string;
   closes_at: string | null;
   application_count: number;
+  is_open: boolean;
+  /** The signed-in viewer's own application status for this job; null if they haven't applied. */
+  my_application_status: string | null;
 }
 
-export async function listJobPostings(): Promise<{ count: number; results: JobPosting[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/jobs/`);
+export const JOB_ROLE_CATEGORIES = ["PROPERTY_MANAGER", "AGENT", "HOSTEL_WARDEN", "MAINTENANCE_STAFF", "DRIVER", "OTHER"] as const;
+export const JOB_EMPLOYMENT_TYPES = ["FULL_TIME", "PART_TIME", "CONTRACT", "INTERNSHIP"] as const;
+export const JOB_WORKPLACE_TYPES = ["ON_SITE", "HYBRID", "REMOTE"] as const;
+
+export interface JobPostingFilters {
+  q?: string;
+  roleCategory?: string;
+  employmentType?: string;
+  workplaceType?: string;
+  quarter?: string;
+  page?: number;
+}
+
+/** Public list of open jobs. `token` only adds the viewer's own application status to each one. */
+export async function listJobPostings(filters: JobPostingFilters = {}, accessToken?: string): Promise<{ count: number; next: string | null; results: JobPosting[] }> {
+  const params = new URLSearchParams();
+  if (filters.q) params.set("q", filters.q);
+  if (filters.roleCategory) params.set("role_category", filters.roleCategory);
+  if (filters.employmentType) params.set("employment_type", filters.employmentType);
+  if (filters.workplaceType) params.set("workplace_type", filters.workplaceType);
+  if (filters.quarter) params.set("quarter", filters.quarter);
+  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${params.size ? `?${params}` : ""}`, accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined);
   if (!res.ok) throw new Error(`Job postings fetch failed: ${res.status}`);
   return res.json();
 }
 
-export async function applyToJob(jobId: string, coverMessage: string, accessToken: string) {
-  const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/apply/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ cover_message: coverMessage }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Could not submit application");
+/** Fetches a single job posting by UUID (including closed ones for shared deep-links), or null if not found. */
+export async function getJobPosting(jobId: string): Promise<JobPosting | null> {
+  if (!/^[0-9a-fA-F-]{32,36}$/.test(jobId)) return null;
+  const res = await fetch(`${API_BASE_URL}/api/jobs/${encodeURIComponent(jobId)}/`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Job posting fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export interface JobApplyInput {
+  coverMessage?: string;
+  yearsExperience?: number | null;
+  cvFile?: File | null;
+}
+
+export async function applyToJob(
+  jobId: string,
+  inputOrMessage: string | JobApplyInput,
+  accessToken: string,
+): Promise<JobApplicationItem> {
+  const input: JobApplyInput =
+    typeof inputOrMessage === "string" ? { coverMessage: inputOrMessage } : inputOrMessage;
+
+  let res: Response;
+  if (input.cvFile) {
+    const formData = new FormData();
+    if (input.coverMessage) formData.append("cover_message", input.coverMessage);
+    if (input.yearsExperience !== null && input.yearsExperience !== undefined) {
+      formData.append("years_experience", String(input.yearsExperience));
+    }
+    formData.append("cv_file", input.cvFile);
+    res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/apply/`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: formData,
+    });
+  } else {
+    const payload: Record<string, unknown> = { cover_message: input.coverMessage ?? "" };
+    if (input.yearsExperience !== null && input.yearsExperience !== undefined) {
+      payload.years_experience = input.yearsExperience;
+    }
+    res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/apply/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(payload),
+    });
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(jobErrorMessage(data, "Could not submit application"));
   return data;
 }
 
@@ -6596,10 +6843,12 @@ export interface RideBookingItem {
   release_note?: string;
   /** True while the request is being offered to nearby drivers one at a time. */
   matching?: boolean;
+  /** The rider has started paying the fare and the provider has not confirmed it yet. */
+  payment_pending?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// My Bookings and real dispute-opening. The real gap this closes:
+// My Bookings and real dispute-opening.
 // open_dispute() existed, fully built (real SLA deadlines, flips the
 // escrow to DISPUTED), but was never called from anywhere reachable
 // — a real person whose payment went wrong had no way to raise it.
@@ -7075,8 +7324,13 @@ export async function getParentPortalData(studentId: string, accessToken: string
 }
 
 export async function listMyRides(accessToken: string): Promise<{ count: number; results: RideBookingItem[] }> {
-  const res = await fetch(`${API_BASE_URL}/api/rides/`, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!res.ok) throw new Error("Could not fetch rides");
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/rides/`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  } catch {
+    throw new ApiStatusError("Could not fetch rides", 0);
+  }
+  if (!res.ok) throw new ApiStatusError("Could not fetch rides", res.status);
   return res.json();
 }
 
@@ -7103,9 +7357,19 @@ export async function requestRide(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(payload),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Could not request ride");
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new RideRequestError(data.detail || "Could not request ride", data.code);
   return data;
+}
+
+/** Why a ride request was refused when the server says so: a trip is already going, or an earlier fare is unpaid. */
+export class RideRequestError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "RideRequestError";
+    this.code = code;
+  }
 }
 
 export interface RideQuote {
@@ -7306,7 +7570,9 @@ export const RIDE_CANCEL_REASONS = [
 export const RIDE_RELEASE_REASONS = [
   "RIDER_UNREACHABLE", "PICKUP_TOO_FAR", "VEHICLE_PROBLEM", "LOAD_DOES_NOT_FIT", "SAFETY_CONCERN", "OTHER",
 ] as const;
-export type RideCancelReason = (typeof RIDE_CANCEL_REASONS)[number] | "NO_DRIVER_FOUND";
+// Set by the system, never chosen by a rider.
+export const SYSTEM_RIDE_CANCEL_REASONS = ["NO_DRIVER_FOUND", "TRIP_NEVER_STARTED", "TRIP_ABANDONED"] as const;
+export type RideCancelReason = (typeof RIDE_CANCEL_REASONS)[number] | (typeof SYSTEM_RIDE_CANCEL_REASONS)[number];
 export type RideReleaseReason = (typeof RIDE_RELEASE_REASONS)[number];
 
 export const cancelRide = (rideId: string, accessToken: string, reason?: { reason: RideCancelReason; note?: string }) =>

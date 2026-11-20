@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
+import { NavChatIcon } from "@/components/navIcons";
 import { contactListing, getOrCreateConversation } from "@/lib/api";
 
 /**
@@ -78,7 +79,7 @@ export default function ContactListingButton({
           disabled={loading || chatLoading}
           className="w-full bg-[var(--navy)] text-white font-semibold px-6 py-3 rounded-xl hover:bg-slate-800 disabled:opacity-50 text-center flex items-center justify-center gap-2 transition-colors text-sm"
         >
-          <span>💬</span>
+          <NavChatIcon size={18} />
           <span>{chatLoading ? t("openingChat") : t("chatDirectly")}</span>
         </button>
       )}

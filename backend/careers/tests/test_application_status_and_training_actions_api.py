@@ -7,8 +7,22 @@ import pytest
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from identity.models import User
+from identity.models import User, KYCProfile, VerificationStatus
 from careers.models import JobRoleCategory, JobApplicationStatus, TrainingCategory, TrainingEnrollmentStatus
+
+
+def _verify(user):
+    KYCProfile.objects.get_or_create(
+        user=user,
+        defaults={
+            "legal_full_name": user.username,
+            "date_of_birth": "1990-01-01",
+            "national_id_number": f"CM-{user.id}",
+            "residential_address": "Yaoundé",
+            "kyc_status": VerificationStatus.VERIFIED,
+        },
+    )
+    return user
 
 
 def _auth_client(user):
@@ -20,7 +34,7 @@ def _auth_client(user):
 
 @pytest.mark.django_db
 def test_poster_can_shortlist_an_applicant_via_api():
-    employer = User.objects.create(username="careers_employer", phone="+237699810001")
+    employer = _verify(User.objects.create(username="careers_employer", phone="+237699810001"))
     applicant = User.objects.create(username="careers_applicant", phone="+237699810002")
     outsider = User.objects.create(username="careers_outsider", phone="+237699810003")
 
@@ -45,7 +59,7 @@ def test_poster_can_shortlist_an_applicant_via_api():
 
 @pytest.mark.django_db
 def test_poster_can_share_job_posting_via_whatsapp_api():
-    employer = User.objects.create(username="careers_share_employer", phone="+237699810004")
+    employer = _verify(User.objects.create(username="careers_share_employer", phone="+237699810004"))
     create_response = _auth_client(employer).post("/api/jobs/", {
         "title": "Hostel Warden", "role_category": JobRoleCategory.HOSTEL_WARDEN, "description": "Run the hostel.",
     })

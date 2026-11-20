@@ -5,7 +5,8 @@ import { Link } from "@/i18n/navigation";
 import type { PopularQuarter, Quarter } from "@/lib/api";
 import Button from "@/components/ui/Button";
 import LoadError from "@/components/ui/LoadError";
-import { IconSearch, IconHome, IconBuilding, IconGraduationCap, IconHotel } from "@/components/Icons";
+import { NavHotelIcon } from "@/components/navIcons";
+import { IconSearch, IconHome, IconBuilding, IconGraduationCap } from "@/components/Icons";
 
 interface HeroSearchConsoleProps {
   quarters: Quarter[];
@@ -39,7 +40,7 @@ export default function HeroSearchConsole({ quarters, popularQuarters, areasFail
           <IconGraduationCap size={18} />{t("hostels")}
         </Link>
         <Link href="/hotels" className={`${tab} bg-slate-100 text-slate-700 hover:bg-slate-200`}>
-          <IconHotel size={18} />{t("hotels")}
+          <NavHotelIcon size={20} />{t("hotels")}
         </Link>
       </nav>
 

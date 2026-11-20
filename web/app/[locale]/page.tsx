@@ -1,5 +1,6 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
+import { MomoBadges } from "@/components/PaymentIcons";
 import { listQuarters, searchListings, listTestimonials, getHomeStats, listPublicFaqs } from "@/lib/api";
 import type { Metadata } from "next";
 import {
@@ -169,7 +170,10 @@ export default async function HomePage() {
                 <IconLock size={20} />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-slate-900">{t("trustStripEscrowTitle")}</h4>
+                <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                  <span>{t("trustStripEscrowTitle")}</span>
+                  <MomoBadges size={15} />
+                </h4>
                 <p className="text-xs text-slate-500 leading-relaxed mt-0.5">
                   {t("trustStripEscrowDesc")}
                 </p>

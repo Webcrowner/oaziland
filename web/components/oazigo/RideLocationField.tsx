@@ -31,6 +31,23 @@ const DEFAULT_CENTER: [number, number] = [3.848, 11.5021];
 
 const hasPoint = (c: Coords) => c.latitude !== null && c.longitude !== null;
 const round6 = (n: number) => Number(n.toFixed(6));
+const coordsText = (latitude: number, longitude: number) => `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+
+/** A short readable place name for a point (OpenStreetMap Nominatim), or null if it can't be found. */
+async function reverseGeocode(latitude: number, longitude: number): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${latitude}&lon=${longitude}`,
+      { headers: { "Accept-Language": document.documentElement.lang || "en" } },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const name = typeof data.display_name === "string" ? data.display_name.split(", ").slice(0, 3).join(", ") : "";
+    return name || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * A pickup/drop-off field that does not require the user to be at the
@@ -105,8 +122,13 @@ export default function RideLocationField({
       map.on("click", (e: LeafletNamespace.LeafletMouseEvent) => {
         if (markerRef.current) markerRef.current.setLatLng(e.latlng);
         else markerRef.current = L.marker(e.latlng).addTo(map);
-        onCoordsRef.current({ latitude: round6(e.latlng.lat), longitude: round6(e.latlng.lng) });
-        if (!valueRef.current.trim()) onValueRef.current(t("pinnedLocation"));
+        const latitude = round6(e.latlng.lat);
+        const longitude = round6(e.latlng.lng);
+        onCoordsRef.current({ latitude, longitude });
+        setTyped(false);
+        setSuggestions([]);
+        // The text always names the pin that was just placed, so the two can never disagree.
+        describePoint(latitude, longitude);
       });
     });
     return () => {
@@ -136,6 +158,15 @@ export default function RideLocationField({
     onCoordsChange({ latitude: round6(Number(s.lat)), longitude: round6(Number(s.lon)) });
   }
 
+  // Shows the coordinates at once, then swaps in the place name when it is found and the text wasn't edited meanwhile.
+  function describePoint(latitude: number, longitude: number) {
+    const fallback = coordsText(latitude, longitude);
+    onValueRef.current(fallback);
+    reverseGeocode(latitude, longitude).then((name) => {
+      if (name && valueRef.current === fallback) onValueRef.current(name);
+    });
+  }
+
   function useCurrentLocation() {
     if (!navigator.geolocation) {
       setError(t("gpsUnsupported"));
@@ -145,11 +176,13 @@ export default function RideLocationField({
     setError("");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        const latitude = round6(pos.coords.latitude);
+        const longitude = round6(pos.coords.longitude);
         setLocating(false);
         setTyped(false);
         setSuggestions([]);
-        onCoordsChange({ latitude: round6(pos.coords.latitude), longitude: round6(pos.coords.longitude) });
-        if (!value.trim()) onValueChange(t("currentLocation"));
+        onCoordsChange({ latitude, longitude });
+        describePoint(latitude, longitude);
       },
       () => {
         setLocating(false);
@@ -172,7 +205,17 @@ export default function RideLocationField({
           autoComplete="off"
           placeholder={placeholder}
           value={value}
-          onChange={(e) => { onValueChange(e.target.value); setTyped(true); if (e.target.value.trim().length < 3) setSuggestions([]); }}
+          onChange={(e) => {
+            onValueChange(e.target.value);
+            setTyped(true);
+            if (e.target.value.trim().length < 3) setSuggestions([]);
+            // Edited text no longer describes the old point, so the point is dropped until a new one is chosen.
+            if (hasPoint(coords)) {
+              onCoordsChange({ latitude: null, longitude: null });
+              markerRef.current?.remove();
+              markerRef.current = null;
+            }
+          }}
           className={inputCls}
         />
         {typed && (searching || suggestions.length > 0) && (
@@ -190,6 +233,10 @@ export default function RideLocationField({
         )}
       </div>
 
+      {!hasPoint(coords) && value.trim().length >= 3 && !searching && suggestions.length === 0 && (
+        <p className="mt-2 text-xs font-medium text-amber-700">{t("pickPlaceHint")}</p>
+      )}
+
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {allowCurrentLocation && (
           <button type="button" onClick={useCurrentLocation} disabled={locating} className={chipCls}>
@@ -201,7 +248,10 @@ export default function RideLocationField({
         </button>
         {hasPoint(coords) && (
           <>
-            <span className="text-xs font-semibold text-emerald-700">✓ {t("locationSet")}</span>
+            <span className="text-xs font-semibold text-emerald-700">
+              ✓ {t("locationSet")}
+              <span className="ml-1.5 font-mono font-medium text-emerald-800/80">{coordsText(coords.latitude!, coords.longitude!)}</span>
+            </span>
             <button
               type="button"
               onClick={() => { onCoordsChange({ latitude: null, longitude: null }); markerRef.current?.remove(); markerRef.current = null; }}

@@ -3,7 +3,7 @@ import { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import SidebarFrame from "@/components/SidebarFrame";
-import NavIconImage, { NAV_ICON_BY_HREF } from "@/components/navIcons";
+import NavIconImage, { NAV_ICON_BY_HREF, NavUserIcon } from "@/components/navIcons";
 import {
   IconUser,
   IconLock,
@@ -19,6 +19,7 @@ import {
   IconGift,
   IconSparkles,
   IconGraduationCap,
+  IconBriefcase,
   IconShoppingBag,
 } from "@/components/Icons";
 
@@ -52,6 +53,7 @@ const ACCOUNT_NAV_GROUPS: AccountNavGroup[] = [
     items: [
       { href: "/bookings", label: "Bookings & Escrow", icon: IconFileText },
       { href: "/my-learning", label: "My Learning", icon: IconGraduationCap },
+      { href: "/careers", label: "Careers & My Jobs", icon: IconBriefcase },
       { href: "/wallet", label: "Wallet & Transactions", icon: IconCreditCard },
       { href: "/ratings", label: "Ratings & Reviews", icon: IconStar },
       { href: "/marketplace/my-listings", label: "My Marketplace Listings", icon: IconFileText },
@@ -107,8 +109,8 @@ export default function AccountSidebarLayout({ activeHref, children }: AccountSi
     <div className="flex flex-col gap-4">
             <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800/80 text-white relative overflow-hidden">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 flex items-center justify-center font-black shadow-md shadow-amber-500/25 shrink-0">
-                  <IconUser size={20} />
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 overflow-hidden ring-2 ring-white/15">
+                  <NavUserIcon size={40} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-black tracking-tight text-white truncate">My Account</p>

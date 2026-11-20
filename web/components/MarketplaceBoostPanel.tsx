@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { boostMarketplaceListing, getMarketplaceBoostOptions, type MarketplaceBoostOption, type MarketplaceCategory } from "@/lib/api";
+import { MomoBadges } from "@/components/PaymentIcons";
 
 /** Buy a TOP boost for a listing: shown first with a TOP badge for the days chosen, paid from the wallet or by Mobile Money. */
 export default function MarketplaceBoostPanel({
@@ -94,7 +95,7 @@ export default function MarketplaceBoostPanel({
       </div>
       <fieldset className="flex flex-wrap gap-4 text-sm text-slate-700">
         <label className="flex items-center gap-1.5"><input type="radio" name={`pay-${listingId}`} checked={payWith === "WALLET"} onChange={() => setPayWith("WALLET")} /> {t("payWallet")}</label>
-        <label className="flex items-center gap-1.5"><input type="radio" name={`pay-${listingId}`} checked={payWith === "MOMO"} onChange={() => setPayWith("MOMO")} /> {t("payMomo")}</label>
+        <label className="flex items-center gap-1.5"><input type="radio" name={`pay-${listingId}`} checked={payWith === "MOMO"} onChange={() => setPayWith("MOMO")} /> <span>{t("payMomo")}</span> <MomoBadges size={14} /></label>
       </fieldset>
       {payWith === "MOMO" && (
         <input

@@ -64,6 +64,12 @@ export default function ListingOwnerActions({
         >
           {busy ? t("renewing") : t("renew")}
         </button>
+        <Link
+          href={`/videos/create?listing_id=${listingId}`}
+          className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-[var(--gold)] text-[var(--navy)] text-sm font-semibold hover:opacity-90 transition-opacity"
+        >
+          {t("postVideo")}
+        </Link>
       </div>
       {expiry && <p className="text-xs text-gray-500 mt-2">{t("expiresOn", { date: expiry })}</p>}
       {message && <p className="text-xs text-gray-600 mt-1">{message}</p>}

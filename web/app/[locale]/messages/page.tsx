@@ -21,6 +21,7 @@ import {
   type ConversationMessage,
 } from "@/lib/api";
 import { IconSearch } from "@/components/Icons";
+import { NavChatIcon } from "@/components/navIcons";
 
 const QUICK_REPLIES = [
   "Hello, is this still available?",
@@ -46,6 +47,11 @@ export default function MessagesPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [blockBusy, setBlockBusy] = useState(false);
   const [sendError, setSendError] = useState("");
+  // Separate flags so a failed load is shown as a failure, not as "no conversations" / "say hello".
+  const [listFailed, setListFailed] = useState(false);
+  const [profileFailed, setProfileFailed] = useState(false);
+  const [threadFailed, setThreadFailed] = useState(false);
+  const [threadAttempt, setThreadAttempt] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastHeartbeatRef = useRef<number>(0);
@@ -76,14 +82,17 @@ export default function MessagesPage() {
       return;
     }
     getMyProfile(token)
-      .then((p) => setMyUserId(p.id))
-      .catch(() => {});
+      .then((p) => {
+        setMyUserId(p.id);
+        setProfileFailed(false);
+      })
+      .catch(() => setProfileFailed(true));
   }, [token]);
 
   // The "Translate" link only exists while an admin has translation on and a provider is connected.
   const [canTranslate, setCanTranslate] = useState(false);
   useEffect(() => {
-    getPublicFeatures().then((features) => setCanTranslate(features.chat_translation));
+    getPublicFeatures().then((features) => setCanTranslate(features.chat_translation)).catch(() => setCanTranslate(false));
   }, []);
 
   const [nowMs, setNowMs] = useState<number>(0);
@@ -96,8 +105,11 @@ export default function MessagesPage() {
       return;
     }
     listConversations(token)
-      .then((data) => setConversations(data.results || []))
-      .catch(() => {});
+      .then((data) => {
+        setConversations(data.results || []);
+        setListFailed(false);
+      })
+      .catch(() => setListFailed(true));
   }, [token]);
 
   useEffect(() => {
@@ -113,17 +125,22 @@ export default function MessagesPage() {
     void Promise.resolve().then(() => {
       setLoadingMessages(true);
       setSendError("");
+      setThreadFailed(false);
     });
     getConversationMessages(selectedId, token)
       .then((msgs) => {
         setThread(msgs);
         setTimeout(() => scrollToBottom(false), 50);
       })
-      .catch(() => {})
+      .catch(() => {
+        // Never leave the previous conversation's messages showing under this one.
+        setThread([]);
+        setThreadFailed(true);
+      })
       .finally(() => setLoadingMessages(false));
 
-    markConversationSeen(selectedId, token).then(loadConversations);
-  }, [selectedId, token, loadConversations, scrollToBottom]);
+    markConversationSeen(selectedId, token).then(loadConversations).catch(() => {});
+  }, [selectedId, token, loadConversations, scrollToBottom, threadAttempt]);
 
   // Periodic poll for new messages in active thread (every 4 seconds)
   useEffect(() => {
@@ -131,6 +148,7 @@ export default function MessagesPage() {
     const interval = setInterval(() => {
       getConversationMessages(selectedId, token)
         .then((msgs) => {
+          setThreadFailed(false);
           setThread((prev) => {
             if (msgs.length !== prev.length || (msgs.length > 0 && msgs[msgs.length - 1].id !== prev[prev.length - 1]?.id)) {
               setTimeout(() => scrollToBottom(true), 50);
@@ -322,9 +340,21 @@ export default function MessagesPage() {
 
           {/* Conversations scroll area */}
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            {conversations.length === 0 ? (
+            {(profileFailed || (listFailed && conversations.length > 0)) && (
+              <p role="alert" className="px-4 py-2 bg-amber-50 text-[11px] font-semibold text-amber-800">
+                {profileFailed ? t("profileLoadFailed") : t("conversationsRefreshFailed")}
+              </p>
+            )}
+            {listFailed && conversations.length === 0 ? (
+              <div role="alert" className="p-8 text-center">
+                <p className="text-xs font-semibold text-red-700">{t("conversationsLoadFailed")}</p>
+                <button type="button" onClick={() => loadConversations()} className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                  {t("loadRetry")}
+                </button>
+              </div>
+            ) : conversations.length === 0 ? (
               <div className="p-8 text-center">
-                <span className="text-3xl block mb-2">💬</span>
+                <NavChatIcon size={40} className="mx-auto mb-2" />
                 <p className="text-xs font-semibold text-slate-700">{t("noConversationsYet")}</p>
                 <p className="text-[11px] text-slate-400 mt-1">
                   Contact an agent, landlord, driver, or technician to start chatting.
@@ -415,8 +445,8 @@ export default function MessagesPage() {
           {!selectedId ? (
             /* Desktop Empty Placeholder */
             <div className="m-auto text-center p-8 max-w-sm bg-white/90 backdrop-blur-md rounded-3xl shadow-lg border border-slate-200/80">
-              <div className="w-16 h-16 rounded-3xl bg-amber-50 text-amber-600 flex items-center justify-center text-3xl mx-auto mb-4 shadow-sm border border-amber-200/60">
-                💬
+              <div className="w-16 h-16 rounded-3xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-4 shadow-sm border border-amber-200/60">
+                <NavChatIcon size={44} />
               </div>
               <h3 className="font-bold text-slate-900 text-base mb-1">{t("selectConversation")}</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
@@ -494,6 +524,13 @@ export default function MessagesPage() {
                 {loadingMessages && thread.length === 0 ? (
                   <div className="m-auto text-xs text-slate-600 bg-white/80 backdrop-blur-xs px-3 py-1.5 rounded-full shadow-2xs">
                     Loading conversation...
+                  </div>
+                ) : threadFailed && thread.length === 0 ? (
+                  <div role="alert" className="m-auto text-center p-6 bg-white/90 rounded-2xl border border-red-100 max-w-xs shadow-md">
+                    <p className="text-xs font-bold text-red-700">{t("threadLoadFailed")}</p>
+                    <button type="button" onClick={() => setThreadAttempt((n) => n + 1)} className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                      {t("loadRetry")}
+                    </button>
                   </div>
                 ) : thread.length === 0 ? (
                   <div className="m-auto text-center p-6 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200/80 max-w-xs shadow-md">

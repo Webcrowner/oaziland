@@ -118,7 +118,7 @@ export type RootStackParamList = {
   AgentProfile: { agentId: string };
   Agencies: undefined;
   AgencyProfile: { agencyId: string };
-  Careers: undefined;
+  Careers: { jobId?: string } | undefined;
   Testimonials: undefined;
   Trainings: undefined;
   Services: undefined;
@@ -138,6 +138,7 @@ const navigationRef = createNavigationContainerRef<RootStackParamList>();
 // The backend sends a web path ("/oazigo/trips", "/notifications"...) with each push; map it to a screen.
 const SCREEN_FOR_PATH: [string, keyof RootStackParamList][] = [
   ["/oazigo", "OaziGo"],
+  ["/careers", "Careers"],
   ["/notifications", "Notifications"],
   ["/messages", "Messages"],
 ];

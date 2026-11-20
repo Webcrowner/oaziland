@@ -11,11 +11,17 @@ export default function ServiceRequestChat({ requestId, myUserId }: { requestId:
   const [messages, setMessages] = useState<ServiceRequestMessageItem[]>([]);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(() => {
     const token = localStorage.getItem("access_token");
     if (!token) return;
-    listServiceRequestMessages(requestId, token).then(setMessages).catch(() => {});
+    listServiceRequestMessages(requestId, token)
+      .then((data) => {
+        setMessages(data);
+        setLoadFailed(false);
+      })
+      .catch(() => setLoadFailed(true));
   }, [requestId]);
 
   useEffect(() => {
@@ -41,7 +47,8 @@ export default function ServiceRequestChat({ requestId, myUserId }: { requestId:
   return (
     <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
       <div className="max-h-48 overflow-y-auto flex flex-col gap-1.5 mb-2">
-        {messages.length === 0 && <p className="text-xs text-gray-400">{t("noMessages")}</p>}
+        {loadFailed && <p role="alert" className="text-xs text-red-600">{t("messagesLoadFailed")}</p>}
+        {messages.length === 0 && !loadFailed && <p className="text-xs text-gray-400">{t("noMessages")}</p>}
         {messages.map((m) => (
           <div key={m.id} className={`text-xs max-w-[85%] px-2.5 py-1.5 rounded-lg ${m.sender === myUserId ? "self-end bg-[var(--navy)] text-white" : "self-start bg-white border border-gray-200 text-gray-800"}`}>
             {m.sender !== myUserId && <p className="font-semibold text-[10px] opacity-70">{m.sender_name}</p>}

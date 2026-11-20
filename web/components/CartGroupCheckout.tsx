@@ -9,6 +9,7 @@ import {
 import { notifyCartChanged } from "@/lib/cartEvents";
 import { normalizeCouponCode } from "@/lib/coupons";
 import SaleCountdown from "@/components/SaleCountdown";
+import { MomoBadges } from "@/components/PaymentIcons";
 
 type Method = MarketplaceCartRequest["delivery_method"];
 type QuoteResult = { key: string; quote?: MarketplaceCartQuote; error?: string };
@@ -253,11 +254,14 @@ export default function CartGroupCheckout({
             </div>
           ) : (
             <>
-              <input
-                type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)}
-                placeholder={tb("phonePlaceholder")} aria-label={tb("phonePlaceholder")}
-                className="min-h-11 rounded-lg border px-3 py-2 text-sm"
-              />
+              <div className="relative">
+                <input
+                  type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)}
+                  placeholder={tb("phonePlaceholder")} aria-label={tb("phonePlaceholder")}
+                  className="min-h-11 w-full rounded-lg border pl-3 pr-14 py-2 text-sm"
+                />
+                <MomoBadges size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" />
+              </div>
               {payError && <p role="alert" className="text-sm text-red-700">{payError}</p>}
               <button
                 type="submit" disabled={paying || !canPay}

@@ -102,6 +102,10 @@ export default function TasklnServicePage() {
   // Technician picked from the directory (?technician=<id>); the request goes only to them.
   const [chosenTechnician, setChosenTechnician] = useState<TechnicianDirectoryItem | null>(null);
   const [chosenTechnicianMissing, setChosenTechnicianMissing] = useState(false);
+  // Until the lookup settles, submitting would silently send the job to every technician instead of the chosen one.
+  const [technicianLookupPending, setTechnicianLookupPending] = useState(false);
+  // Set when the lookup errored (not "not found"): the requester must retry or explicitly ask everyone.
+  const [technicianLookupFailedId, setTechnicianLookupFailedId] = useState<string | null>(null);
   // How far from the technician's last shared position the job board reaches (km, or "all").
   const [boardRadius, setBoardRadius] = useState("30");
   const [sharingLocation, setSharingLocation] = useState(false);
@@ -185,9 +189,9 @@ export default function TasklnServicePage() {
     }
   }, [requests, awaitingFundId]);
 
-  useEffect(() => {
-    const technicianId = new URLSearchParams(window.location.search).get("technician");
-    if (!technicianId) return;
+  const lookupChosenTechnician = useCallback((technicianId: string) => {
+    setTechnicianLookupPending(true);
+    setTechnicianLookupFailedId(null);
     listTechnicianDirectory(undefined, technicianId)
       .then((rows) => {
         if (rows.length === 0) {
@@ -197,8 +201,15 @@ export default function TasklnServicePage() {
         setChosenTechnician(rows[0]);
         setCategory((current) => (rows[0].specialties.includes(current) ? current : rows[0].specialties[0] ?? current));
       })
-      .catch(() => setChosenTechnicianMissing(true));
+      .catch(() => setTechnicianLookupFailedId(technicianId))
+      .finally(() => setTechnicianLookupPending(false));
   }, []);
+
+  useEffect(() => {
+    const technicianId = new URLSearchParams(window.location.search).get("technician");
+    if (!technicianId) return;
+    void Promise.resolve().then(() => lookupChosenTechnician(technicianId));
+  }, [lookupChosenTechnician]);
 
   async function handleRegisterTechnician(e: React.FormEvent) {
     e.preventDefault();
@@ -475,6 +486,15 @@ export default function TasklnServicePage() {
         {chosenTechnicianMissing && !chosenTechnician && (
           <p className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">{t("chosenTechnicianUnavailable")}</p>
         )}
+        {technicianLookupFailedId && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
+            <span>{t("chosenTechnicianLookupFailed")}</span>
+            <span className="flex gap-2">
+              <button type="button" onClick={() => lookupChosenTechnician(technicianLookupFailedId)} className={pillBtnCls}>{t("retry")}</button>
+              <button type="button" onClick={() => setTechnicianLookupFailedId(null)} className={pillBtnCls}>{t("askAllTechnicians")}</button>
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <select aria-label={t("categoryLabel")} value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
             {(chosenTechnician ? chosenTechnician.specialties : TASKLN_CATEGORY_CODES).map((value) => <option key={value} value={value}>{labels.category(value)}</option>)}
@@ -529,7 +549,7 @@ export default function TasklnServicePage() {
             clearLabel={t("remove")}
           />
         </div>
-        <Button size="lg" disabled={requesting || !description.trim() || (gpsCoords.latitude === null && !areaLabel.trim())}>{requesting ? t("requesting") : t("requestTaskln")}</Button>
+        <Button size="lg" disabled={requesting || technicianLookupPending || technicianLookupFailedId !== null || !description.trim() || (gpsCoords.latitude === null && !areaLabel.trim())}>{requesting ? t("requesting") : t("requestTaskln")}</Button>
         {gpsCoords.latitude === null && !areaLabel.trim() && <p className="text-xs text-slate-500">{t("captureGpsHint")}</p>}
       </form>
 

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { getEventBooking, payEventBooking } from "@/lib/api";
+import { MomoBadges } from "@/components/PaymentIcons";
 
 const WAIT_LIMIT_MS = 8 * 60 * 1000;
 
@@ -79,7 +80,10 @@ export default function EventPayForm({ bookingId, part, amountXaf, onPaid }: {
   return (
     <form onSubmit={start} className="flex flex-col gap-2">
       <label className="text-xs font-semibold text-slate-600">
-        {t("phoneLabel")}
+        <span className="flex items-center justify-between gap-2">
+          <span>{t("phoneLabel")}</span>
+          <MomoBadges size={15} />
+        </span>
         <input
           required type="tel" placeholder="+237 6XXXXXXXX" value={phone} onChange={(e) => setPhone(e.target.value)}
           className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"

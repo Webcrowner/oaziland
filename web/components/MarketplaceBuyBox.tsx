@@ -13,6 +13,7 @@ import {
 } from "@/lib/goodsVariants";
 import CompareAtPrice from "@/components/CompareAtPrice";
 import MarketplaceOfferPanel from "@/components/MarketplaceOfferPanel";
+import { MomoBadges } from "@/components/PaymentIcons";
 
 type DeliveryMethod = "PICKUP" | "SELLER" | "COURIER";
 
@@ -357,15 +358,18 @@ export default function MarketplaceBuyBox({
               )}
             </>
           )}
-          <input
-            type="tel"
-            required
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder={t("phonePlaceholder")}
-            aria-label={t("phonePlaceholder")}
-            className="border rounded-lg px-3 py-2 text-sm"
-          />
+          <div className="relative">
+            <input
+              type="tel"
+              required
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder={t("phonePlaceholder")}
+              aria-label={t("phonePlaceholder")}
+              className="w-full border rounded-lg pl-3 pr-14 py-2 text-sm"
+            />
+            <MomoBadges size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" />
+          </div>
           {error && <p className="text-sm text-red-700">{error}</p>}
           {goods && couponDiscount > 0 && (
             <p className="text-xs text-green-700">{t("discountLine", { amount: new Intl.NumberFormat(locale).format(couponDiscount) })}</p>

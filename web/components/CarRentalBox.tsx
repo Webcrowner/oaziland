@@ -6,6 +6,7 @@ import {
   getMyProfile, getMyKycStatus, getCarAvailability, getCarQuote, placeMarketplaceOrder, blockCarDates, unblockCarDates,
   type CarBusyPeriod, type CarRentalQuote,
 } from "@/lib/api";
+import { MomoBadges } from "@/components/PaymentIcons";
 
 export interface RentalCarTerms {
   id: string;
@@ -312,7 +313,10 @@ export default function CarRentalBox({ car }: { car: RentalCarTerms }) {
               {t("requirementsConfirm", { age: car.minDriverAge ?? 18, years: car.minLicenceYears ?? 0 })}
             </label>
           )}
-          <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={tb("phonePlaceholder")} aria-label={tb("phonePlaceholder")} className="rounded-lg border px-3 py-2" />
+          <div className="relative">
+            <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={tb("phonePlaceholder")} aria-label={tb("phonePlaceholder")} className="w-full rounded-lg border pl-3 pr-14 py-2" />
+            <MomoBadges size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" />
+          </div>
           {error && <p role="alert" className="text-red-700">{error}</p>}
           <button
             type="submit" disabled={paying || !quote || !phone.trim() || (hasRequirements && !meetsRequirements)}

@@ -83,9 +83,9 @@ function RegisterForm() {
               <Image
                 src="/logo.png"
                 alt="Oaziland"
-                width={168}
-                height={168}
-                style={{ width: "168px", height: "168px" }}
+                width={152}
+                height={112}
+                style={{ width: "auto", height: "112px" }}
                 priority
                 className="object-contain drop-shadow-md"
               />

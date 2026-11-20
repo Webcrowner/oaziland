@@ -4,6 +4,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import { dropTraining, enrollInTraining, getMyEnrollments, type TrainingEnrollmentItem, type TrainingProgram } from "@/lib/api";
 import { currentPath, loginHref } from "@/lib/authRedirect";
+import { MomoBadges } from "@/components/PaymentIcons";
 
 export const BTN_PRIMARY = "rounded-xl bg-[var(--navy)] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#25396a] disabled:opacity-50";
 const BTN_GHOST = "rounded-xl border border-slate-300 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50";
@@ -108,7 +109,10 @@ export default function TrainingEnrollActions({
 
   const payForm = (
     <form onSubmit={pay} className="flex flex-col gap-2">
-      <label className="text-xs font-semibold text-slate-700" htmlFor={`momo-${program.id}`}>{t("momoNumber")}</label>
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-xs font-semibold text-slate-700" htmlFor={`momo-${program.id}`}>{t("momoNumber")}</label>
+        <MomoBadges size={15} />
+      </div>
       <input
         id={`momo-${program.id}`}
         type="tel"

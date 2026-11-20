@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { getMyWallet, withdrawWallet, type WalletDetail } from "@/lib/api";
 import Button from "@/components/ui/Button";
+import { MtnIcon, OrangeIcon } from "@/components/PaymentIcons";
 import {
   IconLock,
   IconShieldCheck,
@@ -180,7 +181,7 @@ export default function PayoutWithdrawalModal({
                       : "border-slate-200 text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <MtnIcon size={18} />
                   <span>MTN MoMo</span>
                 </button>
                 <button
@@ -192,7 +193,7 @@ export default function PayoutWithdrawalModal({
                       : "border-slate-200 text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+                  <OrangeIcon size={18} />
                   <span>Orange Money</span>
                 </button>
               </div>

@@ -96,6 +96,7 @@ def test_a_real_ride_is_completed_and_paid_only_when_the_provider_confirms_the_f
     ride, rider = ride_in_progress
     started = _complete_ride(rider, ride)
     assert started.status_code == 202 and started.data["status"] == RideStatus.IN_PROGRESS
+    assert started.data["payment_pending"] is True  # the app can keep showing "approve on your phone" after a reload
     assert _complete_ride(rider, ride).status_code == 400  # a second tap doesn't start a second payment
 
     from transactions.models import Booking
@@ -104,6 +105,7 @@ def test_a_real_ride_is_completed_and_paid_only_when_the_provider_confirms_the_f
     ride = RideBooking.objects.get(pk=ride.pk)
     booking.refresh_from_db()
     assert ride.status == RideStatus.COMPLETED and ride.booking_id == booking.id
+    assert _client(rider).get(f"/api/rides/{ride.id}/").data["payment_pending"] is False
     assert booking.escrow.status == EscrowStatus.RELEASED and booking.status == BookingStatus.COMPLETED
 
 

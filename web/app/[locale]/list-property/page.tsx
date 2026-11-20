@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import QuarterOptions from "@/components/QuarterOptions";
@@ -109,7 +109,20 @@ export default function ListPropertyPage() {
   const [listingType, setListingType] = useState<"RENT" | "SALE">("RENT");
   const [price, setPrice] = useState("");
   const [media, setMedia] = useState<MediaUploadResult[]>([]);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: "success" | "warning" | "error"; text: string } | null>(null);
+  // What a submit has already created, so pressing Submit again after a partial failure
+  // retries only what's missing instead of creating a duplicate property or listing.
+  const createdAssetId = useRef<string | null>(null);
+  const createdListingId = useRef<string | null>(null);
+  const savedExtras = useRef<Set<string>>(new Set());
+  const [partialListingId, setPartialListingId] = useState<string | null>(null);
+
+  // A property created by a failed attempt has the old type; switching type must start a fresh one.
+  useEffect(() => {
+    if (createdListingId.current) return;
+    createdAssetId.current = null;
+    savedExtras.current = new Set();
+  }, [propertyType]);
   const [needsKyc, setNeedsKyc] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -255,119 +268,151 @@ export default function ListPropertyPage() {
     }
 
     try {
-      let assetRes: Response;
-      if (propertyType === "HOUSE") {
-        assetRes = await createHouse(
-          {
-            quarter: quarterId,
-            size_sqm: sizeSqm || undefined,
-            bedrooms: bedrooms ? Number(bedrooms) : undefined,
-            bathrooms: bathrooms ? Number(bathrooms) : undefined,
-            living_rooms: livingRooms ? Number(livingRooms) : undefined,
-            description: description || undefined,
-            house_style: houseType,
-            custom_house_style: houseType === "OTHER" ? customHouseType : undefined,
-            latitude: gpsCoords.latitude ?? undefined,
-            longitude: gpsCoords.longitude ?? undefined,
-          },
-          token
-        );
-      } else if (propertyType === "SHOP") {
-        assetRes = await createShop(
-          {
-            quarter: quarterId,
-            size_sqm: sizeSqm || undefined,
-            description: description || undefined,
-            frontage_meters: frontageMeters || undefined,
-            latitude: gpsCoords.latitude ?? undefined,
-            longitude: gpsCoords.longitude ?? undefined,
-          },
-          token
-        );
-      } else {
-        assetRes = await createLand(
-          {
-            quarter: quarterId,
-            size_sqm: sizeSqm || undefined,
-            description: description || undefined,
-            land_use_type: landUseType,
-            title_type: titleType,
-            title_deed_number: titleDeedNumber,
-            bornes_visibles: bornesVisibles,
-            latitude: gpsCoords.latitude ?? undefined,
-            longitude: gpsCoords.longitude ?? undefined,
-          },
-          token
-        );
-      }
+      if (!createdAssetId.current) {
+        let assetRes: Response;
+        if (propertyType === "HOUSE") {
+          assetRes = await createHouse(
+            {
+              quarter: quarterId,
+              size_sqm: sizeSqm || undefined,
+              bedrooms: bedrooms ? Number(bedrooms) : undefined,
+              bathrooms: bathrooms ? Number(bathrooms) : undefined,
+              living_rooms: livingRooms ? Number(livingRooms) : undefined,
+              description: description || undefined,
+              house_style: houseType,
+              custom_house_style: houseType === "OTHER" ? customHouseType : undefined,
+              latitude: gpsCoords.latitude ?? undefined,
+              longitude: gpsCoords.longitude ?? undefined,
+            },
+            token
+          );
+        } else if (propertyType === "SHOP") {
+          assetRes = await createShop(
+            {
+              quarter: quarterId,
+              size_sqm: sizeSqm || undefined,
+              description: description || undefined,
+              frontage_meters: frontageMeters || undefined,
+              latitude: gpsCoords.latitude ?? undefined,
+              longitude: gpsCoords.longitude ?? undefined,
+            },
+            token
+          );
+        } else {
+          assetRes = await createLand(
+            {
+              quarter: quarterId,
+              size_sqm: sizeSqm || undefined,
+              description: description || undefined,
+              land_use_type: landUseType,
+              title_type: titleType,
+              title_deed_number: titleDeedNumber,
+              bornes_visibles: bornesVisibles,
+              latitude: gpsCoords.latitude ?? undefined,
+              longitude: gpsCoords.longitude ?? undefined,
+            },
+            token
+          );
+        }
 
-      if (assetRes.status === 403) {
-        // Defensive fallback only — creating the bare asset no longer
-        // requires KYC (deferred to the listing/"publish" step below),
-        // so this shouldn't normally trigger.
-        setMessage({ type: "error", text: t("kycRequired") });
-        setNeedsKyc(true);
-        setLoading(false);
-        return;
+        if (assetRes.status === 403) {
+          // Defensive fallback only — creating the bare asset no longer
+          // requires KYC (deferred to the listing/"publish" step below),
+          // so this shouldn't normally trigger.
+          setMessage({ type: "error", text: t("kycRequired") });
+          setNeedsKyc(true);
+          setLoading(false);
+          return;
+        }
+        if (!assetRes.ok) {
+          setMessage({ type: "error", text: t("somethingWentWrong") });
+          setLoading(false);
+          return;
+        }
+        const asset = await assetRes.json();
+        createdAssetId.current = asset.id;
       }
-      if (!assetRes.ok) {
-        setMessage({ type: "error", text: t("somethingWentWrong") });
-        setLoading(false);
-        return;
+      const assetId = createdAssetId.current as string;
+
+      let listingId = createdListingId.current;
+      if (!listingId) {
+        const listingRes = await createListing(
+          { property_asset_id: assetId, listing_type: listingType, price_xaf: price },
+          token
+        );
+        if (listingRes.status === 403) {
+          // The real gate: publishing (creating the Listing) is where
+          // KYC is actually enforced platform-wide — MFA is no longer
+          // required anywhere, just an optional feature in account settings.
+          setMessage({ type: "error", text: t("kycRequired") });
+          setNeedsKyc(true);
+          setLoading(false);
+          return;
+        }
+        if (!listingRes.ok) {
+          setMessage({ type: "error", text: t("somethingWentWrong") });
+          setLoading(false);
+          return;
+        }
+        listingId = (await listingRes.json()).id as string;
+        createdListingId.current = listingId;
       }
-      const asset = await assetRes.json();
+      const publishedListingId = listingId;
+
+      // The listing exists now: every remaining step is saved on its own, and any that fail are
+      // reported by name so the owner can retry them, instead of being dropped behind a success message.
+      const failed: string[] = [];
+      async function saveExtra(key: string, label: string, run: () => Promise<unknown>) {
+        if (savedExtras.current.has(key)) return;
+        try {
+          await run();
+          savedExtras.current.add(key);
+        } catch {
+          if (!failed.includes(label)) failed.push(label);
+        }
+      }
 
       if (selectedAmenities.length > 0) {
-        await setPropertyAmenities(propertyType, asset.id, selectedAmenities, token).catch(() => {});
+        await saveExtra("amenities", t("detailAmenities"), () => setPropertyAmenities(propertyType, assetId, selectedAmenities, token));
       }
       if (selectedRules.length > 0) {
-        await setPropertyHouseRules(propertyType, asset.id, selectedRules, token).catch(() => {});
+        await saveExtra("rules", t("detailRules"), () => setPropertyHouseRules(propertyType, assetId, selectedRules, token));
       }
       if (selectedFacilities.length > 0) {
-        await setNearbyFacilities(propertyType, asset.id, selectedFacilities, token).catch(() => {});
+        await saveExtra("facilities", t("detailFacilities"), () => setNearbyFacilities(propertyType, assetId, selectedFacilities, token));
       }
-
-      const listingRes = await createListing(
-        { property_asset_id: asset.id, listing_type: listingType, price_xaf: price },
-        token
-      );
-      if (listingRes.status === 403) {
-        // The real gate: publishing (creating the Listing) is where
-        // KYC is actually enforced platform-wide — MFA is no longer
-        // required anywhere, just an optional feature in account settings.
-        setMessage({ type: "error", text: t("kycRequired") });
-        setNeedsKyc(true);
-        setLoading(false);
-        return;
-      }
-      if (!listingRes.ok) {
-        setMessage({ type: "error", text: t("somethingWentWrong") });
-        setLoading(false);
-        return;
-      }
-      const listing = await listingRes.json();
-
       if (minLeaseMonths || depositRequired || conditionsNotes) {
         const structuredConditions: Record<string, unknown> = {};
         if (minLeaseMonths) structuredConditions.min_lease_months = Number(minLeaseMonths);
         if (depositRequired) structuredConditions.deposit_required = true;
-        await attachListingCondition(
+        await saveExtra("conditions", t("detailConditions"), () => attachListingCondition(
           {
             target_content_type: "property.Listing",
-            target_id: listing.id,
+            target_id: publishedListingId,
             structured_conditions: structuredConditions,
             free_text_clause: conditionsNotes,
           },
           token
-        ).catch(() => {});
+        ));
       }
-
       for (const m of media) {
-        await addListingPhoto(listing.id, m.url, m.media_type, token);
+        await saveExtra(`media:${m.url}`, t("detailPhotos"), () => addListingPhoto(publishedListingId, m.url, m.media_type, token));
       }
 
+      if (failed.length > 0) {
+        setPartialListingId(publishedListingId);
+        setMessage({ type: "warning", text: t("partialSaved", { items: failed.join(", ") }) });
+        return;
+      }
+
+      // Fully saved: a later submit starts a brand-new property, as before.
+      createdAssetId.current = null;
+      createdListingId.current = null;
+      savedExtras.current = new Set();
+      setPartialListingId(null);
       setMessage({ type: "success", text: t("success") });
     } catch {
+      // Only reachable before the listing exists; anything already created is reused on retry.
       setMessage({ type: "error", text: t("couldNotReachServer") });
     } finally {
       setLoading(false);
@@ -1062,18 +1107,29 @@ export default function ListPropertyPage() {
               {/* Status / Error Messages */}
               {message && (
                 <div
+                  role={message.type === "success" ? "status" : "alert"}
                   className={`p-4 rounded-2xl text-xs sm:text-sm font-semibold flex items-center gap-2.5 ${
                     message.type === "success"
                       ? "bg-emerald-50 text-emerald-900 border border-emerald-200"
-                      : "bg-rose-50 text-rose-900 border border-rose-200"
+                      : message.type === "warning"
+                        ? "bg-amber-50 text-amber-900 border border-amber-200"
+                        : "bg-rose-50 text-rose-900 border border-rose-200"
                   }`}
                 >
                   {message.type === "success" ? (
                     <IconCheckCircle size={18} className="text-emerald-600 shrink-0" />
                   ) : (
-                    <IconAlertCircle size={18} className="text-rose-600 shrink-0" />
+                    <IconAlertCircle size={18} className={`${message.type === "warning" ? "text-amber-600" : "text-rose-600"} shrink-0`} />
                   )}
-                  <span>{message.text}</span>
+                  <span>
+                    {message.text}
+                    {message.type === "warning" && partialListingId && (
+                      <>
+                        {" "}
+                        <Link href={`/listing/${partialListingId}/edit`} className="underline font-bold">{t("editListingLink")}</Link>
+                      </>
+                    )}
+                  </span>
                 </div>
               )}
 

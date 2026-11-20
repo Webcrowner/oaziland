@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
+import { NavChatIcon } from "@/components/navIcons";
 import { getOrCreateConversation } from "@/lib/api";
 
 interface DirectChatButtonProps {
@@ -50,7 +51,7 @@ export default function DirectChatButton({
           "inline-flex items-center gap-2 bg-[var(--navy)] text-white font-semibold px-4 py-2.5 rounded-xl hover:bg-slate-800 disabled:opacity-50 transition-colors text-sm"
         }
       >
-        <span>💬</span>
+        <NavChatIcon size={18} />
         <span>{loading ? t("opening") : label || (recipientName ? t("chatWith", { name: recipientName }) : t("chatLister"))}</span>
       </button>
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}

@@ -9,24 +9,149 @@ class AlreadyAppliedError(Exception):
     pass
 
 
-def apply_to_job(*, job_posting, applicant, cover_message: str = ""):
+class JobNotOpenError(Exception):
+    pass
+
+
+class OwnJobError(Exception):
+    pass
+
+
+class InvalidCvError(Exception):
+    pass
+
+
+MAX_CV_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+def validate_cv_pdf(file) -> str:
+    """Validates an uploaded CV is a genuine PDF within MAX_CV_BYTES and returns a safe display filename."""
+    import os
+    import re
+
+    size = getattr(file, "size", 0) or 0
+    if size <= 0 or size > MAX_CV_BYTES:
+        raise InvalidCvError("Your CV must be a PDF file up to 5 MB.")
+    header = file.read(5)
+    file.seek(0)
+    content_type = (getattr(file, "content_type", "") or "").lower()
+    if header != b"%PDF-" or (content_type and content_type not in ("application/pdf", "application/x-pdf", "application/octet-stream")):
+        raise InvalidCvError("Please upload a valid PDF file (.pdf) for your CV.")
+    base = os.path.basename(getattr(file, "name", "") or "cv.pdf")
+    clean = re.sub(r"[^A-Za-z0-9._ -]+", "_", base).strip()[:200] or "cv.pdf"
+    if not clean.lower().endswith(".pdf"):
+        clean = f"{clean}.pdf"
+    return clean
+
+
+def moderate_job_posting_text(*, title: str, company_name: str, description: str):
+    """Runs automated trust & safety text scoring before a job posting goes live."""
+    from trust_safety.models import ModerationAction
+    from trust_safety.services import ContentBlockedError, _worst_action, score_text
+
+    text = "\n".join(part for part in (company_name, title, description) if part).strip()
+    if text and _worst_action(score_text(text)) == ModerationAction.AUTO_REMOVE:
+        raise ContentBlockedError("This job posting was blocked by content moderation. Please remove inappropriate wording and try again.")
+
+
+def job_is_open(job_posting, now=None) -> bool:
+    """Open means not closed by its poster and not past its closing date."""
+    from django.utils import timezone
+    from .models import JobPostingStatus
+    now = now or timezone.now()
+    return job_posting.status == JobPostingStatus.OPEN and (job_posting.closes_at is None or job_posting.closes_at > now)
+
+
+def apply_to_job(*, job_posting, applicant, cover_message: str = "", cv_file=None, years_experience=None):
     """WHY this checks first rather than letting the real
     unique_together constraint raise a raw IntegrityError: the same
     class of bug already found and fixed for training enrollment
     (AlreadyEnrolledError) — a real person re-applying to a job they
     already applied to should see a clean, specific message, not an
     uncaught 500."""
+    from engagement.services import is_blocked_either_way
+    from notifications.services import notify
     from .models import JobApplication
 
+    if job_posting.posted_by_id == applicant.id:
+        raise OwnJobError("You can't apply to your own job posting.")
+    if is_blocked_either_way(job_posting.posted_by, applicant):
+        raise OwnJobError("You cannot apply to this job posting.")
+    if not job_is_open(job_posting):
+        raise JobNotOpenError("This job is no longer accepting applications.")
     if JobApplication.objects.filter(job_posting=job_posting, applicant=applicant).exists():
         raise AlreadyAppliedError("You have already applied to this job posting.")
-    return JobApplication.objects.create(job_posting=job_posting, applicant=applicant, cover_message=cover_message)
+
+    cv_filename = validate_cv_pdf(cv_file) if cv_file is not None else ""
+    application = JobApplication.objects.create(
+        job_posting=job_posting,
+        applicant=applicant,
+        cover_message=cover_message,
+        cv_file=cv_file if cv_file is not None else "",
+        cv_filename=cv_filename,
+        years_experience=years_experience,
+    )
+    notify(
+        recipient=job_posting.posted_by, notification_type="JOB_APPLICATION", title="New job application",
+        message=f"{applicant.full_name or applicant.username} applied to \"{job_posting.title}\".",
+        related_reference=str(job_posting.id),
+    )
+    return application
+
+
+def withdraw_job_application(*, application, user):
+    """Lets an applicant withdraw their own application and removes any private CV file."""
+    from .models import JobApplicationStatus
+
+    if application.applicant_id != user.id:
+        raise PermissionError("Only the applicant can withdraw this application.")
+    if application.status == JobApplicationStatus.HIRED:
+        raise JobNotOpenError("A hired application cannot be withdrawn.")
+    if application.cv_file:
+        application.cv_file.delete(save=False)
+    application.delete()
+
+
+_STATUS_NOTICES = {
+    "SHORTLISTED": "You were shortlisted",
+    "REJECTED": "Your application was not selected",
+    "HIRED": "You got the job",
+}
 
 
 def update_application_status(*, application, new_status: str):
+    from notifications.services import notify
+    changed = application.status != new_status
     application.status = new_status
     application.save(update_fields=["status"])
+    if changed and new_status in _STATUS_NOTICES:
+        notify(
+            recipient=application.applicant, notification_type="JOB_APPLICATION_UPDATE", title=_STATUS_NOTICES[new_status],
+            message=f"Update on your application for \"{application.job_posting.title}\": {_STATUS_NOTICES[new_status].lower()}.",
+            related_reference=str(application.job_posting_id),
+        )
     return application
+
+
+def close_job_posting(*, job_posting):
+    from .models import JobPostingStatus
+    job_posting.status = JobPostingStatus.CLOSED
+    job_posting.save(update_fields=["status"])
+    return job_posting
+
+
+def reopen_job_posting(*, job_posting):
+    """Reopens a closed job posting. If an old closing date has already passed, clears it so the job is genuinely open."""
+    from django.utils import timezone
+    from .models import JobPostingStatus
+
+    job_posting.status = JobPostingStatus.OPEN
+    fields = ["status"]
+    if job_posting.closes_at is not None and job_posting.closes_at <= timezone.now():
+        job_posting.closes_at = None
+        fields.append("closes_at")
+    job_posting.save(update_fields=fields)
+    return job_posting
 
 
 def share_job_posting_via_whatsapp(*, job_posting, shared_by, recipient_phone: str):

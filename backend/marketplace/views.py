@@ -45,6 +45,7 @@ from .services import (
     report_ride_issue, resolve_ride_issue, RideIssueNotAllowedError,
     update_driver_location, open_rides_for_driver, ride_driver_tracking, DEFAULT_NEARBY_RADIUS_KM,
     advance_ride_matching, current_offer_for, ensure_driver_may_take, decline_ride_offer, RideOfferError, RIDE_OFFER_SECONDS,
+    rider_active_ride, rider_has_unpaid_fare,
 )
 from oaziland.permissions import IsAdminRole, IsKycVerified
 import notifications.services as notification_services
@@ -783,6 +784,19 @@ class RideViewSet(viewsets.ModelViewSet):
         input_serializer = RideRequestSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data
+
+        # One trip at a time: several open requests would each ask nearby drivers to wait, and an unpaid trip must be
+        # settled before the next one starts.
+        if rider_active_ride(request.user) is not None:
+            return Response(
+                {"detail": "You already have a trip in progress. Finish or cancel it before you request another.", "code": "ACTIVE_RIDE_EXISTS"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if rider_has_unpaid_fare(request.user):
+            return Response(
+                {"detail": "A previous trip's fare was never paid. Contact support to settle it before you book again.", "code": "UNPAID_FARE"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         points = [data.get(f) for f in ("pickup_latitude", "pickup_longitude", "dropoff_latitude", "dropoff_longitude")]
         if any(value is None for value in points):

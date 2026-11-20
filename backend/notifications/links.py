@@ -11,6 +11,7 @@ import uuid
 
 MARKETPLACE_LISTING_TYPES = {"SAVED_SEARCH_MATCH", "PRICE_DROP", "LISTING_EXPIRING", "SHOP_NEW_LISTING", "FLASH_SALE", "LOW_STOCK"}
 PROPERTY_LISTING_TYPES = {"SAVED_SEARCH_MATCH", "LISTING_EXPIRING_7D", "LISTING_EXPIRING_1D", "LISTING_EXPIRED", "PRICE_DROP"}
+JOB_TYPES = {"JOB_APPLICATION", "JOB_APPLICATION_UPDATE"}
 RIDE_PREFIX = "RIDE_"
 
 
@@ -23,6 +24,7 @@ def _uuid(value):
 
 def resolve_targets(notifications, user) -> dict:
     """{notification id: target} for the notifications that lead somewhere."""
+    from careers.models import JobPosting
     from marketplace.models import MarketplaceListingBase, MarketplaceOffer, MarketplaceOrder
     from marketplace.offers import category_of
     from property.models import Listing
@@ -50,6 +52,7 @@ def resolve_targets(notifications, user) -> dict:
     }
     property_ids = refs(PROPERTY_LISTING_TYPES) - set(market)
     properties = set(Listing.objects.filter(pk__in=property_ids).values_list("pk", flat=True))
+    jobs = set(JobPosting.objects.filter(pk__in=refs(JOB_TYPES)).values_list("pk", flat=True))
 
     targets = {}
     for notification, ref in rows:
@@ -65,6 +68,8 @@ def resolve_targets(notifications, user) -> dict:
             target = {"kind": "marketplace_listing", "id": str(ref), "category": market[ref]}
         elif kind in PROPERTY_LISTING_TYPES and ref in properties:
             target = {"kind": "listing", "id": str(ref)}
+        elif kind in JOB_TYPES and ref in jobs:
+            target = {"kind": "job", "id": str(ref)}
         elif kind.startswith(RIDE_PREFIX):
             target = {"kind": "ride", "id": str(ref)}
         if target:

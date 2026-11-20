@@ -1,7 +1,8 @@
 "use client";
 import { useState, useRef, useId, type ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { checkMediaFile, uploadMediaFile, type MediaUploadResult } from "@/lib/api";
+import { loginHref } from "@/lib/authRedirect";
 
 /**
  * Photo/video picker and uploader. Several files can be chosen at
@@ -25,6 +26,7 @@ export default function MediaUploader({
   triggerClassName?: string;
 }) {
   const t = useTranslations("MediaUploader");
+  const locale = useLocale();
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "uploading" | "error">("idle");
@@ -47,7 +49,9 @@ export default function MediaUploader({
 
     const token = localStorage.getItem("access_token");
     if (!token) {
-      window.location.href = "/login";
+      // Keep the language and bring the person back to this page after signing in.
+      const here = window.location.pathname.replace(/^\/(en|fr)(?=\/|$)/, "") || "/";
+      window.location.href = `/${locale}${loginHref(`${here}${window.location.search}`)}`;
       return;
     }
 

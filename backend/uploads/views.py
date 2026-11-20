@@ -44,4 +44,11 @@ class MediaUploadView(APIView):
         except (UnsupportedMediaTypeError, MediaTooLargeError) as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({"url": result.url, "media_type": result.media_type}, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "url": result.url,
+                "media_type": result.media_type,
+                **({"duration_seconds": result.duration_seconds, "video_codec": result.video_codec} if result.media_type == "VIDEO" else {}),
+            },
+            status=status.HTTP_201_CREATED,
+        )

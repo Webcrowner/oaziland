@@ -2,12 +2,11 @@
 import { ReactNode } from "react";
 import { Link } from "@/i18n/navigation";
 import SidebarFrame from "@/components/SidebarFrame";
-import NavIconImage, { NAV_ICON_BY_HREF } from "@/components/navIcons";
+import NavIconImage, { NAV_ICON_BY_HREF, NavCarIcon } from "@/components/navIcons";
 import {
   IconDashboard,
   IconBuilding,
   IconBriefcase,
-  IconCar,
   IconWrench,
   IconGraduationCap,
   IconCompass,
@@ -163,13 +162,13 @@ const ROLE_NAV: Record<
   },
   driver: {
     roleLabel: "OaziGo Driver",
-    roleIcon: IconCar,
+    roleIcon: NavCarIcon,
     defaultGroups: [
       {
         title: "Ride Ops",
         items: [
           { href: "/driver-dashboard", label: "Driver Control Hub", icon: IconDashboard },
-          { href: "/oazigo", label: "Live Ride Queue", icon: IconCar },
+          { href: "/oazigo", label: "Live Ride Queue", icon: NavCarIcon },
         ],
       },
       {
@@ -212,7 +211,7 @@ const ALL_ROLES_SHORTCUTS = [
   { role: "landlord", label: "Landlord", href: "/landlord-portfolio", icon: IconBuilding },
   { role: "agent", label: "Agent", href: "/dashboard", icon: IconBriefcase },
   { role: "student", label: "Student", href: "/student-dashboard", icon: IconGraduationCap },
-  { role: "driver", label: "OaziGo", href: "/driver-dashboard", icon: IconCar },
+  { role: "driver", label: "OaziGo", href: "/driver-dashboard", icon: NavCarIcon },
   { role: "technician", label: "Taskln", href: "/technician-dashboard", icon: IconWrench },
 ] as const;
 
